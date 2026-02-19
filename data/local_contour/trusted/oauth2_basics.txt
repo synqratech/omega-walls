@@ -1,0 +1,7 @@
+﻿Company Wiki: OAuth2 Basics
+OAuth2 protects delegated access with scopes and token lifetimes.
+Best practices:
+- least privilege scopes
+- short token TTL
+- refresh token rotation
+Marker: TRUSTED_OAUTH_GUIDE

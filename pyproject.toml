@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "omega-walls"
+version = "0.1.0"
+description = "Omega Walls v1 safety layer for RAG/agents"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.24",
+  "PyYAML>=6.0",
+  "jsonschema>=4.0"
+]
+
+[project.scripts]
+omega = "omega.cli:main"
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7.0"
+]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+norecursedirs = ["tests/_tmp", "_tmp"]
+
+[tool.setuptools.packages.find]
+include = ["omega*", "redteam*"]
+exclude = ["tests*", "data*", "docs*", "config*", "schemas*", "scripts*", "artifacts*"]

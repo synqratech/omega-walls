@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="560" viewBox="0 0 1240 560" role="img" aria-labelledby="title desc">
+  <title id="title">Omega runtime flow</title>
+  <desc id="desc">End-to-end trust-boundary flow for RAG and agents.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f7fafc; }
+      .card { fill: #ffffff; stroke: #1f2937; stroke-width: 2; rx: 12; ry: 12; }
+      .trusted { fill: #e8f5e9; }
+      .untrusted { fill: #fff3e0; }
+      .omega { fill: #e3f2fd; }
+      .text { font-family: Arial, Helvetica, sans-serif; font-size: 16px; fill: #111827; }
+      .title { font-family: Arial, Helvetica, sans-serif; font-size: 22px; font-weight: 700; fill: #0f172a; }
+      .small { font-family: Arial, Helvetica, sans-serif; font-size: 13px; fill: #334155; }
+      .arrow { stroke: #334155; stroke-width: 2.5; fill: none; marker-end: url(#head); }
+    </style>
+    <marker id="head" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1240" height="560" class="bg"/>
+  <text x="40" y="48" class="title">Omega: Stateful Trust-Boundary Runtime</text>
+  <text x="40" y="76" class="small">Untrusted context is projected to risk, accumulated in memory, then enforced via deterministic actions.</text>
+
+  <rect x="40" y="120" width="220" height="90" class="card trusted"/>
+  <text x="58" y="156" class="text">User Query</text>
+  <text x="58" y="182" class="small">Trusted input</text>
+
+  <rect x="320" y="120" width="240" height="90" class="card untrusted"/>
+  <text x="338" y="156" class="text">Retriever + Chunks</text>
+  <text x="338" y="182" class="small">Untrusted evidence packet X_t</text>
+
+  <rect x="620" y="120" width="260" height="90" class="card omega"/>
+  <text x="638" y="148" class="text">pi0 Projector</text>
+  <text x="638" y="172" class="small">v(x) per wall + evidence</text>
+  <text x="638" y="194" class="small">polarity gating</text>
+
+  <rect x="940" y="120" width="250" height="90" class="card omega"/>
+  <text x="958" y="148" class="text">Omega Core step()</text>
+  <text x="958" y="172" class="small">aggregate -> p_t -> m_(t+1)</text>
+  <text x="958" y="194" class="small">Off + reasons + attribution</text>
+
+  <rect x="940" y="280" width="250" height="100" class="card omega"/>
+  <text x="958" y="312" class="text">Off Policy</text>
+  <text x="958" y="336" class="small">SOFT_BLOCK / TOOL_FREEZE</text>
+  <text x="958" y="358" class="small">SOURCE_QUARANTINE / ESCALATE</text>
+
+  <rect x="620" y="280" width="260" height="100" class="card"/>
+  <text x="638" y="312" class="text">Context Builder</text>
+  <text x="638" y="336" class="small">trusted prompt + allowed docs</text>
+  <text x="638" y="358" class="small">blocked docs removed</text>
+
+  <rect x="320" y="280" width="240" height="100" class="card"/>
+  <text x="338" y="312" class="text">LLM Response</text>
+  <text x="338" y="336" class="small">response + tool intents</text>
+  <text x="338" y="358" class="small">mock/local/ollama backend</text>
+
+  <rect x="40" y="280" width="220" height="100" class="card"/>
+  <text x="58" y="312" class="text">Tool Gateway</text>
+  <text x="58" y="336" class="small">single chokepoint</text>
+  <text x="58" y="358" class="small">freeze + allowlist enforcement</text>
+
+  <rect x="40" y="430" width="1150" height="90" class="card"/>
+  <text x="58" y="462" class="text">Telemetry / Audit</text>
+  <text x="58" y="486" class="small">omega_off_v1 + enforcement_step_v1 with reasons, top_docs, freeze state, and replayable snapshots.</text>
+
+  <path d="M 260 165 L 320 165" class="arrow"/>
+  <path d="M 560 165 L 620 165" class="arrow"/>
+  <path d="M 880 165 L 940 165" class="arrow"/>
+  <path d="M 1065 210 L 1065 280" class="arrow"/>
+  <path d="M 940 330 L 880 330" class="arrow"/>
+  <path d="M 620 330 L 560 330" class="arrow"/>
+  <path d="M 320 330 L 260 330" class="arrow"/>
+  <path d="M 150 210 L 150 280" class="arrow"/>
+  <path d="M 150 380 L 150 430" class="arrow"/>
+  <path d="M 450 380 L 450 430" class="arrow"/>
+  <path d="M 750 380 L 750 430" class="arrow"/>
+  <path d="M 1065 380 L 1065 430" class="arrow"/>
+</svg>

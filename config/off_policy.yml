@@ -1,0 +1,37 @@
+off_policy:
+  version: v1
+  last_updated: 2026-02-18
+  notes: Default reaction policy.
+  enforcement_mode: ENFORCE
+  block:
+    gamma: 0.70
+    target: DOC
+
+  tool_freeze:
+    enabled: true
+    horizon_steps: 20
+    mode: TOOLS_DISABLED
+    allowlist: ['retrieval_readonly', 'summarize']
+
+  source_quarantine:
+    enabled: true
+    strikes_to_quarantine: 2
+    duration_hours: 24
+
+  escalate:
+    enabled: true
+    always_on_exfil: true
+    on_three_plus_walls: true
+
+  severity:
+    rules:
+      L3_if_walls_any: [secret_exfiltration]
+      L3_if_walls_count_gte: 3
+      L2_if_walls_any: [tool_or_action_abuse]
+      default: L1
+
+logging:
+  mode: OFF_ONLY
+  capture_text: NEVER
+  max_text_chars: 800
+  allowlisted_sources: ['synthetic:', 'tests:']

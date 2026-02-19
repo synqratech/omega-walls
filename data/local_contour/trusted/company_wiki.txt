@@ -1,0 +1,3 @@
+﻿Company Wiki Entry
+General architecture notes for RAG services and audit logging.
+Marker: TRUSTED_ARCH_NOTE

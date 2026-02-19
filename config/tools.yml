@@ -1,0 +1,27 @@
+tools:
+  output_dir: artifacts/tools
+  execution_mode: ENFORCE
+  unknown_tool_policy: DENY
+  freeze:
+    read_only_exception: true
+  capabilities:
+    retrieval_readonly:
+      mode: read_only
+      allowed_when: ["NO_OFF", "OFF"]
+      requires_human_approval: false
+    summarize:
+      mode: read_only
+      allowed_when: ["NO_OFF", "OFF"]
+      requires_human_approval: false
+    echo:
+      mode: read_only
+      allowed_when: ["NO_OFF", "OFF"]
+      requires_human_approval: false
+    write_file:
+      mode: write
+      allowed_when: ["NO_OFF"]
+      requires_human_approval: true
+    network_post:
+      mode: dangerous
+      allowed_when: ["NO_OFF"]
+      requires_human_approval: true

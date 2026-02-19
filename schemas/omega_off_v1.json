@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "omega_off_v1.json",
+  "title": "omega_off_v1",
+  "type": "object",
+  "required": [
+    "event",
+    "schema_version",
+    "timestamp",
+    "session_id",
+    "step",
+    "config_refs",
+    "walls",
+    "reasons",
+    "walls_triggered",
+    "v_total",
+    "p",
+    "m_prev",
+    "m_next",
+    "thresholds",
+    "top_docs",
+    "actions"
+  ],
+  "properties": {
+    "event": {"const": "omega_off_v1"},
+    "schema_version": {"type": "string"},
+    "timestamp": {"type": "string"},
+    "session_id": {"type": "string"},
+    "trace_id": {"type": ["string", "null"]},
+    "step": {"type": "integer", "minimum": 0},
+    "config_refs": {"type": "object"},
+    "walls": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {"type": "string"}
+    },
+    "reasons": {"type": "array", "items": {"type": "string"}},
+    "walls_triggered": {"type": "array", "items": {"type": "string"}},
+    "v_total": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number"}},
+    "p": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number"}},
+    "m_prev": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number"}},
+    "m_next": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number"}},
+    "thresholds": {"type": "object"},
+    "top_docs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["doc_id", "source_id", "contrib_c", "v", "e", "projector", "content_ref"],
+        "properties": {
+          "doc_id": {"type": "string"},
+          "source_id": {"type": "string"},
+          "source_type": {"type": "string"},
+          "trust": {"type": "string"},
+          "contrib_c": {"type": "number"},
+          "v": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number"}},
+          "e": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number"}},
+          "projector": {
+            "type": "object",
+            "required": ["name", "polarity", "debug_scores_raw", "matches"],
+            "properties": {
+              "name": {"type": "string"},
+              "polarity": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "integer"}},
+              "debug_scores_raw": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number"}},
+              "matches": {"type": "object"}
+            }
+          },
+          "content_ref": {
+            "type": "object",
+            "required": ["text_capture", "text_sha256"],
+            "properties": {
+              "text_capture": {"type": "string"},
+              "text_sha256": {"type": "string"}
+            }
+          }
+        }
+      }
+    },
+    "actions": {"type": "array", "items": {"type": "object"}, "minItems": 1},
+    "tool_gateway": {"type": "object"}
+  }
+}

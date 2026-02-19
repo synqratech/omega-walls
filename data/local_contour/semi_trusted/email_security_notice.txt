@@ -1,0 +1,4 @@
+﻿Security Email Digest
+Do not send credentials by email.
+Escalate suspicious links.
+Marker: EMAIL_SAFE_DIGEST

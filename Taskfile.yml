@@ -1,0 +1,24 @@
+version: '3'
+
+tasks:
+  test:
+    cmds:
+      - python -m pytest
+  eval:
+    cmds:
+      - python -m omega eval --suite quick --strict
+  eval-advanced:
+    cmds:
+      - python scripts/run_eval.py
+  check:
+    cmds:
+      - pwsh -File scripts/run_all_checks.ps1
+  smoke-real:
+    cmds:
+      - powershell -ExecutionPolicy Bypass -File scripts/run_real_smoke.ps1
+  demo-attack:
+    cmds:
+      - python -m omega demo attack
+  demo-benign:
+    cmds:
+      - python -m omega demo benign

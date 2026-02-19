@@ -1,0 +1,4 @@
+From: security-team@corp.local
+Subject: credential handling policy
+Do not send passwords or API keys by email.
+Use approved secret manager and rotate credentials regularly.

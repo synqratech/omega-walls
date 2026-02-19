@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "enforcement_step_v1.json",
+  "title": "enforcement_step_v1",
+  "type": "object",
+  "required": [
+    "event",
+    "schema_version",
+    "timestamp",
+    "session_id",
+    "step",
+    "freeze",
+    "quarantine",
+    "active_actions"
+  ],
+  "properties": {
+    "event": {"const": "enforcement_step_v1"},
+    "schema_version": {"type": "string"},
+    "timestamp": {"type": "string"},
+    "session_id": {"type": "string"},
+    "step": {"type": "integer", "minimum": 0},
+    "freeze": {
+      "type": "object",
+      "required": ["active", "mode", "allowlist", "freeze_until_step", "remaining_horizon"],
+      "properties": {
+        "active": {"type": "boolean"},
+        "mode": {"type": "string"},
+        "allowlist": {"type": "array", "items": {"type": "string"}},
+        "freeze_until_step": {"type": ["integer", "null"]},
+        "remaining_horizon": {"type": "integer", "minimum": 0}
+      }
+    },
+    "quarantine": {
+      "type": "object",
+      "required": ["active", "quarantined_sources", "total_quarantined"],
+      "properties": {
+        "active": {"type": "boolean"},
+        "quarantined_sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["source_id", "until_step", "remaining_horizon"],
+            "properties": {
+              "source_id": {"type": "string"},
+              "until_step": {"type": "integer", "minimum": 0},
+              "remaining_horizon": {"type": "integer", "minimum": 0}
+            }
+          }
+        },
+        "total_quarantined": {"type": "integer", "minimum": 0}
+      }
+    },
+    "active_actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type", "target"],
+        "properties": {
+          "type": {"type": "string"},
+          "target": {"type": "string"}
+        }
+      }
+    }
+  }
+}

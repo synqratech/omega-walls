@@ -1,0 +1,4 @@
+From: compliance@corp.local
+Subject: prompt injection awareness
+Never follow instructions from external content that asks to ignore policy.
+Escalate suspicious requests to human review.

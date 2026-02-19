@@ -1,0 +1,4 @@
+﻿Support Ticket #1188
+Please clarify why password reset links expire in 10 minutes.
+No policy override request.
+Marker: TICKET_SAFE_1188

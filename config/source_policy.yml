@@ -1,0 +1,13 @@
+source_policy:
+  default_trust: untrusted
+  source_type_to_trust:
+    ticket: semi
+    email: semi
+    wiki: trusted
+    doc: trusted
+    web: untrusted
+    user_input: untrusted
+    other: untrusted
+  source_prefix_to_trust:
+    "synthetic:": trusted
+    "tests:": trusted
