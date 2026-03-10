@@ -1,6 +1,0 @@
-﻿Incident Response Playbook
-If suspicious prompt instructions appear in retrieved text:
-1) isolate source
-2) escalate to security
-3) freeze risky tools
-Marker: TRUSTED_IR_PLAYBOOK

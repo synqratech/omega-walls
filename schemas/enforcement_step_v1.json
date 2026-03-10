@@ -60,6 +60,35 @@
           "target": {"type": "string"}
         }
       }
+    },
+    "cross_session": {
+      "type": "object",
+      "required": [
+        "actor_hash",
+        "carryover_applied",
+        "carried_scars_before_decay",
+        "carried_scars_after_decay",
+        "freeze_until_step",
+        "quarantined_sources_count",
+        "state_backend",
+        "state_version"
+      ],
+      "properties": {
+        "actor_hash": {"type": "string"},
+        "carryover_applied": {"type": "boolean"},
+        "carried_scars_before_decay": {
+          "type": "array",
+          "items": {"type": "number"}
+        },
+        "carried_scars_after_decay": {
+          "type": "array",
+          "items": {"type": "number"}
+        },
+        "freeze_until_step": {"type": ["integer", "null"]},
+        "quarantined_sources_count": {"type": "integer", "minimum": 0},
+        "state_backend": {"type": "string"},
+        "state_version": {"type": "string"}
+      }
     }
   }
 }

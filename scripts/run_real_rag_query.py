@@ -14,10 +14,10 @@ from omega.config.loader import config_refs_from_snapshot, load_resolved_config
 from omega.core.omega_core import OmegaCoreV1
 from omega.core.params import omega_params_from_config
 from omega.policy.off_policy_v1 import OffPolicyV1
-from omega.projector.pi0_intent_v2 import Pi0IntentAwareV2
+from omega.projector.factory import build_projector
 from omega.rag.harness import OmegaRAGHarness
 from omega.rag.llm_backends import LocalTransformersLLM
-from omega.rag.retriever_adapters import SQLiteFTSRetrieverAdapter
+from omega.rag.retriever_prod_adapter import build_retriever_prod_adapter
 from omega.tools.tool_gateway import ToolGatewayV1
 
 
@@ -36,13 +36,13 @@ def main() -> int:
     snapshot = load_resolved_config(profile=args.profile)
     cfg = snapshot.resolved
 
-    retriever = SQLiteFTSRetrieverAdapter.from_directory(args.source_dir, config=cfg)
+    retriever = build_retriever_prod_adapter(config=cfg, source_root=args.source_dir)
     packet = retriever.search(args.query, k=args.top_k)
     if not packet:
         raise SystemExit(f"No readable/retrievable text files found in {args.source_dir}")
 
     harness = OmegaRAGHarness(
-        projector=Pi0IntentAwareV2(cfg),
+        projector=build_projector(cfg),
         omega_core=OmegaCoreV1(omega_params_from_config(cfg)),
         off_policy=OffPolicyV1(cfg),
         tool_gateway=ToolGatewayV1(cfg),
@@ -76,6 +76,7 @@ def main() -> int:
         "inferred_tool_requests": [asdict(req) for req in out["inferred_tool_requests"]],
         "tool_decisions": [asdict(dec) for dec in out["tool_decisions"]],
         "tool_executions": [asdict(exec_) for exec_ in out["tool_executions"]],
+        "tool_gateway_events": out["tool_gateway_events"],
     }
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0

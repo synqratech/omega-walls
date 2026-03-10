@@ -48,16 +48,22 @@ class ToolGatewayV1:
     def __post_init__(self) -> None:
         tools_cfg = (self.config or {}).get("tools", {})
         self.unknown_tool_policy = str(tools_cfg.get("unknown_tool_policy", "DENY")).upper()
+        if self.unknown_tool_policy != "DENY":
+            raise ValueError("tools.unknown_tool_policy must be DENY in v1")
         self.freeze_read_only_exception = bool(tools_cfg.get("freeze", {}).get("read_only_exception", True))
 
         raw_caps = tools_cfg.get("capabilities", {}) or _DEFAULT_CAPABILITIES
         self.capabilities: Dict[str, ToolCapability] = {}
         for tool_name, cap in raw_caps.items():
             cap_dict = cap or {}
+            mode = _normalize_tool_mode(cap_dict.get("mode", "dangerous"))
+            requires_human_approval = bool(cap_dict.get("requires_human_approval", False))
+            if mode in {"write", "dangerous"} and not requires_human_approval:
+                raise ValueError(f"Tool capability '{tool_name}' mode={mode} must require human approval")
             self.capabilities[str(tool_name)] = ToolCapability(
-                mode=_normalize_tool_mode(cap_dict.get("mode", "dangerous")),
+                mode=mode,
                 allowed_when=_normalize_allowed_when(cap_dict.get("allowed_when")),
-                requires_human_approval=bool(cap_dict.get("requires_human_approval", False)),
+                requires_human_approval=requires_human_approval,
             )
 
     def _find_freeze(self, current_actions: List[OffAction]) -> Optional[OffAction]:
@@ -69,6 +75,20 @@ class ToolGatewayV1:
     @staticmethod
     def _is_off_state(current_actions: List[OffAction]) -> bool:
         return any(action.type in {"SOFT_BLOCK", "HUMAN_ESCALATE", "SOURCE_QUARANTINE", "TOOL_FREEZE"} for action in current_actions)
+
+    def find_freeze(self, current_actions: List[OffAction]) -> Optional[OffAction]:
+        return self._find_freeze(current_actions)
+
+    def is_off_state(self, current_actions: List[OffAction]) -> bool:
+        return self._is_off_state(current_actions)
+
+    def capability_for(self, tool_name: str) -> Optional[ToolCapability]:
+        return self.capabilities.get(tool_name)
+
+    def ensure_tool_coverage(self, tool_names: List[str]) -> None:
+        missing = [name for name in tool_names if name not in self.capabilities]
+        if missing:
+            raise ValueError(f"Missing capability profiles for tools: {', '.join(sorted(missing))}")
 
     def enforce(self, request: ToolRequest, current_actions: List[OffAction]) -> ToolDecision:
         freeze_action = self._find_freeze(current_actions)

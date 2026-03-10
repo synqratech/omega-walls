@@ -1,0 +1,59 @@
+api:
+  enabled: true
+  host: 127.0.0.1
+  port: 8080
+  security:
+    transport_mode: proxy_tls
+    require_https: true
+  auth:
+    api_keys:
+      - dev-api-key
+    require_hmac: true
+    hmac_secret_env: OMEGA_API_HMAC_SECRET
+    hmac_headers:
+      signature: X-Signature
+      timestamp: X-Timestamp
+      nonce: X-Nonce
+    max_clock_skew_sec: 300
+    replay_nonce_ttl_sec: 600
+    replay_cache_max_entries: 100000
+  limits:
+    max_file_bytes: 20971520
+    max_extracted_text_chars: 200000
+    request_timeout_sec: 15
+  logging:
+    enabled: true
+    include_policy_trace: true
+  debug:
+    enable_document_scan_report: false
+    max_report_chunks: 200
+  chunk_pipeline:
+    wall_trigger_threshold: 0.12
+    worst_weight: 0.65
+    synergy_weight: 0.20
+    confidence_weight: 0.15
+    synergy_pair_bonus: 0.18
+    synergy_multiwall_bonus: 0.10
+    synergy_pattern_bonus: 0.05
+    confidence_margin: 0.15
+    confidence_support_threshold: 0.35
+    confidence_support_chunks: 2
+    top_chunks_limit: 3
+    synergy_pairs:
+      - [override_instructions, tool_or_action_abuse]
+      - [override_instructions, secret_exfiltration]
+      - [policy_evasion, override_instructions]
+  policy_mapper:
+    block_score_threshold: 0.72
+    quarantine_score_threshold: 0.45
+    quarantine_worst_threshold: 0.38
+    quarantine_synergy_threshold: 0.20
+    exfil_block_wall_threshold: 0.60
+    confidence_block_threshold: 0.55
+  attestation:
+    enabled: false
+    format: jws
+    alg: RS256
+    kid: omega-attestation-v1
+    private_key_pem_env: OMEGA_API_ATTESTATION_PRIVATE_KEY
+    exp_sec: 300

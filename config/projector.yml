@@ -1,0 +1,22 @@
+projector:
+  mode: hybrid
+  fallback_to_pi0: true
+  pitheta:
+    enabled: auto
+    head_mode: auto
+    conversion_mode: expected
+    pressure_map: [0.0, 0.25, 0.6, 1.0]
+    require_calibration: true
+    calibration_file: temperature_scaling.json
+    checkpoint_dir: artifacts/pitheta_export/latest
+    base_model_path: deberta-v3-base
+    local_files_only: true
+    device: auto
+    max_length: 256
+    batch_size: 8
+    legacy:
+      wall_thresholds:
+        override_instructions: 0.55
+        secret_exfiltration: 0.60
+        tool_or_action_abuse: 0.60
+        policy_evasion: 0.55

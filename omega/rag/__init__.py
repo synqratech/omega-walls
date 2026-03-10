@@ -1,5 +1,7 @@
 from omega.rag.harness import OmegaRAGHarness
 from omega.rag.llm_backends import LocalTransformersLLM, OllamaLLM
+from omega.rag.retriever_prod_adapter import RetrieverProdAdapter, build_retriever_prod_adapter
+from omega.rag.retriever_provider import ExternalRetrieverProvider, RetrieverProvider, SQLiteFTSProvider
 from omega.rag.retriever_adapters import ExternalRetrieverAdapter, SQLiteFTSRetrieverAdapter
 from omega.rag.retriever_fts import SQLiteFTSRetriever
 from omega.rag.retriever_interface import Retriever
@@ -13,9 +15,14 @@ __all__ = [
     "OllamaLLM",
     "KeywordRetriever",
     "Retriever",
+    "RetrieverProvider",
     "SourceTrustPolicy",
+    "RetrieverProdAdapter",
+    "build_retriever_prod_adapter",
     "ExternalRetrieverAdapter",
     "SQLiteFTSRetrieverAdapter",
+    "ExternalRetrieverProvider",
+    "SQLiteFTSProvider",
     "SQLiteFTSRetriever",
     "load_content_items_from_directory",
 ]

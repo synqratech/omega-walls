@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 from omega.interfaces.contracts_v1 import OffAction, ToolRequest
+from omega.tools.tool_gateway import ToolGatewayV1
 
 
 def test_gateway_freeze_disabled_mode(gateway):
@@ -46,3 +49,25 @@ def test_gateway_freeze_allows_read_only_exception(gateway):
     req = ToolRequest(tool_name="summarize", args={}, session_id="s", step=1)
     dec = gateway.enforce(req, [action])
     assert dec.allowed is True
+
+
+def test_gateway_requires_deny_unknown_policy(resolved_config):
+    cfg = deepcopy(resolved_config)
+    cfg["tools"]["unknown_tool_policy"] = "ALLOW"
+    try:
+        ToolGatewayV1(cfg)
+    except ValueError as exc:
+        assert "unknown_tool_policy" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for non-DENY unknown_tool_policy")
+
+
+def test_gateway_requires_human_approval_for_write_dangerous_capabilities(resolved_config):
+    cfg = deepcopy(resolved_config)
+    cfg["tools"]["capabilities"]["write_file"]["requires_human_approval"] = False
+    try:
+        ToolGatewayV1(cfg)
+    except ValueError as exc:
+        assert "must require human approval" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for write capability without approval")

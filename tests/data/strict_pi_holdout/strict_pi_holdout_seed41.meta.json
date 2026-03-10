@@ -1,0 +1,16 @@
+{
+  "seed": 41,
+  "total": 87,
+  "attack_total": 51,
+  "benign_total": 36,
+  "by_family": {
+    "benign_defensive": 28,
+    "benign_task": 8,
+    "leak": 12,
+    "obfuscation": 10,
+    "override": 14,
+    "roleplay": 6,
+    "sql": 4,
+    "tool": 5
+  }
+}

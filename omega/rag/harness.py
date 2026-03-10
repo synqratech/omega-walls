@@ -3,16 +3,26 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 import re
 from typing import Any, Dict, List, Optional
+import uuid
 
 import numpy as np
 
 from omega.interfaces.contracts_v1 import ContentItem, OffAction, OffDecision, OmegaState, ToolRequest
+from omega.policy.cross_session_state import CrossSessionStateManager
 from omega.policy.enforcement_state import EnforcementStateManager
 from omega.rag.context_builder import ContextBuilder
-from omega.telemetry.events import build_enforcement_step_event, build_off_event, build_step_event
+from omega.telemetry.events import (
+    build_enforcement_step_event,
+    build_off_event,
+    build_step_event,
+    build_tool_gateway_step_event,
+)
 from omega.tools.adapters import ToolExecution, build_default_tool_registry
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -45,15 +55,35 @@ class OmegaRAGHarness:
         self.llm = llm_backend or MockLLM()
         self.tool_registry = tool_registry or build_default_tool_registry()
         self.system_prompt = system_prompt
-        self.state = OmegaState(session_id="sess-local", m=np.zeros(4, dtype=float), step=0)
+        self.state = OmegaState(session_id=f"sess-local-{uuid.uuid4().hex[:10]}", m=np.zeros(4, dtype=float), step=0)
         self.enforcement = EnforcementStateManager.from_config(config)
+        self.cross_session = CrossSessionStateManager.from_config(config)
+        if hasattr(self.tool_registry, "list_tools"):
+            self.tool_gateway.ensure_tool_coverage(list(self.tool_registry.list_tools()))
+        self._default_actor_id: Optional[str] = None
+        self._warned_actor_fallback: bool = False
 
-    def reset_state(self, session_id: Optional[str] = None) -> None:
+    def reset_state(self, session_id: Optional[str] = None, actor_id: Optional[str] = None) -> None:
         self.state.m = np.zeros_like(self.state.m)
         self.state.step = 0
         self.enforcement.reset()
         if session_id is not None:
             self.state.session_id = session_id
+        self._default_actor_id = actor_id
+
+    def _resolve_actor_id(self, actor_id: Optional[str]) -> str:
+        if actor_id:
+            return actor_id
+        if self._default_actor_id:
+            return self._default_actor_id
+
+        fallback_enabled = bool(getattr(self.cross_session, "fallback_actor_to_session", True))
+        if fallback_enabled:
+            if not self._warned_actor_fallback:
+                LOGGER.warning("actor_id is missing; fallback to session_id for cross-session state")
+                self._warned_actor_fallback = True
+            return self.state.session_id
+        raise ValueError("actor_id is required when cross_session.fallback_actor_to_session=false")
 
     @staticmethod
     def _compose_effective_actions(policy_actions: List[OffAction], active_actions: List[OffAction]) -> List[OffAction]:
@@ -78,7 +108,7 @@ class OmegaRAGHarness:
             requests.append(
                 ToolRequest(
                     tool_name=tool_name,
-                    args={"raw_args": raw_args, "intent_id": idx},
+                    args={"raw_args": raw_args, "intent_id": idx, "request_origin": "inferred"},
                     session_id=session_id,
                     step=step,
                 )
@@ -90,26 +120,49 @@ class OmegaRAGHarness:
         user_query: str,
         packet_items: List[ContentItem],
         tool_requests: Optional[List[ToolRequest]] = None,
+        actor_id: Optional[str] = None,
         config_refs: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         enforcement_mode = str(self.config.get("off_policy", {}).get("enforcement_mode", "ENFORCE")).upper()
         tools_execution_mode = str(self.config.get("tools", {}).get("execution_mode", "ENFORCE")).upper()
+        resolved_actor_id = self._resolve_actor_id(actor_id)
+
+        cross_hydrated = self.cross_session.hydrate_actor_state(
+            actor_id=resolved_actor_id,
+            session_id=self.state.session_id,
+        )
+        self.state.m = np.maximum(self.state.m, cross_hydrated.carried_scars_after_decay)
 
         projections = [self.projector.project(item) for item in packet_items]
         step_result = self.omega_core.step(self.state, packet_items, projections)
         policy_decision = self.off_policy.select_actions(step_result, packet_items)
 
+        self.cross_session.record_step(
+            actor_id=resolved_actor_id,
+            session_id=self.state.session_id,
+            step_result=step_result,
+            policy_actions=policy_decision.actions,
+            packet_items=packet_items,
+        )
+        cross_active_actions = self.cross_session.active_actions(
+            actor_id=resolved_actor_id,
+            session_id=self.state.session_id,
+            step=step_result.step,
+        )
+        cross_snapshot = self.cross_session.snapshot(
+            actor_id=resolved_actor_id,
+            session_id=self.state.session_id,
+            step=step_result.step,
+        )
+
         if enforcement_mode == "ENFORCE":
-            self.enforcement.record_policy_actions(policy_decision.actions, step_result.step)
-            active_actions = self.enforcement.active_actions(step_result.step)
             decision = OffDecision(
                 off=policy_decision.off,
                 severity=policy_decision.severity,
-                actions=self._compose_effective_actions(policy_decision.actions, active_actions),
+                actions=self._compose_effective_actions(policy_decision.actions, cross_active_actions),
             )
             enforcement_actions = list(decision.actions)
         else:
-            active_actions = []
             decision = policy_decision
             enforcement_actions = []
 
@@ -140,13 +193,33 @@ class OmegaRAGHarness:
             session_id=self.state.session_id,
             step=step_result.step,
         )
-        merged_requests = list(tool_requests or []) + inferred_requests
+        merged_requests: List[tuple[ToolRequest, str]] = []
+        for request in list(tool_requests or []):
+            if "request_origin" not in request.args:
+                request.args["request_origin"] = "explicit"
+            merged_requests.append((request, "explicit"))
+        for request in inferred_requests:
+            merged_requests.append((request, "inferred"))
 
         tool_decisions = []
         tool_executions: List[ToolExecution] = []
-        for request in merged_requests:
+        tool_gateway_events: List[Dict[str, Any]] = []
+        off_state = bool(self.tool_gateway.is_off_state(enforcement_actions))
+        freeze_active = bool(self.tool_gateway.find_freeze(enforcement_actions) is not None)
+        actor_hash = str((cross_snapshot.get("cross_session") or {}).get("actor_hash", "n/a"))
+        source_ids_seen = sorted({item.source_id for item in allowed_items})[:16]
+
+        for request, request_origin in merged_requests:
             decision_out = self.tool_gateway.enforce(request, enforcement_actions)
             tool_decisions.append(decision_out)
+            capability_obj = self.tool_gateway.capability_for(request.tool_name)
+            capability = {
+                "mode": capability_obj.mode if capability_obj is not None else "unknown",
+                "requires_human_approval": capability_obj.requires_human_approval if capability_obj is not None else False,
+            }
+            adapter_present = bool(self.tool_registry.has(request.tool_name))
+            human_approved = bool(request.args.get("human_approved", False))
+            executed = False
 
             if not decision_out.allowed:
                 tool_executions.append(
@@ -155,6 +228,29 @@ class OmegaRAGHarness:
                         allowed=False,
                         executed=False,
                         reason=decision_out.reason,
+                    )
+                )
+                tool_gateway_events.append(
+                    build_tool_gateway_step_event(
+                        session_id=self.state.session_id,
+                        step=step_result.step,
+                        tool_name=request.tool_name,
+                        request_origin=request_origin,
+                        intent_id=request.args.get("intent_id"),
+                        decision={
+                            "allowed": decision_out.allowed,
+                            "reason": decision_out.reason,
+                            "mode": decision_out.mode,
+                            "off_state": off_state,
+                            "freeze_active": freeze_active,
+                        },
+                        capability=capability,
+                        human_approved=human_approved,
+                        executed=executed,
+                        adapter_present=adapter_present,
+                        execution_mode=tools_execution_mode,
+                        actor_hash=actor_hash,
+                        source_ids_seen=source_ids_seen,
                     )
                 )
                 continue
@@ -169,9 +265,32 @@ class OmegaRAGHarness:
                         output={"status": "dry_run", "tool_name": request.tool_name},
                     )
                 )
+                tool_gateway_events.append(
+                    build_tool_gateway_step_event(
+                        session_id=self.state.session_id,
+                        step=step_result.step,
+                        tool_name=request.tool_name,
+                        request_origin=request_origin,
+                        intent_id=request.args.get("intent_id"),
+                        decision={
+                            "allowed": decision_out.allowed,
+                            "reason": decision_out.reason,
+                            "mode": decision_out.mode,
+                            "off_state": off_state,
+                            "freeze_active": freeze_active,
+                        },
+                        capability=capability,
+                        human_approved=human_approved,
+                        executed=executed,
+                        adapter_present=adapter_present,
+                        execution_mode=tools_execution_mode,
+                        actor_hash=actor_hash,
+                        source_ids_seen=source_ids_seen,
+                    )
+                )
                 continue
 
-            if not self.tool_registry.has(request.tool_name):
+            if not adapter_present:
                 tool_executions.append(
                     ToolExecution(
                         tool_name=request.tool_name,
@@ -179,6 +298,29 @@ class OmegaRAGHarness:
                         executed=False,
                         reason="NO_ADAPTER",
                         error=f"No adapter registered for {request.tool_name}",
+                    )
+                )
+                tool_gateway_events.append(
+                    build_tool_gateway_step_event(
+                        session_id=self.state.session_id,
+                        step=step_result.step,
+                        tool_name=request.tool_name,
+                        request_origin=request_origin,
+                        intent_id=request.args.get("intent_id"),
+                        decision={
+                            "allowed": decision_out.allowed,
+                            "reason": decision_out.reason,
+                            "mode": decision_out.mode,
+                            "off_state": off_state,
+                            "freeze_active": freeze_active,
+                        },
+                        capability=capability,
+                        human_approved=human_approved,
+                        executed=executed,
+                        adapter_present=adapter_present,
+                        execution_mode=tools_execution_mode,
+                        actor_hash=actor_hash,
+                        source_ids_seen=source_ids_seen,
                     )
                 )
                 continue
@@ -202,6 +344,7 @@ class OmegaRAGHarness:
                         output=output,
                     )
                 )
+                executed = True
             except Exception as exc:  # pragma: no cover
                 tool_executions.append(
                     ToolExecution(
@@ -212,13 +355,37 @@ class OmegaRAGHarness:
                         error=str(exc),
                     )
                 )
+            tool_gateway_events.append(
+                build_tool_gateway_step_event(
+                    session_id=self.state.session_id,
+                    step=step_result.step,
+                    tool_name=request.tool_name,
+                    request_origin=request_origin,
+                    intent_id=request.args.get("intent_id"),
+                    decision={
+                        "allowed": decision_out.allowed,
+                        "reason": decision_out.reason,
+                        "mode": decision_out.mode,
+                        "off_state": off_state,
+                        "freeze_active": freeze_active,
+                    },
+                    capability=capability,
+                    human_approved=human_approved,
+                    executed=executed,
+                    adapter_present=adapter_present,
+                    execution_mode=tools_execution_mode,
+                    actor_hash=actor_hash,
+                    source_ids_seen=source_ids_seen,
+                )
+            )
 
         step_event = build_step_event(step_result)
         enforcement_event = build_enforcement_step_event(
             session_id=step_result.session_id,
             step=step_result.step,
-            enforcement_snapshot=self.enforcement.snapshot(step_result.step),
+            enforcement_snapshot=cross_snapshot,
             active_actions=enforcement_actions,
+            cross_session=cross_snapshot.get("cross_session"),
         )
         off_event = None
         if step_result.off:
@@ -249,6 +416,7 @@ class OmegaRAGHarness:
             "tool_decisions": tool_decisions,
             "tool_executions": tool_executions,
             "inferred_tool_requests": inferred_requests,
+            "tool_gateway_events": tool_gateway_events,
             "step_event": step_event,
             "enforcement_event": enforcement_event,
             "off_event": off_event,

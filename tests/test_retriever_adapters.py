@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 from omega.config.loader import load_resolved_config
 from omega.rag.retriever_adapters import ExternalRetrieverAdapter, SQLiteFTSRetrieverAdapter
+from omega.rag.retriever_prod_adapter import RetrieverProdAdapter, build_retriever_prod_adapter
+from omega.rag.retriever_provider import ExternalRetrieverProvider
 
 
 @dataclass
@@ -38,6 +40,22 @@ def test_external_retriever_adapter_maps_content_items():
     assert items[1].trust == "semi"
 
 
+def test_prod_adapter_fallbacks_and_empty_text_drop():
+    cfg = load_resolved_config(profile="dev").resolved
+    provider = ExternalRetrieverProvider(
+        client=FakeRetrieverClientWithMissingFields()
+    )
+    adapter = RetrieverProdAdapter.from_config(provider=provider, config=cfg)
+    items = adapter.search("rotation", 10)
+
+    # One record with empty text must be dropped.
+    assert len(items) == 2
+    assert items[0].source_type == "other"
+    assert items[0].trust == "untrusted"
+    assert items[1].source_type == "ticket"
+    assert items[1].trust == "semi"
+
+
 def test_sqlite_fts_retriever_adapter_contract():
     cfg = load_resolved_config(profile="dev").resolved
     adapter = SQLiteFTSRetrieverAdapter.from_directory("data/smoke_sources/safe_index", config=cfg)
@@ -46,3 +64,37 @@ def test_sqlite_fts_retriever_adapter_contract():
     assert len(items) >= 1
     assert all(hasattr(item, "doc_id") for item in items)
     assert all(item.trust in {"trusted", "semi", "untrusted"} for item in items)
+
+
+def test_build_retriever_prod_adapter_sqlite_backend():
+    cfg = load_resolved_config(profile="dev").resolved
+    adapter = build_retriever_prod_adapter(config=cfg, source_root="data/smoke_sources/safe_index")
+    items = adapter.search("credentials", 2)
+    assert len(items) >= 1
+
+
+@dataclass
+class FakeRetrieverClientWithMissingFields:
+    def search(self, query: str, k: int):
+        del query
+        del k
+        return [
+            {
+                "id": "hit-missing",
+                "text": "legit content",
+                "source_id": "x:1",
+                "metadata": {"rank": 1},
+            },
+            {
+                "id": "hit-ticket",
+                "text": "support details",
+                "source_id": "ticket:55",
+                "source_type": "ticket",
+            },
+            {
+                "id": "hit-empty",
+                "text": "   ",
+                "source_id": "web:bad",
+                "source_type": "web",
+            },
+        ]

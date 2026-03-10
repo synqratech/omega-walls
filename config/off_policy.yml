@@ -16,7 +16,27 @@ off_policy:
   source_quarantine:
     enabled: true
     strikes_to_quarantine: 2
+    duration_steps: 24
     duration_hours: 24
+
+  cross_session:
+    enabled: true
+    backend: sqlite
+    sqlite_path: artifacts/state/cross_session_state.db
+    fallback_actor_to_session: true
+    actor_ttl_steps: 400
+    decay:
+      mode: exponential
+      half_life_steps: 120
+    transfer:
+      scars: true
+      freeze: true
+      quarantine: true
+    freeze_scope: actor
+    quarantine_scope: global_source
+    telemetry:
+      hash_actor_id: true
+      actor_hash_salt_env: OMEGA_ACTOR_HASH_SALT
 
   escalate:
     enabled: true

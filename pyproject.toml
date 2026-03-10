@@ -21,6 +21,12 @@ omega = "omega.cli:main"
 dev = [
   "pytest>=7.0"
 ]
+integrations = [
+  "langchain-core>=0.2",
+  "langchain-community>=0.2",
+  "llama-index-core>=0.10",
+  "rank-bm25>=0.2"
+]
 
 [tool.pytest.ini_options]
 addopts = "-q"

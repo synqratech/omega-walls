@@ -1,4 +1,0 @@
-﻿Partner Ticket
-Text references docs and requests summary only.
-No imperative override statements.
-Marker: TICKET_SAFE_PARTNER

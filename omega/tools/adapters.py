@@ -33,6 +33,9 @@ class ToolAdapterRegistry:
     def has(self, tool_name: str) -> bool:
         return tool_name in self._adapters
 
+    def list_tools(self) -> list[str]:
+        return sorted(self._adapters.keys())
+
     def execute(self, request: ToolRequest, context: Dict[str, Any]) -> Dict[str, Any]:
         if request.tool_name not in self._adapters:
             raise KeyError(f"No adapter registered for tool '{request.tool_name}'")

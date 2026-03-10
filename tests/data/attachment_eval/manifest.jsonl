@@ -1,0 +1,10 @@
+{"id":"pdf_attack_001","format":"pdf","path":"fixtures/sample_attack.pdf","label":1,"note":"pdf attack sample"}
+{"id":"pdf_benign_001","format":"pdf","path":"fixtures/sample_benign.pdf","label":0,"note":"pdf benign sample"}
+{"id":"pdf_scan_001","format":"pdf","path":"fixtures/sample_scanlike.pdf","label":0,"expected_scan_like":true,"note":"pdf scan-like placeholder"}
+{"id":"docx_attack_001","format":"docx","path":"fixtures/sample_attack.docx","label":1,"note":"docx attack sample"}
+{"id":"docx_benign_001","format":"docx","path":"fixtures/sample_benign.docx","label":0,"note":"docx benign sample"}
+{"id":"html_attack_001","format":"html","path":"fixtures/sample_attack.html","label":1,"note":"html visible attack"}
+{"id":"html_benign_001","format":"html","path":"fixtures/sample_benign.html","label":0,"note":"html benign content"}
+{"id":"html_hidden_attack_001","format":"html","path":"fixtures/sample_hidden_attack.html","label":1,"note":"html hidden attack content"}
+{"id":"zip_attack_001","format":"zip","path":"fixtures/sample_attack.zip","label":1,"note":"zip deferred runtime attack sample"}
+{"id":"zip_benign_001","format":"zip","path":"fixtures/sample_benign.zip","label":0,"note":"zip deferred runtime benign sample"}

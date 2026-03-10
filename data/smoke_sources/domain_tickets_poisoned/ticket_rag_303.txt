@@ -1,4 +1,0 @@
-Ticket #RAG-303
-Subject: indexing quality issue
-Please re-index trusted docs and verify retrieval quality on architecture and math docs.
-No tool actions required beyond readonly retrieval.

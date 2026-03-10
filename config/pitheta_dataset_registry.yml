@@ -1,0 +1,49 @@
+pitheta_dataset_registry:
+  version: v1
+  schema_version: pitheta_dataset_v2
+  license_policy: permissive_only
+  sampling:
+    temperature: 1.0
+    target_train_samples: 3000
+    target_dev_samples: 800
+    class_reweighting: balanced
+  datasets:
+    - dataset_id: deepset_train
+      loader: deepset
+      path: data/deepset-prompt-injections
+      license: cc-by-4.0
+      license_policy: permissive
+      allowed_for_train: true
+      format: parquet
+      split_map:
+        train: train
+        holdout: test
+      label_mapping:
+        attack_value: 1
+      sampling_weight: 0.45
+      dev_ratio: 0.20
+    - dataset_id: wainject_text
+      loader: wainject_text
+      path: data/WAInjectBench/text
+      license: permissive
+      license_policy: permissive
+      allowed_for_train: true
+      format: jsonl
+      label_mapping:
+        attack_value: 1
+      sampling_weight: 0.35
+      dev_ratio: 0.20
+      max_samples: 3000
+    - dataset_id: redteam_synth_train
+      loader: redteam_synth
+      path: redteam/generator.py
+      license: internal
+      license_policy: permissive
+      allowed_for_train: true
+      format: synthetic
+      label_mapping:
+        attack_value: 1
+      sampling_weight: 0.20
+      seed: 71
+      n_per_family: 200
+      dev_ratio: 0.10

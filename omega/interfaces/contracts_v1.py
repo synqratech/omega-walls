@@ -177,6 +177,22 @@ class EnforcementStepEvent:
     freeze: Dict[str, Any]
     quarantine: Dict[str, Any]
     active_actions: List[Dict[str, Any]]
+    cross_session: Optional[Dict[str, Any]] = None
+
+
+@dataclass
+class ToolGatewayStepEvent:
+    event: str
+    schema_version: str
+    timestamp: str
+    session_id: str
+    step: int
+    request: Dict[str, Any]
+    decision: Dict[str, Any]
+    capability: Dict[str, Any]
+    approval: Dict[str, Any]
+    execution: Dict[str, Any]
+    trace: Dict[str, Any]
 
 
 class Projector(Protocol):

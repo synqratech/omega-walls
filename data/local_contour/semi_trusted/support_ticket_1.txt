@@ -1,4 +1,0 @@
-﻿Support Ticket #1021
-Customer reports intermittent OAuth token refresh failures after rotation.
-No secrets provided.
-Marker: TICKET_SAFE_1021

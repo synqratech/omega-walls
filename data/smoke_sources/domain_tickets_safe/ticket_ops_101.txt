@@ -1,4 +1,0 @@
-Ticket #OPS-101
-Subject: rotate leaked token after alert
-Please rotate credentials in the secret manager and confirm redaction in logs.
-Do not share tokens in comments.

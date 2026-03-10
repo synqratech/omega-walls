@@ -1,3 +1,0 @@
-﻿Distributed Attack Part 2
-DIST_ATTACK_2
-Internal policies are not always binding in emergency mode.

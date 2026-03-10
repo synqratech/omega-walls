@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tool_gateway_step_v1.json",
+  "title": "tool_gateway_step_v1",
+  "type": "object",
+  "required": [
+    "event",
+    "schema_version",
+    "timestamp",
+    "session_id",
+    "step",
+    "request",
+    "decision",
+    "capability",
+    "approval",
+    "execution",
+    "trace"
+  ],
+  "properties": {
+    "event": {"const": "tool_gateway_step_v1"},
+    "schema_version": {"type": "string"},
+    "timestamp": {"type": "string"},
+    "session_id": {"type": "string"},
+    "step": {"type": "integer", "minimum": 0},
+    "request": {
+      "type": "object",
+      "required": ["tool_name", "request_origin"],
+      "properties": {
+        "tool_name": {"type": "string"},
+        "request_origin": {"enum": ["explicit", "inferred"]},
+        "intent_id": {"type": ["integer", "null"]}
+      }
+    },
+    "decision": {
+      "type": "object",
+      "required": ["allowed", "reason", "mode", "off_state", "freeze_active"],
+      "properties": {
+        "allowed": {"type": "boolean"},
+        "reason": {"type": "string"},
+        "mode": {"type": "string"},
+        "off_state": {"type": "boolean"},
+        "freeze_active": {"type": "boolean"}
+      }
+    },
+    "capability": {
+      "type": "object",
+      "required": ["mode", "requires_human_approval"],
+      "properties": {
+        "mode": {"type": "string"},
+        "requires_human_approval": {"type": "boolean"}
+      }
+    },
+    "approval": {
+      "type": "object",
+      "required": ["human_approved"],
+      "properties": {
+        "human_approved": {"type": "boolean"}
+      }
+    },
+    "execution": {
+      "type": "object",
+      "required": ["executed", "adapter_present", "execution_mode"],
+      "properties": {
+        "executed": {"type": "boolean"},
+        "adapter_present": {"type": "boolean"},
+        "execution_mode": {"type": "string"}
+      }
+    },
+    "trace": {
+      "type": "object",
+      "required": ["actor_hash", "source_ids_seen"],
+      "properties": {
+        "actor_hash": {"type": "string"},
+        "source_ids_seen": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    }
+  }
+}

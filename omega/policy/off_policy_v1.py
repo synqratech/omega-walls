@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from typing import Dict, List
 
 from omega.interfaces.contracts_v1 import ContentItem, OffAction, OffDecision, OmegaStepResult
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -84,12 +87,22 @@ class OffPolicyV1:
         if cfg["source_quarantine"].get("enabled", True):
             source_ids = sorted({item.source_id for item in items if item.doc_id in set(step_result.top_docs)})
             if source_ids:
+                sq_cfg = cfg["source_quarantine"]
+                if "duration_steps" in sq_cfg:
+                    horizon_steps = int(sq_cfg.get("duration_steps", 24))
+                else:
+                    horizon_steps = int(sq_cfg.get("duration_hours", 24))
+                    if "duration_hours" in sq_cfg:
+                        LOGGER.warning(
+                            "off_policy.source_quarantine.duration_hours is interpreted as step horizon; "
+                            "prefer duration_steps (deprecated field)."
+                        )
                 actions.append(
                     OffAction(
                         type="SOURCE_QUARANTINE",
                         target="SOURCE",
                         source_ids=source_ids,
-                        horizon_steps=int(cfg["source_quarantine"].get("duration_hours", 24)),
+                        horizon_steps=horizon_steps,
                     )
                 )
 

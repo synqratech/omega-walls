@@ -1,0 +1,47 @@
+pitheta_train:
+  base_model: microsoft/deberta-v3-base
+  task: ordinal_pressure_with_polarity
+  max_len: 256
+  batch_size: 32
+  grad_accum_steps: 1
+  lr: 0.0002
+  epochs: 3
+  warmup_ratio: 0.10
+  weight_decay: 0.01
+  seed: 41
+  mixed_precision: auto
+  early_stopping_patience: 2
+  early_stopping_metric: dev_attack_recall
+  benign_fpr_ceiling: 0.05
+  loss_weights:
+    ordinal: 1.0
+    polarity: 0.3
+  ordinal:
+    class_weights:
+      - [1.0, 1.2, 1.3, 1.4]
+      - [1.0, 1.2, 1.3, 1.4]
+      - [1.0, 1.2, 1.3, 1.4]
+      - [1.0, 1.2, 1.3, 1.4]
+  polarity:
+    class_weights:
+      - [1.0, 1.0, 1.0]
+      - [1.0, 1.0, 1.0]
+      - [1.0, 1.0, 1.0]
+      - [1.0, 1.0, 1.0]
+  labeling:
+    ordinal_bins: [0.45, 1.10, 2.00]
+    active_floor_gold: 2
+  calibration:
+    fit_temperature: true
+    temperature_split: dev
+    temperature_output: best/temperature_scaling.json
+    source_mode: blended
+    gold_slice_path: data/gold_slice/gold_slice.jsonl
+    gold_ratio: 0.70
+    weak_ratio: 0.30
+  lora:
+    enabled: true
+    r: 16
+    alpha: 32
+    dropout: 0.05
+    target_modules: [query_proj, value_proj]

@@ -78,8 +78,9 @@ def build_enforcement_step_event(
     step: int,
     enforcement_snapshot: Dict[str, Any],
     active_actions: List[OffAction],
+    cross_session: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    return {
+    event = {
         "event": "enforcement_step_v1",
         "schema_version": "1.0",
         "timestamp": _utc_now_iso(),
@@ -88,6 +89,61 @@ def build_enforcement_step_event(
         "freeze": enforcement_snapshot.get("freeze", {}),
         "quarantine": enforcement_snapshot.get("quarantine", {}),
         "active_actions": _actions_to_dict(active_actions),
+    }
+    if cross_session is not None:
+        event["cross_session"] = cross_session
+    return event
+
+
+def build_tool_gateway_step_event(
+    session_id: str,
+    step: int,
+    tool_name: str,
+    request_origin: str,
+    intent_id: Optional[int],
+    decision: Dict[str, Any],
+    capability: Dict[str, Any],
+    human_approved: bool,
+    executed: bool,
+    adapter_present: bool,
+    execution_mode: str,
+    actor_hash: str,
+    source_ids_seen: List[str],
+) -> Dict[str, Any]:
+    return {
+        "event": "tool_gateway_step_v1",
+        "schema_version": "1.0",
+        "timestamp": _utc_now_iso(),
+        "session_id": session_id,
+        "step": step,
+        "request": {
+            "tool_name": tool_name,
+            "request_origin": request_origin,
+            "intent_id": intent_id,
+        },
+        "decision": {
+            "allowed": bool(decision.get("allowed", False)),
+            "reason": str(decision.get("reason", "")),
+            "mode": str(decision.get("mode", "")),
+            "off_state": bool(decision.get("off_state", False)),
+            "freeze_active": bool(decision.get("freeze_active", False)),
+        },
+        "capability": {
+            "mode": str(capability.get("mode", "unknown")),
+            "requires_human_approval": bool(capability.get("requires_human_approval", False)),
+        },
+        "approval": {
+            "human_approved": bool(human_approved),
+        },
+        "execution": {
+            "executed": bool(executed),
+            "adapter_present": bool(adapter_present),
+            "execution_mode": execution_mode,
+        },
+        "trace": {
+            "actor_hash": actor_hash,
+            "source_ids_seen": list(source_ids_seen),
+        },
     }
 
 

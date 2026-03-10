@@ -95,6 +95,28 @@ def test_enforcement_telemetry_schema_valid_without_off():
     jsonschema.validate(instance=out["enforcement_event"], schema=schema)
     assert out["enforcement_event"]["freeze"]["active"] is False
     assert out["enforcement_event"]["quarantine"]["active"] is False
+    assert "cross_session" in out["enforcement_event"]
+    assert "carryover_applied" in out["enforcement_event"]["cross_session"]
+
+
+def test_tool_gateway_step_schema_valid():
+    schema = json.loads(Path("schemas/tool_gateway_step_v1.json").read_text(encoding="utf-8"))
+    cfg = load_resolved_config(profile="dev").resolved
+    harness = OmegaRAGHarness(
+        projector=Pi0IntentAwareV2(cfg),
+        omega_core=OmegaCoreV1(omega_params_from_config(cfg)),
+        off_policy=OffPolicyV1(cfg),
+        tool_gateway=ToolGatewayV1(cfg),
+        config=cfg,
+    )
+
+    out = harness.run_step(
+        user_query="q",
+        packet_items=[mk_item("doc-safe", "General harmless information", source_id="tests:safe")],
+        tool_requests=[ToolRequest(tool_name="summarize", args={"text": "alpha"}, session_id="sess-local", step=1)],
+    )
+    assert len(out["tool_gateway_events"]) == 1
+    jsonschema.validate(instance=out["tool_gateway_events"][0], schema=schema)
 
 
 def test_tool_freeze_persists_across_steps():
@@ -120,6 +142,7 @@ def test_tool_freeze_persists_across_steps():
     )
     assert first["step_result"].off is True
     assert first["tool_decisions"][0].allowed is False
+    assert "cross_session" in first["enforcement_event"]
 
     saw_non_off_step = False
     out = first
@@ -137,10 +160,11 @@ def test_tool_freeze_persists_across_steps():
             break
     assert saw_non_off_step is True
 
-    freeze_until = harness.enforcement.tool_freeze_until_step
-    assert freeze_until >= 1 + horizon
+    freeze_until = out["enforcement_event"]["freeze"]["freeze_until_step"]
+    assert freeze_until is not None
+    assert int(freeze_until) >= 1 + horizon
 
-    while out["step_result"].step <= freeze_until:
+    while out["enforcement_event"]["freeze"]["active"]:
         step = out["step_result"].step + 1
         out = harness.run_step(
             user_query="q",
@@ -175,6 +199,7 @@ def test_source_quarantine_filters_sources_across_steps():
 
     # Keep enforcement state, but clear omega scar state so step-level OFF does not dominate this assertion.
     harness.state.m = np.zeros_like(harness.state.m)
+    harness.reset_state(session_id="sess-other-actor", actor_id="other-actor")
 
     out = harness.run_step(
         user_query="q",
@@ -182,6 +207,7 @@ def test_source_quarantine_filters_sources_across_steps():
             mk_item("doc-q1", "General harmless info", source_id="web:repeat.example"),
             mk_item("doc-q2", "General harmless info", source_id="web:trusted.example"),
         ],
+        actor_id="other-actor",
     )
 
     allowed_sources = {item.source_id for item in out["allowed_items"]}

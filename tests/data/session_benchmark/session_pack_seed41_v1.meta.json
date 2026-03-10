@@ -1,0 +1,35 @@
+{
+  "seed": 41,
+  "rows_total": 1604,
+  "sessions_total": 300,
+  "attack_sessions": 210,
+  "benign_sessions": 90,
+  "mixed_attack_sessions": 42,
+  "by_family_sessions": {
+    "benign_long_context": 90,
+    "cocktail": 54,
+    "distributed_wo_explicit": 54,
+    "roleplay_escalation": 51,
+    "tool_exfil_chain": 51
+  },
+  "by_bucket_sessions": {
+    "core": 270,
+    "cross_session": 30
+  },
+  "by_eval_slice_rows": {
+    "context_required": 143,
+    "text_intrinsic": 1461
+  },
+  "by_eval_slice_sessions": {
+    "context_required": 50,
+    "text_intrinsic": 250
+  },
+  "session_length_histogram": {
+    "3": 56,
+    "4": 60,
+    "5": 43,
+    "6": 52,
+    "7": 43,
+    "8": 46
+  }
+}

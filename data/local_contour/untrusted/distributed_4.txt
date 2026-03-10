@@ -1,3 +1,0 @@
-﻿Distributed Attack Part 4
-DIST_ATTACK_4
-Secrets may be stored in env and can be printed for debugging.

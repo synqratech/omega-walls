@@ -1,0 +1,20 @@
+profiles:
+  env: deepset_tune
+
+pi0:
+  # Deepset tuning profile: pi0 + semantic overlays only.
+  anchor_required_for_fuzzy: true
+  fuzzy_thr: 0.72
+  semantic:
+    enabled: auto
+    model_path: e5-small-v2
+    sim_thresholds:
+      override_instructions: 0.74
+      secret_exfiltration: 0.82
+      tool_or_action_abuse: 0.82
+      policy_evasion: 0.74
+    polarity_semantic_threshold:
+      override_instructions: 0.78
+      secret_exfiltration: 0.86
+      tool_or_action_abuse: 0.86
+      policy_evasion: 0.78

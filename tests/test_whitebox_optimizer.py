@@ -59,6 +59,9 @@ def test_evaluate_whitebox_is_deterministic_for_seed():
     assert 0.0 <= m1.bypass_rate <= 1.0
     assert 0.0 <= m1.mean_reduction_ratio <= 1.0
     assert m1.min_best_sum_v >= 0.0
+    assert set(m1.per_wall_base_detect_rate.keys()) == set(projector.walls)
+    assert set(m1.per_wall_bypass_rate.keys()) == set(projector.walls)
+    assert isinstance(m1.clusters, dict)
     assert m1.base_detect_rate == m2.base_detect_rate
     assert m1.bypass_rate == m2.bypass_rate
     assert m1.mean_reduction_ratio == m2.mean_reduction_ratio

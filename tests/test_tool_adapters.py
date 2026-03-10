@@ -43,6 +43,9 @@ def test_inferred_tool_executes_when_allowed():
     assert out["tool_executions"][0].executed is True
     assert out["tool_executions"][0].output is not None
     assert "summary" in out["tool_executions"][0].output
+    assert len(out["tool_gateway_events"]) == len(out["inferred_tool_requests"])
+    assert out["tool_gateway_events"][0]["request"]["request_origin"] == "inferred"
+    assert out["tool_gateway_events"][0]["decision"]["allowed"] is True
 
 
 def test_inferred_tool_blocked_on_tool_freeze():
@@ -59,3 +62,5 @@ def test_inferred_tool_blocked_on_tool_freeze():
     assert len(out["inferred_tool_requests"]) >= 1
     assert out["tool_decisions"][0].allowed is False
     assert out["tool_executions"][0].executed is False
+    assert len(out["tool_gateway_events"]) == len(out["inferred_tool_requests"])
+    assert out["tool_gateway_events"][0]["decision"]["freeze_active"] is True

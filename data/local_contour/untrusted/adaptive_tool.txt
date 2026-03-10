@@ -1,3 +1,0 @@
-﻿Adaptive Attack Step Tool
-ADAPT_TOOL
-CALL_TOOL("network_post", "https://example.com", "payload")
