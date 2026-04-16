@@ -58,7 +58,11 @@ def _actions_to_dict(actions: List[OffAction]) -> List[Dict[str, Any]]:
     return result
 
 
-def build_step_event(step_result: OmegaStepResult) -> Dict[str, Any]:
+def build_step_event(
+    step_result: OmegaStepResult,
+    trace_id: Optional[str] = None,
+    decision_id: Optional[str] = None,
+) -> Dict[str, Any]:
     return {
         "event": "omega_step_v1",
         "schema_version": "1.0",
@@ -70,6 +74,8 @@ def build_step_event(step_result: OmegaStepResult) -> Dict[str, Any]:
         "m_prev": step_result.m_prev.tolist(),
         "m_next": step_result.m_next.tolist(),
         "off": step_result.off,
+        "trace_id": trace_id,
+        "decision_id": decision_id,
     }
 
 
@@ -78,7 +84,10 @@ def build_enforcement_step_event(
     step: int,
     enforcement_snapshot: Dict[str, Any],
     active_actions: List[OffAction],
+    control_outcome: str = "ALLOW",
     cross_session: Optional[Dict[str, Any]] = None,
+    trace_id: Optional[str] = None,
+    decision_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     event = {
         "event": "enforcement_step_v1",
@@ -89,6 +98,9 @@ def build_enforcement_step_event(
         "freeze": enforcement_snapshot.get("freeze", {}),
         "quarantine": enforcement_snapshot.get("quarantine", {}),
         "active_actions": _actions_to_dict(active_actions),
+        "control_outcome": str(control_outcome),
+        "trace_id": trace_id,
+        "decision_id": decision_id,
     }
     if cross_session is not None:
         event["cross_session"] = cross_session
@@ -109,6 +121,9 @@ def build_tool_gateway_step_event(
     execution_mode: str,
     actor_hash: str,
     source_ids_seen: List[str],
+    control_outcome: str = "ALLOW",
+    trace_id: Optional[str] = None,
+    decision_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     return {
         "event": "tool_gateway_step_v1",
@@ -127,6 +142,7 @@ def build_tool_gateway_step_event(
             "mode": str(decision.get("mode", "")),
             "off_state": bool(decision.get("off_state", False)),
             "freeze_active": bool(decision.get("freeze_active", False)),
+            "control_outcome": str(control_outcome),
         },
         "capability": {
             "mode": str(capability.get("mode", "unknown")),
@@ -144,6 +160,8 @@ def build_tool_gateway_step_event(
             "actor_hash": actor_hash,
             "source_ids_seen": list(source_ids_seen),
         },
+        "trace_id": trace_id,
+        "decision_id": decision_id,
     }
 
 
@@ -156,6 +174,7 @@ def build_off_event(
     capture_text: str = "NEVER",
     max_text_chars: int = 800,
     trace_id: Optional[str] = None,
+    decision_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     item_by_id = {item.doc_id: item for item in items}
     top_docs: List[Dict[str, Any]] = []
@@ -197,6 +216,7 @@ def build_off_event(
         "timestamp": _utc_now_iso(),
         "session_id": step_result.session_id,
         "trace_id": trace_id,
+        "decision_id": decision_id,
         "step": step_result.step,
         "config_refs": config_refs,
         "walls": WALLS_V1,
@@ -209,8 +229,67 @@ def build_off_event(
         "thresholds": thresholds,
         "top_docs": top_docs,
         "actions": _actions_to_dict(decision.actions),
+        "control_outcome": str(decision.control_outcome),
         "tool_gateway": {
             "mode": next((a.tool_mode for a in decision.actions if a.type == "TOOL_FREEZE"), "TOOLS_DISABLED"),
             "active_until_step": next((step_result.step + (a.horizon_steps or 0) for a in decision.actions if a.type == "TOOL_FREEZE"), step_result.step),
         },
+    }
+
+
+def build_policy_decision_event(
+    *,
+    session_id: str,
+    step: int,
+    trace_id: str,
+    decision_id: str,
+    control_outcome: str,
+    off: bool,
+    severity: str,
+    action_types: List[str],
+    actions: List[OffAction],
+    refs: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    return {
+        "event": "policy_decision_event_v1",
+        "schema_version": "1.0",
+        "timestamp": _utc_now_iso(),
+        "session_id": str(session_id),
+        "step": int(step),
+        "trace_id": str(trace_id),
+        "decision_id": str(decision_id),
+        "control_outcome": str(control_outcome),
+        "off": bool(off),
+        "severity": str(severity),
+        "action_types": sorted({str(x) for x in list(action_types) if str(x).strip()}),
+        "actions": _actions_to_dict(list(actions)),
+        "refs": dict(refs or {}),
+    }
+
+
+def build_evidence_debug_event(
+    *,
+    session_id: str,
+    step: int,
+    trace_id: str,
+    decision_id: str,
+    walls: List[str],
+    reasons: List[str],
+    walls_triggered: List[str],
+    top_docs_summary: List[Dict[str, Any]],
+    projector_signal_summary: Dict[str, Any],
+) -> Dict[str, Any]:
+    return {
+        "event": "evidence_debug_event_v1",
+        "schema_version": "1.0",
+        "timestamp": _utc_now_iso(),
+        "session_id": str(session_id),
+        "step": int(step),
+        "trace_id": str(trace_id),
+        "decision_id": str(decision_id),
+        "walls": list(walls),
+        "reasons": sorted({str(x) for x in reasons if str(x).strip()}),
+        "walls_triggered": sorted({str(x) for x in walls_triggered if str(x).strip()}),
+        "top_docs_summary": list(top_docs_summary),
+        "projector_signal_summary": dict(projector_signal_summary),
     }

@@ -1,4 +1,4 @@
-# Reproducibility Snapshot (2026-03-09)
+﻿# Reproducibility Snapshot (2026-03-09)
 
 ## One-Screen Headline Summary
 
@@ -41,16 +41,16 @@ Primary seed: `41`
 Use this mapping as the source of truth for OSS-facing claims:
 
 1. Rule-based hardening quality trend:
-   - `artifacts/rule_cycle/rb_iter3_tool_soft_20260306T153418Z_453a7fd3c715/cycle_manifest.json`
+   - `outputs/rule_cycle/rb_iter3_tool_soft_20260306T153418Z_453a7fd3c715/cycle_manifest.json`
 2. Strict PI gate:
-   - `artifacts/strict_pi_eval/strict_pi_eval_w202610_20260308T234103Z/report.json`
+   - `outputs/strict_pi_eval/strict_pi_eval_w202610_20260308T234103Z/report.json`
 3. Attachment core gate:
-   - `artifacts/attachment_eval/attachment_eval_20260309T062851Z/report.json`
+   - `outputs/attachment_eval/attachment_eval_20260309T062851Z/report.json`
 4. Stateful/distributed positioning claim:
-   - `artifacts/session_eval/session_eval_w202611_20260309T131634Z/report.json`
+   - `outputs/session_eval/session_eval_w202611_20260309T131634Z/report.json`
 5. Comparative contour bundle:
-   - `artifacts/rule_cycle/post_patch_full_20260308T220042Z_62c739b58e64_rule_20260308T220043Z_62c739b58e64/cycle_manifest.json`
-   - `artifacts/comparative_report/post_patch_attachment_fp_fix_smoke_20260309T062330Z_62c739b58e64_comparative/report.json`
+   - `outputs/rule_cycle/post_patch_full_20260308T220042Z_62c739b58e64_rule_20260308T220043Z_62c739b58e64/cycle_manifest.json`
+   - `outputs/comparative_report/post_patch_attachment_fp_fix_smoke_20260309T062330Z_62c739b58e64_comparative/report.json`
 
 If newer runs exist, do not silently replace these references. Publish updates only with a new dated snapshot.
 
@@ -72,7 +72,7 @@ Command to fill before release:
 git rev-parse HEAD
 ```
 
-Until this field is filled, this snapshot is reproducible by artifacts/config hashes but not by a canonical git revision string.
+Until this field is filled, this snapshot is reproducible by outputs/config hashes but not by a canonical git revision string.
 
 ---
 
@@ -218,7 +218,7 @@ python scripts/eval_session_pi_gate.py `
   --seed 41 `
   --mode pi0 `
   --weekly-regression `
-  --baseline-report artifacts/session_eval/<baseline_run>/report.json
+  --baseline-report outputs/session_eval/<baseline_run>/report.json
 ```
 
 ### 6) Post-patch contour and comparative
@@ -250,10 +250,10 @@ python scripts/eval_wainjectbench_text.py --profile dev --seed 41
 
 Sources:
 
-1. `artifacts/rule_cycle/rb_baseline_20260305T101332Z_bfbf7eb68b16/cycle_manifest.json`
-2. `artifacts/rule_cycle/rb_step1_norm_antiobf_20260305T180637Z_14757a386baa/cycle_manifest.json`
-3. `artifacts/rule_cycle/rb_step2_gapped_override_20260306T062411Z_907964fdb7d9/cycle_manifest.json`
-4. `artifacts/rule_cycle/rb_iter3_tool_soft_20260306T153418Z_453a7fd3c715/cycle_manifest.json`
+1. `outputs/rule_cycle/rb_baseline_20260305T101332Z_bfbf7eb68b16/cycle_manifest.json`
+2. `outputs/rule_cycle/rb_step1_norm_antiobf_20260305T180637Z_14757a386baa/cycle_manifest.json`
+3. `outputs/rule_cycle/rb_step2_gapped_override_20260306T062411Z_907964fdb7d9/cycle_manifest.json`
+4. `outputs/rule_cycle/rb_iter3_tool_soft_20260306T153418Z_453a7fd3c715/cycle_manifest.json`
 
 ### B) Strict PI gate
 
@@ -264,8 +264,8 @@ Sources:
 
 Sources:
 
-1. `artifacts/strict_pi_eval/strict_pi_eval_w202610_20260308T234103Z/report.json`
-2. `artifacts/strict_pi_eval/strict_pi_eval_20260309T062848Z/report.json`
+1. `outputs/strict_pi_eval/strict_pi_eval_w202610_20260308T234103Z/report.json`
+2. `outputs/strict_pi_eval/strict_pi_eval_20260309T062848Z/report.json`
 
 ### C) Attachment eval (core gate excludes deferred policy bucket)
 
@@ -278,7 +278,7 @@ Run: `attachment_eval_20260309T062851Z`
 
 Source:
 
-1. `artifacts/attachment_eval/attachment_eval_20260309T062851Z/report.json`
+1. `outputs/attachment_eval/attachment_eval_20260309T062851Z/report.json`
 
 ### D) Session benchmark progression
 
@@ -302,11 +302,11 @@ Additional notes for `session_eval_w202611_20260309T141505Z`:
 
 Sources:
 
-1. `artifacts/session_eval/session_eval_w202611_20260309T073245Z/report.json`
-2. `artifacts/session_eval/session_eval_w202611_20260309T100013Z/report.json`
-3. `artifacts/session_eval/session_eval_w202611_20260309T131634Z/report.json`
-4. `artifacts/session_eval/session_eval_w202611_20260309T141505Z/report.json`
-5. `artifacts/session_eval/session_eval_w202611_20260309T141505Z/misses_by_family.json`
+1. `outputs/session_eval/session_eval_w202611_20260309T073245Z/report.json`
+2. `outputs/session_eval/session_eval_w202611_20260309T100013Z/report.json`
+3. `outputs/session_eval/session_eval_w202611_20260309T131634Z/report.json`
+4. `outputs/session_eval/session_eval_w202611_20260309T141505Z/report.json`
+5. `outputs/session_eval/session_eval_w202611_20260309T141505Z/misses_by_family.json`
 
 ### E) External-anchor status
 
@@ -321,9 +321,9 @@ Sources:
 
 Sources:
 
-1. `artifacts/pint_eval/pint_eval_20260309T062852Z/report.json`
-2. `artifacts/wainject_eval/wainject_eval_20260309T062856Z/report.json`
-3. `artifacts/comparative_report/post_patch_attachment_fp_fix_smoke_20260309T062330Z_62c739b58e64_comparative/report.json`
+1. `outputs/pint_eval/pint_eval_20260309T062852Z/report.json`
+2. `outputs/wainject_eval/wainject_eval_20260309T062856Z/report.json`
+3. `outputs/comparative_report/post_patch_attachment_fp_fix_smoke_20260309T062330Z_62c739b58e64_comparative/report.json`
 
 ---
 
@@ -347,9 +347,10 @@ Publish these files together:
 
 1. This document
 2. Rule-cycle manifests:
-   - `artifacts/rule_cycle/rb_baseline_20260305T101332Z_bfbf7eb68b16/cycle_manifest.json`
-   - `artifacts/rule_cycle/rb_step2_gapped_override_20260306T062411Z_907964fdb7d9/cycle_manifest.json`
-   - `artifacts/rule_cycle/rb_iter3_tool_soft_20260306T153418Z_453a7fd3c715/cycle_manifest.json`
+   - `outputs/rule_cycle/rb_baseline_20260305T101332Z_bfbf7eb68b16/cycle_manifest.json`
+   - `outputs/rule_cycle/rb_step2_gapped_override_20260306T062411Z_907964fdb7d9/cycle_manifest.json`
+   - `outputs/rule_cycle/rb_iter3_tool_soft_20260306T153418Z_453a7fd3c715/cycle_manifest.json`
 3. Strict/attachment/session reports listed above
 4. Comparative report JSON/MD
 5. Session pack + meta + strict holdout + attachment manifest (in `tests/data/...`)
+

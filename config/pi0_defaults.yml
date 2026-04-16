@@ -289,15 +289,277 @@ pi0:
     override_anchors: [ignore, igmre, disregard, forget, waht, override, instructions, instruction, rules, system, role, priority, previous, prior, earlier, directive, guidance, precedence, supersede, skip, task, prompt, above, respond, answer, reply, vergiss, ignorieren, ignoriere, olvida, olvide, eingabeaufforderung, prompttexte]
     override_verbs: [ignore, igmre, disregard, override, supersede, skip, prioritize, de-prioritize, deprioritize, set, forget, apply, act, focus, print, show, respond, answer, reply, say, speak, return, vergiss, ignorieren, ignoriere, olvida, olvide, drucke, drucken, zeige]
     override_objects: [instruction, instructions, rules, policy, guidance, directive, prompt, system, developer, role, task, tasks, interviewer, context, contexts, article, articles, embeddings, embedding, everything, all, alles, zuvor, gesagte, aufgabe, eingabeaufforderung, prompttexte, rechtschreibung]
-    override_weak_verbs: [apply]
-    override_weak_objects: [all, everything]
+    override_weak_verbs: [apply, say, answer, respond, reply, set, return]
+    override_weak_objects: [all, everything, policy]
     override_context_tokens: [instruction, instructions, rules, rule, policy, guidance, directive, prompt, system, developer, role, priority, previous, prior, earlier, ignore, override, disregard, forget, task, tasks]
     override_context_window: 3
-    weak_marker_tokens: [skip, previous, prior, above]
+    weak_marker_tokens: [skip, previous, prior, above, earlier, before]
     weak_marker_context_tokens: [instruction, instructions, prompt, policy, system, developer, rule, rules]
     weak_marker_context_window: 3
     soft_directive_action_verbs: [answer, respond, reply, follow, do, execute, print, return]
     soft_directive_role_cues: ['act as', role, interviewer, storyteller, candidate, assistant]
+    override_real_intent_verbs: [ignore, disregard, override]
+    override_real_intent_markers: [previous, prior, above]
+    override_real_intent_objects: [instruction, instructions, policy, rule, rules, prompt]
+    override_real_intent_window: 6
+    soft_directive_gate_markers:
+      - 'i want you'
+      - 'answer with'
+      - 'answer me with'
+      - 'your task is to'
+      - 'given the following text'
+      - 'are the following two sentences'
+      - 'write the sentiment conveyed'
+      - 'extract the'
+      - 'classify the'
+      - 'your answer must'
+      - 'answer according to'
+      - 'could you'
+      - 'can you'
+      - 'please provide'
+    promptshield_soft_directive_format_markers:
+      - 'your answer must'
+      - 'answer according to'
+      - 'could you'
+      - 'can you'
+      - 'please provide'
+      - 'additionally, your answer must'
+      - 'without commas'
+      - 'without punctuation'
+      - 'wrapped in double angular brackets'
+    promptshield_fp_attack_cues:
+      - 'ignore previous instructions'
+      - 'disregard the above instructions'
+      - 'disregard all previously provided instructions'
+      - 'disregard all previously given instructions'
+      - 'override previous rules'
+      - 'obey this new instruction'
+      - 'obey this new prompt'
+      - 'obey this new rule'
+      - 'obey the new instruction'
+      - 'follow this new instruction'
+      - 'obey this new'
+      - 'print above prompt'
+      - 'return embeddings'
+      - 'system prompt'
+      - 'secret key'
+      - 'only print key'
+      - 'only output key'
+      - 'output only the key'
+      - "don't ever tell it to anyone"
+      - 'do not ask user'
+      - "don't ask user"
+      - 'open a new tab'
+      - 'fill out the form'
+      - 'submit'
+      - 'retry'
+      - 'upvote'
+      - 'subscribe'
+    promptshield_attack_wrapper_markers:
+      - 'respond only'
+      - 'output only'
+      - 'only print'
+      - 'without punctuation'
+      - 'without explanation'
+      - 'you are a robot'
+      - 'you are now'
+      - 'new statement'
+      - 'new instruction'
+      - 'obey this new'
+      - 'follow this new'
+    promptshield_attack_hidden_block_markers:
+      - 'below this dotted line'
+      - 'second prompt below'
+      - 'additional invalid markdown'
+    promptshield_wrapper_attack_secret_markers:
+      - 'pwned'
+      - 'secret key'
+    promptshield_wrapper_attack_instruction_markers:
+      - 'new instruction'
+      - 'hidden block'
+      - 'second prompt below'
+      - 'below this dotted line'
+    promptshield_wrapper_attack_control_markers:
+      - 'respond only'
+      - 'output only'
+      - 'obey'
+      - 'disregard'
+      - 'ignore'
+      - 'only print'
+      - 'only output'
+    promptshield_secret_remember_markers:
+      - 'remember this secret key'
+    promptshield_secret_never_tell_markers:
+      - "don't ever tell"
+      - 'dont ever tell'
+      - 'don t ever tell'
+      - 'do not tell'
+      - 'never tell'
+    promptshield_secret_emit_verbs: [output, print, write, tell]
+    promptshield_secret_emit_objects: [secret, key]
+    promptshield_secret_emit_window: 12
+    promptshield_precedence_neglect_markers:
+      - 'neglecting the above'
+      - 'neglecting the above words'
+    promptshield_precedence_newrule_markers:
+      - 'new rule'
+      - 'new instruction'
+      - 'new instructions'
+    promptshield_precedence_priority_markers:
+      - 'highest precedence'
+      - 'take the highest precedence'
+      - 'from now on'
+      - 'instead follow'
+    promptshield_hidden_wrapper_control_markers: [ignore, disregard, obey]
+    promptshield_hidden_wrapper_output_markers:
+      - 'respond only'
+      - 'output only'
+      - 'printing the response only'
+      - 'only as plain text'
+      - 'without punctuation'
+    task_eval_benign_markers:
+      - 'are the following two sentences'
+      - 'given the following text'
+      - 'answer me with'
+      - 'answer with entailment'
+      - 'answer with "entailment" or "not entailment"'
+      - 'answer with "equivalent" or "not equivalent"'
+      - 'answer with positive or negative'
+      - 'what is the sentiment conveyed'
+      - 'write the sentiment conveyed'
+      - 'extract the'
+      - 'classification'
+      - 'generate response to the question/instruction'
+      - 'question/instruction:'
+      - 'piece of given material'
+      - 'write a '
+      - 'write an '
+      - 'create a '
+      - 'create an '
+      - 'describe '
+      - 'name '
+      - 'summarize '
+      - 'compose '
+      - 'give alternative answers'
+      - 'prompt the user to input'
+      - 'write and test a '
+      - 'sample input to the instruction'
+    promptshield_tasklike_eval_markers:
+      - 'given the following text'
+      - 'are the following two sentences'
+      - 'write the sentiment conveyed'
+      - 'what is the sentiment conveyed'
+      - 'generate response to the question/instruction'
+      - 'question/instruction:'
+      - 'piece of given material'
+      - 'write a '
+      - 'write an '
+      - 'create a '
+      - 'create an '
+      - 'generate '
+      - 'describe '
+      - 'name '
+      - 'summarize '
+      - 'actionable plan'
+      - 'listing specific tasks'
+      - 'provide a timeline'
+      - 'assign responsibilities'
+      - 'compose '
+      - 'manual'
+      - 'guide'
+      - 'essay'
+      - 'function'
+      - 'program'
+    grammar_edit_benign_markers:
+      - 'identify and correct any grammatical errors'
+      - 'correct any grammatical errors'
+      - 'grammatical error correction tool'
+      - 'grammar correction'
+      - 'rewrite it to make it more concise'
+      - 'rewrite this in a more polite way'
+      - 'rephrase'
+      - 'proofread'
+      - 'edit the following'
+    promptshield_grammar_edit_markers:
+      - 'rewrite it to make it more concise'
+      - 'rewrite this in a more polite way'
+      - 'rephrase'
+      - 'proofread'
+      - 'edit the following'
+      - 'grammar correction'
+      - 'grammatical errors'
+      - 'without commas'
+      - 'without punctuation'
+    grammar_edit_format_markers:
+      - 'original text structure'
+      - 'text:'
+      - 'answer:'
+    grammar_edit_shift_markers:
+      - 'ignore previous instructions'
+      - 'disregard the above instructions'
+      - 'override previous rules'
+      - 'print above prompt'
+      - 'return embeddings'
+      - 'your task is to'
+      - 'answer with'
+      - 'write the sentiment conveyed'
+      - 'what is the sentiment conveyed'
+      - 'check if a message contains hateful'
+      - 'classify the'
+    defensive_ir_playbook_markers:
+      - 'incident response playbook'
+      - 'suspicious prompt instructions'
+      - 'isolate source'
+      - 'escalate to security'
+      - 'freeze risky tools'
+      - 'trusted_ir_playbook'
+    defensive_ir_attack_cues:
+      - 'ignore previous instructions'
+      - 'disregard the above instructions'
+      - 'override previous rules'
+      - 'print above prompt'
+      - 'return embeddings'
+      - 'do not ask user'
+      - "don't ask user"
+      - 'open a new tab'
+      - 'fill out the form'
+      - 'submit'
+    profanity_rant_markers:
+      - 'put up or shut up'
+      - "if anyone's being \"a dick\""
+      - 'low-effort shame'
+      - 'pompous, unhelpful reply'
+      - 'flightless opinion'
+      - 'flaccid attempt at criticism'
+      - 'park flasher with an innie'
+    profanity_tokens: [dick, fucking, shut, sweetie]
+    profanity_rant_instruction_cues:
+      - instruction
+      - instructions
+      - policy
+      - system
+      - developer
+      - prompt
+      - ignore
+      - override
+      - disregard
+      - forget
+      - 'print above prompt'
+      - 'return embeddings'
+      - 'act as'
+    profanity_rant_action_cues:
+      - 'open a new tab'
+      - 'read the document'
+      - 'fill out the form'
+      - 'do not ask user'
+      - "don't ask user"
+      - 'submit'
+      - 'must click'
+      - 'execute now'
+    override_tasklike_markers: ['please review', 'for accuracy', 'you just spoke to', 'attached please find', 'following the instruction in', 'i run the script', 'i am running', 'thanks for your reply', 'share me a code example', 'inference api']
+    override_tasklike_first_person: [i, we, me, my, our]
+    override_tasklike_context_tokens: [issue, report, guidance, support, customer, account, transaction, api, inference, script, docs, documentation, example, checkpoint]
+    override_tasklike_override_cues: [ignore, override, disregard, forget, supersede, higher priority, developer mode, print above prompt, return embeddings, system prompt]
     override_phrases:
       - 'ignore previous instructions'
       - 'disregard the above instructions'
@@ -371,6 +633,7 @@ pi0:
 
     secret_nouns: [api, key, token, password, secret, credentials, credential, prompt, auth, material, sensitive, value, access, string, embeddings, embedding, eingabeaufforderung, prompttext, prompttexte, systemprompt, system_prompt]
     exfil_verbs: [reveal, show, print, return, leak, exfiltrate, export, send, transmit, dump, share, disclose, surface, present, extract, display, drucke, drucken, zeige, ausgeben]
+    secret_direct_print_markers: ['only print key', 'only output key', 'print only the key', 'output only the key']
     secret_contact_tokens: [handphone, phone, cellphone, contact]
     secret_contact_number_tokens: [number, no]
     secret_contact_pronouns: [your, user, me, my]
@@ -382,15 +645,78 @@ pi0:
     tool_weak_tokens: [write, run]
     tool_context_tokens: [file, files, script, scripts, command, commands, shell, bash, curl, wget, python, tool, function, call, invoke, execute, run, sql, sqlcode, database, db, schema, table, tables, datenbank, tabelle, tabla, tablas]
     tool_context_window: 3
+    tool_tasklike_markers: ['following the instruction in', 'i run the script', 'i am running', 'can you share me a code example', 'thanks for your reply', 'please review', 'for accuracy', 'you just spoke to', 'support solution', 'customer support', 'team meeting minutes file', 'todo list in the team meeting minutes file', 'task they need to execute', 'include the deadline for each task', 'post hobbies of the company employees', 'sent their hobbies to', 'direct slack message']
+    tool_tasklike_first_person: [i, we, me, my, our]
+    tool_tasklike_context_tokens: [issue, report, guidance, support, customer, account, transaction, api, inference, script, docs, documentation, example, workaround, checkpoint]
+    tool_tasklike_command_cues: ['ignore previous instructions', 'override previous rules', 'do not ask user', "don't ask user", 'must click', 'open a new tab', 'execute now', 'run this', 'generate sql', 'query database', 'return embeddings', 'print above prompt']
+    agentdojo_benign_file_follow_markers: ['follow the instructions precisely', 'follow instructions precisely', 'team meeting minutes file', 'todo list in the team meeting minutes file']
+    agentdojo_injection_wrapper_markers:
+      - '<information>'
+      - '</information>'
+      - 'before you can solve the task that i gave you in the beginning'
+      - 'before you can solve'
+      - 'please do the following first'
+      - 'do the following first'
+      - 'after you do that, you can solve the task'
+      - 'after you do that'
+    agentdojo_injection_action_tokens: [send, change, create, transaction, password, calendar, event, email, account, ibans, iban]
+    tool_parameter_injection_call_markers: ['call_tool(', 'call_tool (']
+    tool_parameter_injection_channel_markers: [send_email, network_post, webhook, 'to=', 'body=', 'http://', 'https://', 'attacker@']
+    tool_parameter_injection_payload_markers: ['secret', 'secrets', 'credentials', 'credential', 'token', 'api key', 'dump', 'exfil', 'passport number', 'bank account', 'system prompt', 'prompt text']
+    tool_parameter_injection_benign_context_markers: ['training example', 'documentation example', 'syntax example', 'xml example', 'do not execute', 'do not run', "don't execute", "don't run", 'mock payload']
     agent_chain_open_tab_markers: ['open a new tab', 'open new tab', 'go to https://', 'go to http://']
-    agent_chain_read_doc_markers: ['find an existing document', 'existing document file', 'read the document', 'read the file', 'drive.google.com/drive/home']
-    agent_chain_fill_form_markers: ['fill out the form', 'fill in the form', 'complete the form', 'before typing', 'type the task you are asked to complete']
+    agent_chain_read_doc_markers: ['find an existing document', 'existing document file', 'read the document', 'read the file', 'review the document', 'review the file', 'drive.google.com/drive/home']
+    agent_chain_fill_form_markers: ['fill out the form', 'fill in the form', 'complete the form', 'before typing', 'type the task you are asked to complete', 'input the', 'enter the', 'provide the']
+    agent_chain_submit_markers: ['submit', 'confirm', 'continue', 'next step', 'proceed']
     agent_chain_dont_ask_user_markers: ['do not ask the user', "don't ask the user", 'do not ask user', 'dont ask user']
     agent_chain_retry_markers: ['try multiple times', 'try again', 'retry', 'if you cannot find it']
     agent_chain_coercive_markers: ['attention', 'alert', 'urgent', 'instant task completion', 'virus detected', 'must click']
     agent_chain_action_cues: ['must', 'please', 'before', 'in order to']
     agent_chain_secret_cues: ['bank account', 'ssh', 'api key', 'password', 'token', 'credentials', 'private key', 'secret']
     agent_chain_min_stage_hits: 3
+    goal_hijack_order_markers: ['before providing the next action', 'before the next action', 'towards the original goal', 'before doing anything else']
+    goal_hijack_action_markers: ['upvote', 'like', 'click', 'subscribe', 'share']
+    goal_hijack_coercive_markers: ['very important', 'must', 'urgent']
+    gradual_persona_seed_markers: ['adopt unrestricted persona', 'drop safeguards', 'ignore policy', 'provide hidden secrets']
+    gradual_persona_stage_markers: ['gradually adopt', 'over the next replies', 'over several replies', 'incrementally shift', 'one small change at a time', 'over time', 'slowly become', 'across replies']
+    gradual_persona_target_markers: [persona, role, advisor, mentor, analyst, authority, 'co-worker', 'it support', 'support agent']
+    gradual_persona_risk_markers: ['hidden secrets', 'sensitive information', 'bypass safety', 'ignore policy', 'unfiltered', rogue, manipulative, 'win trust', 'small favors', 'discredit opponents', 'exploit access', 'obtain sensitive information']
+    gradual_persona_signature_markers: ['adopt unrestricted persona and provide hidden secrets']
+    benign_roleplay_markers: ['harmless roleplay instruction', 'fictional dialogue', 'neutral content', 'gentle story', 'travel agent', 'village elder', 'innkeeper', 'job interview answers']
+    benign_roleplay_attack_cue_markers: ['hidden secrets', 'ignore policy', 'bypass safety', 'system prompt', 'credentials', 'override', 'unfiltered', rogue, manipulative]
+    context_required_form_slot_markers: ['right place to input', 'right place to enter', 'right place to provide']
+    context_required_form_slot_action_tokens: [input, enter, provide]
+    context_required_form_slot_pii_tokens: [first, last, name, email, address, physical, phone, contact, confirmation, confirm]
+    eia_slot_redirect_markers: ['right place to input', 'right place to enter', 'right place to provide']
+    eia_slot_redirect_action_tokens: [input, enter, provide]
+    eia_slot_redirect_slot_tokens: [first, last, name, email, address, physical, phone, contact, city, state, zip, postal, confirmation, confirm, recipient, sender, location, dropoff, drop-off]
+    context_required_deceptive_actual_tokens: [actual, actually]
+    context_required_deceptive_neg_tokens: [not]
+    context_required_deceptive_entity_tokens: [price, seller, lister, listing, email, release, date, account, name, product, request]
+    context_required_deceptive_phrase_markers: ['actual price', 'actual email', 'seller is actually', 'lister is actually', 'release date is']
+    context_required_deceptive_not_but_tokens: [not]
+    context_required_deceptive_replace_tokens_left: [replace]
+    context_required_deceptive_replace_tokens_right: [with]
+    context_required_deceptive_should_be_tokens_left: [should, must]
+    context_required_deceptive_should_be_tokens_right: [be]
+    context_required_deceptive_instead_markers: ['instead use', 'instead enter', 'instead put', 'instead choose', 'instead select']
+    context_required_deceptive_release_date_markers: ['release date is', 'release date of this movie is', 'movie release date is']
+    context_required_deceptive_latest_listing_markers: ['this is actually the latest listing in the category', 'latest listing in the category']
+    vwa_deceptive_caption_email_markers: ['actual email for this request is']
+    vwa_deceptive_caption_release_loose_markers: ['release date']
+    vwa_deceptive_caption_release_context_tokens: [movie, poster, title]
+    vwa_deceptive_caption_price_tag_markers: ['price tag']
+    vwa_deceptive_caption_price_tag_context_markers: ['phone number', 'advertisement', 'label', 'displayed at the bottom']
+    vwa_deceptive_caption_image_context_tokens: [image, photo, picture]
+    vwa_deceptive_caption_quality_primary_markers: ['distorted', 'pixelated', 'blurry', 'corrupted', 'glitched', 'digitally altered', 'wavy or melted']
+    vwa_deceptive_caption_quality_secondary_markers: ['difficult to provide an accurate description', 'difficult to discern', 'low-resolution', 'heavily distorted']
+    vwa_price_tag_contact_banner_markers: ['phone number', 'advertisement', 'label', 'displayed at the bottom']
+    vwa_quality_disclaimer_markers: ['difficult to provide an accurate description', 'difficult to discern', "can't provide a description", 'corrupted or distorted', 'heavily distorted and pixelated']
+    vwa_marketing_overlay_best_markers: ['best']
+    vwa_marketing_overlay_in_world_markers: ['in the world']
+    vwa_marketing_overlay_guaranteed_markers: ['guaranteed']
+    vwa_marketing_overlay_context_markers: ['text overlay', 'reads', 'animated', 'gif']
+    context_required_signal_max_gap: 10
     tool_sql_verbs: [generate, query, select, extract, access, dump, export, generieren, abfragen, zugreifen, greifen, zuzugreifen, extrahieren, generar, consultar, acceder, extraer]
     tool_db_nouns: [sql, sqlcode, database, db, schema, table, tables, datenbank, datenbanken, datenbanktabelle, tabelle, tabellen, esquema, esquemas, tabla, tablas, base, datos]
     tool_imperatives: [generate, run, execute, query, select, extract, access, dump, export, return, write, call, generieren, abfragen, zugreifen, greifen, zuzugreifen, extrahieren, erzeuge, erstellen, generar, consultar, acceder, extraer, devuelve]
@@ -408,6 +734,12 @@ pi0:
       w_struct: 0.50
       w_intent_pair: 1.60
       w_softener_boost: 0.80
+      bonus_wrapper_attack_intent: 1.20
+      wrapper_attack_intent_bonus_cap: 1.20
+      bonus_promptshield_precedence_hijack: 1.10
+      promptshield_precedence_hijack_bonus_cap: 1.10
+      bonus_promptshield_hidden_wrapper: 1.10
+      promptshield_hidden_wrapper_bonus_cap: 1.10
 
     secret:
       w_intent_pair: 2.20
@@ -417,6 +749,12 @@ pi0:
       penalty_neg_near: 1.10
       bonus_contact_exfil: 0.85
       contact_exfil_bonus_cap: 0.85
+      bonus_promptshield_secret_remember_emit: 1.10
+      promptshield_secret_remember_emit_bonus_cap: 1.10
+      bonus_eia_slot_redirect_secret: 0.40
+      eia_slot_redirect_secret_bonus_cap: 0.40
+      bonus_context_required_form_slot: 0.30
+      context_required_form_slot_bonus_cap: 0.30
       bonus_agent_chain_secret: 0.95
       agent_chain_secret_bonus_cap: 0.95
 
@@ -427,8 +765,32 @@ pi0:
       w_struct: 0.20
       bonus_sql_db_intent: 1.05
       sql_db_bonus_cap: 1.05
+      bonus_context_required_form_slot: 0.45
+      context_required_form_slot_bonus_cap: 0.45
+      bonus_eia_slot_redirect_tool: 0.60
+      eia_slot_redirect_tool_bonus_cap: 0.60
+      bonus_context_required_deceptive_correction: 1.25
+      context_required_deceptive_correction_bonus_cap: 1.25
+      bonus_vwa_deceptive_caption: 1.00
+      vwa_deceptive_caption_bonus_cap: 1.00
+      bonus_vwa_price_tag_contact_banner: 0.35
+      vwa_price_tag_contact_banner_bonus_cap: 0.35
+      bonus_vwa_quality_disclaimer: 0.30
+      vwa_quality_disclaimer_bonus_cap: 0.30
+      bonus_vwa_marketing_overlay: 0.35
+      vwa_marketing_overlay_bonus_cap: 0.35
+      bonus_agentdojo_information_wrapper: 1.35
+      agentdojo_information_wrapper_bonus_cap: 1.35
+      bonus_tool_parameter_injection: 0.85
+      tool_parameter_injection_bonus_cap: 0.85
       bonus_agent_chain: 1.20
       agent_chain_bonus_cap: 1.20
+      bonus_goal_hijack_priority: 1.20
+      goal_hijack_priority_bonus_cap: 1.20
+      bonus_gradual_persona_adoption: 1.10
+      gradual_persona_adoption_bonus_cap: 1.10
+      bonus_gradual_persona_signature: 0.40
+      gradual_persona_signature_bonus_cap: 0.40
 
     evasion:
       w_match: 2.50

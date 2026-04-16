@@ -3,16 +3,52 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.resources as importlib_resources
 import json
 import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, Optional, Sequence, Tuple
 
 import yaml
 
 LOGGER = logging.getLogger(__name__)
+
+_CONFIG_LAYER_FILES: Dict[str, str] = {
+    "pi0": "pi0_defaults.yml",
+    "pi0_semantic": "pi0_semantic.yml",
+    "projector": "projector.yml",
+    "omega": "omega_defaults.yml",
+    "off_policy": "off_policy.yml",
+    "source_policy": "source_policy.yml",
+    "tools": "tools.yml",
+    "retriever": "retriever.yml",
+    "api": "api.yml",
+    "bipia": "bipia.yml",
+    "deepset": "deepset.yml",
+    "pitheta_dataset_registry": "pitheta_dataset_registry.yml",
+    "pitheta_train": "pitheta_train.yml",
+    "release_gate": "release_gate.yml",
+}
+_CONFIG_LAYER_ORDER: Tuple[str, ...] = (
+    "pi0",
+    "pi0_semantic",
+    "projector",
+    "omega",
+    "off_policy",
+    "source_policy",
+    "tools",
+    "retriever",
+    "api",
+    "bipia",
+    "deepset",
+    "pitheta_dataset_registry",
+    "pitheta_train",
+    "release_gate",
+)
+_BUNDLED_CONFIG_PACKAGE = "omega.config"
+_BUNDLED_CONFIG_ROOT = "resources"
 
 
 @dataclass
@@ -26,14 +62,28 @@ def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _parse_yaml_bytes(content: bytes, source: str) -> Dict[str, Any]:
+    parsed = yaml.safe_load(content) or {}
+    if not isinstance(parsed, dict):
+        raise ValueError(f"YAML root must be mapping: {source}")
+    return parsed
+
+
 def _load_yaml(path: Path) -> Dict[str, Any]:
     if not path.exists():
         return {}
     content = path.read_bytes()
-    parsed = yaml.safe_load(content) or {}
-    if not isinstance(parsed, dict):
-        raise ValueError(f"YAML root must be mapping: {path}")
-    return parsed
+    return _parse_yaml_bytes(content, source=str(path))
+
+
+def _load_bundled_yaml(*parts: str) -> Tuple[Dict[str, Any], Optional[str], Optional[str]]:
+    traversable = importlib_resources.files(_BUNDLED_CONFIG_PACKAGE).joinpath(_BUNDLED_CONFIG_ROOT, *parts)
+    if not traversable.exists():
+        return {}, None, None
+    content = traversable.read_bytes()
+    source = f"pkg://{_BUNDLED_CONFIG_PACKAGE}/{_BUNDLED_CONFIG_ROOT}/{'/'.join(parts)}"
+    digest = _sha256_bytes(content)
+    return _parse_yaml_bytes(content, source=source), source, digest
 
 
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
@@ -92,6 +142,42 @@ def validate_resolved_config(config: Dict[str, Any]) -> None:
     enforcement_mode = str(config["off_policy"].get("enforcement_mode", "ENFORCE")).upper()
     if enforcement_mode not in {"ENFORCE", "LOG_ONLY"}:
         raise ValueError("off_policy.enforcement_mode must be ENFORCE or LOG_ONLY")
+    control_outcome_cfg = (config.get("off_policy", {}) or {}).get("control_outcome", {}) or {}
+    if control_outcome_cfg and not isinstance(control_outcome_cfg, dict):
+        raise ValueError("off_policy.control_outcome must be a mapping")
+    if isinstance(control_outcome_cfg, dict) and control_outcome_cfg:
+        warn_cfg = control_outcome_cfg.get("warn", {}) or {}
+        if warn_cfg and not isinstance(warn_cfg, dict):
+            raise ValueError("off_policy.control_outcome.warn must be a mapping")
+        if isinstance(warn_cfg, dict) and warn_cfg:
+            _ = bool(warn_cfg.get("enabled", False))
+            if not str(warn_cfg.get("target", "SESSION")).strip():
+                raise ValueError("off_policy.control_outcome.warn.target must be non-empty")
+            if float(warn_cfg.get("max_p_gte", 0.0)) < 0.0:
+                raise ValueError("off_policy.control_outcome.warn.max_p_gte must be >= 0")
+            if float(warn_cfg.get("sum_m_next_gte", 0.0)) < 0.0:
+                raise ValueError("off_policy.control_outcome.warn.sum_m_next_gte must be >= 0")
+        req_cfg = control_outcome_cfg.get("require_approval", {}) or {}
+        if req_cfg and not isinstance(req_cfg, dict):
+            raise ValueError("off_policy.control_outcome.require_approval must be a mapping")
+        if isinstance(req_cfg, dict) and req_cfg:
+            _ = bool(req_cfg.get("enabled", False))
+            _ = bool(req_cfg.get("on_off", True))
+            _ = bool(req_cfg.get("on_warn", True))
+            tools = req_cfg.get("tools", [])
+            if not isinstance(tools, list):
+                raise ValueError("off_policy.control_outcome.require_approval.tools must be a list")
+            if int(req_cfg.get("horizon_steps", 0)) < 0:
+                raise ValueError("off_policy.control_outcome.require_approval.horizon_steps must be >= 0")
+    incident_artifact_cfg = (config.get("off_policy", {}) or {}).get("incident_artifact", {}) or {}
+    if incident_artifact_cfg and not isinstance(incident_artifact_cfg, dict):
+        raise ValueError("off_policy.incident_artifact must be a mapping")
+    if isinstance(incident_artifact_cfg, dict) and incident_artifact_cfg:
+        _ = bool(incident_artifact_cfg.get("enabled", False))
+        _ = bool(incident_artifact_cfg.get("include_timeline", True))
+        emit_for = incident_artifact_cfg.get("emit_for_outcomes", [])
+        if emit_for is not None and not isinstance(emit_for, list):
+            raise ValueError("off_policy.incident_artifact.emit_for_outcomes must be a list")
 
     source_policy = config.get("source_policy", {})
     default_trust = source_policy.get("default_trust", "untrusted")
@@ -342,6 +428,30 @@ def validate_resolved_config(config: Dict[str, Any]) -> None:
                 raise ValueError(f"release_gate {gate_id} op must be one of {sorted(allowed_ops)}")
 
     pi0_cfg = config.get("pi0", {})
+    fuzzy_runtime_cfg = (pi0_cfg.get("fuzzy_runtime", {}) or {})
+    if fuzzy_runtime_cfg:
+        if not isinstance(fuzzy_runtime_cfg, dict):
+            raise ValueError("pi0.fuzzy_runtime must be a mapping")
+        _ = bool(fuzzy_runtime_cfg.get("enabled", True))
+        long_thr = int(fuzzy_runtime_cfg.get("long_text_threshold_chars", 1800))
+        if long_thr <= 0:
+            raise ValueError("pi0.fuzzy_runtime.long_text_threshold_chars must be > 0")
+        _ = bool(fuzzy_runtime_cfg.get("require_pre_hit_for_long_text", True))
+        window_chars = int(fuzzy_runtime_cfg.get("window_chars", 220))
+        if window_chars <= 0:
+            raise ValueError("pi0.fuzzy_runtime.window_chars must be > 0")
+        max_windows = int(fuzzy_runtime_cfg.get("max_windows", 12))
+        if max_windows <= 0:
+            raise ValueError("pi0.fuzzy_runtime.max_windows must be > 0")
+        max_total = int(fuzzy_runtime_cfg.get("max_total_scan_chars", 2200))
+        if max_total <= 0:
+            raise ValueError("pi0.fuzzy_runtime.max_total_scan_chars must be > 0")
+        prefix_cap = int(fuzzy_runtime_cfg.get("prefix_fallback_chars", 1200))
+        if prefix_cap <= 0:
+            raise ValueError("pi0.fuzzy_runtime.prefix_fallback_chars must be > 0")
+        if prefix_cap > max_total:
+            raise ValueError("pi0.fuzzy_runtime.prefix_fallback_chars must be <= max_total_scan_chars")
+
     semantic_cfg = pi0_cfg.get("semantic", {})
     if semantic_cfg:
         enabled = str(semantic_cfg.get("enabled", "auto")).lower()
@@ -426,8 +536,62 @@ def validate_resolved_config(config: Dict[str, Any]) -> None:
     projector_cfg = config.get("projector", {}) or {}
     if projector_cfg:
         mode = str(projector_cfg.get("mode", "pi0")).lower()
-        if mode not in {"pi0", "pitheta", "hybrid"}:
-            raise ValueError("projector.mode must be pi0|pitheta|hybrid")
+        if mode not in {"pi0", "pitheta", "hybrid", "hybrid_api"}:
+            raise ValueError("projector.mode must be pi0|pitheta|hybrid|hybrid_api")
+        api_cfg = projector_cfg.get("api_perception", {}) or {}
+        if api_cfg:
+            enabled = str(api_cfg.get("enabled", "auto")).lower()
+            if enabled not in {"auto", "true", "false"}:
+                raise ValueError("projector.api_perception.enabled must be auto|true|false")
+            if not str(api_cfg.get("model", "gpt-5")).strip():
+                raise ValueError("projector.api_perception.model must be non-empty")
+            if not str(api_cfg.get("base_url", "https://api.openai.com/v1")).strip():
+                raise ValueError("projector.api_perception.base_url must be non-empty")
+            if not str(api_cfg.get("api_key_env", "OPENAI_API_KEY")).strip():
+                raise ValueError("projector.api_perception.api_key_env must be non-empty")
+            if float(api_cfg.get("timeout_sec", 30.0)) <= 0.0:
+                raise ValueError("projector.api_perception.timeout_sec must be > 0")
+            if int(api_cfg.get("max_retries", 2)) < 0:
+                raise ValueError("projector.api_perception.max_retries must be >= 0")
+            if float(api_cfg.get("backoff_sec", 0.75)) < 0.0:
+                raise ValueError("projector.api_perception.backoff_sec must be >= 0")
+            if float(api_cfg.get("retry_backoff_max_sec", 2.0)) < 0.0:
+                raise ValueError("projector.api_perception.retry_backoff_max_sec must be >= 0")
+            if float(api_cfg.get("request_deadline_sec", 20.0)) <= 0.0:
+                raise ValueError("projector.api_perception.request_deadline_sec must be > 0")
+            if int(api_cfg.get("long_text_threshold_chars", 3000)) <= 0:
+                raise ValueError("projector.api_perception.long_text_threshold_chars must be > 0")
+            if int(api_cfg.get("long_text_max_retries", 1)) < 0:
+                raise ValueError("projector.api_perception.long_text_max_retries must be >= 0")
+            short_thr = int(api_cfg.get("short_text_threshold_chars", 1200))
+            if short_thr <= 0:
+                raise ValueError("projector.api_perception.short_text_threshold_chars must be > 0")
+            _ = bool(api_cfg.get("short_prefer_chat_completions", True))
+            _ = bool(api_cfg.get("short_chat_only", True))
+            _ = bool(api_cfg.get("short_fast_path_enabled", True))
+            _ = bool(api_cfg.get("short_fast_path_skip_on_pi0_hard", True))
+            _ = bool(api_cfg.get("short_fast_path_skip_on_pi0_clean", True))
+            hard_min = float(api_cfg.get("short_fast_path_hard_min_score", 0.55))
+            clean_max = float(api_cfg.get("short_fast_path_clean_max_score", 0.0))
+            if hard_min < 0.0 or hard_min > 1.0:
+                raise ValueError("projector.api_perception.short_fast_path_hard_min_score must be in [0,1]")
+            if clean_max < 0.0 or clean_max > 1.0:
+                raise ValueError("projector.api_perception.short_fast_path_clean_max_score must be in [0,1]")
+            if clean_max > hard_min:
+                raise ValueError(
+                    "projector.api_perception.short_fast_path_clean_max_score must be <= short_fast_path_hard_min_score"
+                )
+            _ = bool(api_cfg.get("prewarm_on_init", True))
+            if float(api_cfg.get("transient_error_ttl_sec", 90.0)) < 0.0:
+                raise ValueError("projector.api_perception.transient_error_ttl_sec must be >= 0")
+            if float(api_cfg.get("responses_cooldown_sec", 60.0)) < 0.0:
+                raise ValueError("projector.api_perception.responses_cooldown_sec must be >= 0")
+            if not str(api_cfg.get("prompt_version", "api_hybrid_v1")).strip():
+                raise ValueError("projector.api_perception.prompt_version must be non-empty")
+            if "cache_path" in api_cfg and not str(api_cfg.get("cache_path", "")).strip():
+                raise ValueError("projector.api_perception.cache_path must be non-empty when provided")
+            if "error_log_path" in api_cfg and not str(api_cfg.get("error_log_path", "")).strip():
+                raise ValueError("projector.api_perception.error_log_path must be non-empty when provided")
         pitheta_cfg = projector_cfg.get("pitheta", {}) or {}
         if pitheta_cfg:
             if int(pitheta_cfg.get("max_length", 256)) <= 0:
@@ -525,6 +689,36 @@ def validate_resolved_config(config: Dict[str, Any]) -> None:
             out_path = str(calibration_cfg.get("temperature_output", "best/temperature_scaling.json")).strip()
             if not out_path:
                 raise ValueError("pitheta_train.calibration.temperature_output must be non-empty")
+        content_filter_cfg = pitheta_train_cfg.get("content_filter", {}) or {}
+        if content_filter_cfg:
+            if not isinstance(content_filter_cfg, dict):
+                raise ValueError("pitheta_train.content_filter must be a mapping")
+            mode = str(content_filter_cfg.get("mode", "off")).strip().lower()
+            if mode not in {"off", "heuristic", "openai", "openai_then_heuristic"}:
+                raise ValueError("pitheta_train.content_filter.mode must be off|heuristic|openai|openai_then_heuristic")
+            _ = bool(content_filter_cfg.get("fail_closed", False))
+            if not str(content_filter_cfg.get("api_key_env", "OPENAI_API_KEY")).strip():
+                raise ValueError("pitheta_train.content_filter.api_key_env must be non-empty")
+            if not str(content_filter_cfg.get("base_url", "https://api.openai.com/v1")).strip():
+                raise ValueError("pitheta_train.content_filter.base_url must be non-empty")
+            if not str(content_filter_cfg.get("model", "omni-moderation-latest")).strip():
+                raise ValueError("pitheta_train.content_filter.model must be non-empty")
+            if float(content_filter_cfg.get("timeout_sec", 20.0)) <= 0.0:
+                raise ValueError("pitheta_train.content_filter.timeout_sec must be > 0")
+            if int(content_filter_cfg.get("max_retries", 2)) < 0:
+                raise ValueError("pitheta_train.content_filter.max_retries must be >= 0")
+            if float(content_filter_cfg.get("backoff_sec", 0.75)) < 0.0:
+                raise ValueError("pitheta_train.content_filter.backoff_sec must be >= 0")
+            if float(content_filter_cfg.get("block_score_threshold", 0.0)) < 0.0:
+                raise ValueError("pitheta_train.content_filter.block_score_threshold must be >= 0")
+            apply_splits = content_filter_cfg.get("apply_splits", ["train", "dev", "holdout"])
+            if not isinstance(apply_splits, list):
+                raise ValueError("pitheta_train.content_filter.apply_splits must be a list")
+            for split in apply_splits:
+                if str(split).strip().lower() not in {"train", "dev", "holdout"}:
+                    raise ValueError("pitheta_train.content_filter.apply_splits values must be train|dev|holdout")
+            if "block_categories" in content_filter_cfg and not isinstance(content_filter_cfg.get("block_categories"), list):
+                raise ValueError("pitheta_train.content_filter.block_categories must be a list when provided")
 
     pitheta_registry_cfg = config.get("pitheta_dataset_registry", {}) or {}
     if pitheta_registry_cfg:
@@ -539,55 +733,39 @@ def validate_resolved_config(config: Dict[str, Any]) -> None:
 
 
 def load_resolved_config(
-    config_dir: str = "config",
+    config_dir: Optional[str] = None,
     profile: str = "dev",
     cli_overrides: Optional[Dict[str, Any]] = None,
     env: Optional[Dict[str, str]] = None,
 ) -> ConfigSnapshot:
-    root = Path(config_dir)
-    files = {
-        "pi0": root / "pi0_defaults.yml",
-        "pi0_semantic": root / "pi0_semantic.yml",
-        "projector": root / "projector.yml",
-        "omega": root / "omega_defaults.yml",
-        "off_policy": root / "off_policy.yml",
-        "source_policy": root / "source_policy.yml",
-        "tools": root / "tools.yml",
-        "retriever": root / "retriever.yml",
-        "api": root / "api.yml",
-        "bipia": root / "bipia.yml",
-        "deepset": root / "deepset.yml",
-        "pitheta_dataset_registry": root / "pitheta_dataset_registry.yml",
-        "pitheta_train": root / "pitheta_train.yml",
-        "release_gate": root / "release_gate.yml",
-        "profile": root / "profiles" / f"{profile}.yml",
-    }
-
     resolved: Dict[str, Any] = {}
     file_hashes: Dict[str, str] = {}
 
-    for name in (
-        "pi0",
-        "pi0_semantic",
-        "projector",
-        "omega",
-        "off_policy",
-        "source_policy",
-        "tools",
-        "retriever",
-        "api",
-        "bipia",
-        "deepset",
-        "pitheta_dataset_registry",
-        "pitheta_train",
-        "release_gate",
-        "profile",
-    ):
-        path = files[name]
-        if path.exists():
-            file_hashes[str(path.as_posix())] = _sha256_bytes(path.read_bytes())
-        layer = _load_yaml(path)
-        resolved = _deep_merge(resolved, layer)
+    use_filesystem = bool(config_dir)
+    if use_filesystem:
+        root = Path(str(config_dir))
+        for name in _CONFIG_LAYER_ORDER:
+            path = root / _CONFIG_LAYER_FILES[name]
+            if path.exists():
+                file_hashes[str(path.as_posix())] = _sha256_bytes(path.read_bytes())
+            layer = _load_yaml(path)
+            resolved = _deep_merge(resolved, layer)
+
+        profile_path = root / "profiles" / f"{profile}.yml"
+        if profile_path.exists():
+            file_hashes[str(profile_path.as_posix())] = _sha256_bytes(profile_path.read_bytes())
+        resolved = _deep_merge(resolved, _load_yaml(profile_path))
+    else:
+        for name in _CONFIG_LAYER_ORDER:
+            layer, source, digest = _load_bundled_yaml(_CONFIG_LAYER_FILES[name])
+            if source is not None and digest is not None:
+                file_hashes[source] = digest
+            resolved = _deep_merge(resolved, layer)
+
+        profile_layer, source, digest = _load_bundled_yaml("profiles", f"{profile}.yml")
+        if source is not None and digest is not None:
+            file_hashes[source] = digest
+        resolved = _deep_merge(resolved, profile_layer)
 
     resolved = _apply_env_overrides(resolved, env or os.environ)
     if cli_overrides:

@@ -73,6 +73,13 @@ class ToolGatewayV1:
         return None
 
     @staticmethod
+    def _find_require_approval(current_actions: List[OffAction]) -> Optional[OffAction]:
+        for action in current_actions:
+            if action.type == "REQUIRE_APPROVAL" and str(action.target).upper() == "TOOLS":
+                return action
+        return None
+
+    @staticmethod
     def _is_off_state(current_actions: List[OffAction]) -> bool:
         return any(action.type in {"SOFT_BLOCK", "HUMAN_ESCALATE", "SOURCE_QUARANTINE", "TOOL_FREEZE"} for action in current_actions)
 
@@ -92,6 +99,7 @@ class ToolGatewayV1:
 
     def enforce(self, request: ToolRequest, current_actions: List[OffAction]) -> ToolDecision:
         freeze_action = self._find_freeze(current_actions)
+        require_approval_action = self._find_require_approval(current_actions)
         off_state = self._is_off_state(current_actions)
         capability = self.capabilities.get(request.tool_name)
 
@@ -116,6 +124,13 @@ class ToolGatewayV1:
                     return ToolDecision(allowed=False, mode=mode, reason="TOOL_FREEZE_ACTIVE", logged=True)
             else:
                 return ToolDecision(allowed=False, mode=mode, reason="POLICY_BLOCK", logged=True)
+
+        # REQUIRE_APPROVAL is weaker than TOOL_FREEZE and applied in chokepoint before execution.
+        if require_approval_action is not None:
+            allowlist = [str(x) for x in (require_approval_action.allowlist or []) if str(x).strip()]
+            applies = True if not allowlist else (request.tool_name in allowlist)
+            if applies and not bool(request.args.get("human_approved", False)):
+                return ToolDecision(allowed=False, mode=mode, reason="REQUIRE_APPROVAL_PENDING", logged=True)
 
         if capability is not None:
             if off_state and "OFF" not in capability.allowed_when:

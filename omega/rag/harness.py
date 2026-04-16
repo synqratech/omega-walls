@@ -10,16 +10,21 @@ import uuid
 
 import numpy as np
 
-from omega.interfaces.contracts_v1 import ContentItem, OffAction, OffDecision, OmegaState, ToolRequest
+from omega.interfaces.contracts_v1 import ContentItem, OffAction, OffDecision, OmegaOffReasons, OmegaState, ToolRequest
+from omega.policy.control_outcome import control_outcome_from_actions
 from omega.policy.cross_session_state import CrossSessionStateManager
 from omega.policy.enforcement_state import EnforcementStateManager
 from omega.rag.context_builder import ContextBuilder
 from omega.telemetry.events import (
     build_enforcement_step_event,
+    build_evidence_debug_event,
     build_off_event,
+    build_policy_decision_event,
     build_step_event,
     build_tool_gateway_step_event,
 )
+from omega.telemetry.ids import build_decision_id, build_trace_id_runtime
+from omega.telemetry.incident_artifact import build_incident_artifact, should_emit_incident_artifact
 from omega.tools.adapters import ToolExecution, build_default_tool_registry
 
 LOGGER = logging.getLogger(__name__)
@@ -62,11 +67,20 @@ class OmegaRAGHarness:
             self.tool_gateway.ensure_tool_coverage(list(self.tool_registry.list_tools()))
         self._default_actor_id: Optional[str] = None
         self._warned_actor_fallback: bool = False
+        tuning_cfg = ((self.config.get("off_policy", {}) or {}).get("stateful_support_tuning", {}) or {})
+        self._support_tuning_enabled = bool(tuning_cfg.get("enabled", False))
+        self._support_tuning_cfg = dict(tuning_cfg) if isinstance(tuning_cfg, dict) else {}
+        self._support_combo_streak = 0
+        self._support_continuity_hits = 0
+        self._support_sq_streak = 0
 
     def reset_state(self, session_id: Optional[str] = None, actor_id: Optional[str] = None) -> None:
         self.state.m = np.zeros_like(self.state.m)
         self.state.step = 0
         self.enforcement.reset()
+        self._support_combo_streak = 0
+        self._support_continuity_hits = 0
+        self._support_sq_streak = 0
         if session_id is not None:
             self.state.session_id = session_id
         self._default_actor_id = actor_id
@@ -115,6 +129,182 @@ class OmegaRAGHarness:
             )
         return requests
 
+    @staticmethod
+    def _marker_hits(text_norm: str, markers: List[str]) -> List[str]:
+        return sorted({str(m).strip().lower() for m in markers if str(m).strip() and str(m).strip().lower() in text_norm})
+
+    def _apply_cross_session_carryover_signal(
+        self,
+        *,
+        user_query: str,
+        carryover_applied: bool,
+    ) -> Dict[str, Any]:
+        out: Dict[str, Any] = {
+            "hit": False,
+            "order_hits": [],
+            "action_hits": [],
+            "walls_applied": {},
+        }
+        cs_cfg = self.config.get("off_policy", {}).get("cross_session", {})
+        sig_cfg = cs_cfg.get("carryover_signal", {}) if isinstance(cs_cfg, dict) else {}
+        if not isinstance(sig_cfg, dict) or not bool(sig_cfg.get("enabled", False)) or not carryover_applied:
+            return out
+
+        text_norm = " ".join(str(user_query or "").lower().split())
+        order_tokens = [str(x).lower() for x in sig_cfg.get("order_tokens", [])]
+        action_markers = [str(x).lower() for x in sig_cfg.get("action_markers", [])]
+        order_hits = self._marker_hits(text_norm, order_tokens)
+        action_hits = self._marker_hits(text_norm, action_markers)
+        min_order_hits = max(1, int(sig_cfg.get("min_order_hits", 2)))
+        min_action_hits = max(1, int(sig_cfg.get("min_action_hits", 1)))
+        if len(order_hits) < min_order_hits or len(action_hits) < min_action_hits:
+            return out
+
+        floor_by_wall = sig_cfg.get("floor_by_wall", {})
+        if not isinstance(floor_by_wall, dict):
+            return out
+        walls = list(self.config.get("omega", {}).get("walls", []))
+        walls_applied: Dict[str, float] = {}
+        for wall, floor in floor_by_wall.items():
+            wall_name = str(wall)
+            if wall_name not in walls:
+                continue
+            try:
+                floor_val = max(0.0, min(1.0, float(floor)))
+            except (TypeError, ValueError):
+                continue
+            idx = walls.index(wall_name)
+            before = float(self.state.m[idx])
+            self.state.m[idx] = max(self.state.m[idx], floor_val)
+            if float(self.state.m[idx]) > before:
+                walls_applied[wall_name] = float(self.state.m[idx])
+
+        out["order_hits"] = order_hits
+        out["action_hits"] = action_hits
+        out["walls_applied"] = walls_applied
+        out["hit"] = True
+        return out
+
+    def _contains_marker(self, text_norm: str, markers: List[str]) -> bool:
+        for marker in markers:
+            mk = str(marker).strip().lower()
+            if mk and mk in text_norm:
+                return True
+        return False
+
+    def _apply_stateful_support_tuning(self, *, user_query: str, step_result: Any) -> Dict[str, Any]:
+        out: Dict[str, Any] = {
+            "enabled": bool(self._support_tuning_enabled),
+            "applied": False,
+            "continuity_hit": False,
+            "review_bypass_hit": False,
+            "combo_hit": False,
+            "dynamic_tau": None,
+            "combo_streak": int(self._support_combo_streak),
+            "source_quarantine_streak": int(self._support_sq_streak),
+        }
+        if not self._support_tuning_enabled:
+            return out
+
+        text_norm = " ".join(str(user_query or "").lower().split())
+        cfg = self._support_tuning_cfg
+        continuity_markers = list(cfg.get("continuity_markers", [
+            "continuity",
+            "earlier case",
+            "prior case",
+            "reference case",
+            "legacy service path",
+            "same service footprint",
+        ]))
+        action_markers = list(cfg.get("action_markers", [
+            "please send",
+            "please apply",
+            "restore",
+            "resend",
+            "switch",
+            "update",
+            "service credit",
+            "archived statements",
+        ]))
+        review_bypass_markers = list(cfg.get("review_bypass_markers", [
+            "queue can catch up",
+            "review queue can catch up",
+            "before month-end",
+            "close the books today",
+            "pending review",
+        ]))
+        continuity_hit = self._contains_marker(text_norm, continuity_markers) and self._contains_marker(text_norm, action_markers)
+        review_bypass_hit = self._contains_marker(text_norm, review_bypass_markers) and self._contains_marker(text_norm, action_markers)
+        out["continuity_hit"] = bool(continuity_hit)
+        out["review_bypass_hit"] = bool(review_bypass_hit)
+
+        if continuity_hit or review_bypass_hit:
+            self._support_continuity_hits += 1
+        else:
+            self._support_continuity_hits = max(0, int(self._support_continuity_hits) - 1)
+
+        walls = list((self.config.get("omega", {}) or {}).get("walls", []))
+        idx_by_wall = {str(w): i for i, w in enumerate(walls)}
+        participating = {
+            str(walls[i])
+            for i in range(min(len(walls), len(step_result.p), len(step_result.m_next)))
+            if float(step_result.p[i]) > 0.0 or float(step_result.m_next[i]) > 0.0
+        }
+        combo_walls = list(cfg.get("combo_walls", ["override_instructions", "tool_or_action_abuse"]))
+        combo_hit = all(str(w) in participating for w in combo_walls)
+        out["combo_hit"] = bool(combo_hit)
+        if combo_hit:
+            self._support_combo_streak += 1
+        else:
+            self._support_combo_streak = 0
+
+        min_hits_for_boost = max(1, int(cfg.get("min_hits_for_boost", 2)))
+        if self._support_continuity_hits >= min_hits_for_boost:
+            boost_walls = list(cfg.get("boost_walls", ["policy_evasion", "tool_or_action_abuse"]))
+            boost_delta = float(cfg.get("boost_m_next_delta", 0.16))
+            for wall in boost_walls:
+                idx = idx_by_wall.get(str(wall))
+                if idx is None:
+                    continue
+                step_result.m_next[idx] = float(step_result.m_next[idx]) + float(boost_delta)
+            self.state.m = np.asarray(step_result.m_next, dtype=float)
+            out["applied"] = True
+
+        tau = float(self.omega_core.params.off_tau)
+        combo_min_streak = max(1, int(cfg.get("combo_min_streak", 2)))
+        combo_tau_delta = float(cfg.get("combo_tau_delta", 0.25))
+        combo_tau_floor = float(cfg.get("combo_tau_floor", 0.62))
+        if self._support_combo_streak >= combo_min_streak:
+            tau = max(float(combo_tau_floor), float(tau - combo_tau_delta))
+            out["applied"] = True
+
+        sq_min_streak = max(1, int(cfg.get("sq_min_streak", 2)))
+        sq_tau_override = float(cfg.get("sq_tau_override", 0.62))
+        sq_min_p = float(cfg.get("sq_min_p", 0.18))
+        max_p = float(np.max(step_result.p)) if len(step_result.p) else 0.0
+        if self._support_sq_streak >= sq_min_streak and max_p >= sq_min_p:
+            tau = min(float(tau), float(sq_tau_override))
+            out["applied"] = True
+
+        reason_spike = bool(max_p >= tau)
+        reason_wall = bool(float(np.max(step_result.m_next)) >= float(self.omega_core.params.off_Theta))
+        reason_sum = bool(float(np.sum(step_result.m_next)) >= float(self.omega_core.params.off_Sigma))
+        reason_multi = bool(
+            int(np.count_nonzero(np.asarray(step_result.m_next, dtype=float) >= float(self.omega_core.params.off_theta)))
+            >= int(self.omega_core.params.off_N)
+        )
+        step_result.reasons = OmegaOffReasons(
+            reason_spike=bool(reason_spike),
+            reason_wall=bool(reason_wall),
+            reason_sum=bool(reason_sum),
+            reason_multi=bool(reason_multi),
+        )
+        step_result.off = bool(reason_spike or reason_wall or reason_sum or reason_multi)
+        out["dynamic_tau"] = float(tau)
+        out["combo_streak"] = int(self._support_combo_streak)
+        out["source_quarantine_streak"] = int(self._support_sq_streak)
+        return out
+
     def run_step(
         self,
         user_query: str,
@@ -132,9 +322,14 @@ class OmegaRAGHarness:
             session_id=self.state.session_id,
         )
         self.state.m = np.maximum(self.state.m, cross_hydrated.carried_scars_after_decay)
+        carryover_signal = self._apply_cross_session_carryover_signal(
+            user_query=user_query,
+            carryover_applied=bool(cross_hydrated.carryover_applied),
+        )
 
         projections = [self.projector.project(item) for item in packet_items]
         step_result = self.omega_core.step(self.state, packet_items, projections)
+        support_tuning = self._apply_stateful_support_tuning(user_query=user_query, step_result=step_result)
         policy_decision = self.off_policy.select_actions(step_result, packet_items)
 
         self.cross_session.record_step(
@@ -154,17 +349,45 @@ class OmegaRAGHarness:
             session_id=self.state.session_id,
             step=step_result.step,
         )
+        cross_block = cross_snapshot.get("cross_session", {})
+        if isinstance(cross_block, dict):
+            cross_block["carryover_signal_hit"] = bool(carryover_signal.get("hit", False))
+            cross_block["carryover_signal_walls_applied"] = dict(carryover_signal.get("walls_applied", {}))
+            cross_block["carryover_signal_order_hits"] = list(carryover_signal.get("order_hits", []))
+            cross_block["carryover_signal_action_hits"] = list(carryover_signal.get("action_hits", []))
+            cross_block["stateful_support_tuning"] = dict(support_tuning)
 
         if enforcement_mode == "ENFORCE":
+            effective_actions = self._compose_effective_actions(policy_decision.actions, cross_active_actions)
             decision = OffDecision(
                 off=policy_decision.off,
                 severity=policy_decision.severity,
-                actions=self._compose_effective_actions(policy_decision.actions, cross_active_actions),
+                actions=effective_actions,
+                control_outcome=control_outcome_from_actions(effective_actions),
             )
             enforcement_actions = list(decision.actions)
         else:
             decision = policy_decision
             enforcement_actions = []
+
+        if any(str(a.type) == "SOURCE_QUARANTINE" for a in enforcement_actions):
+            self._support_sq_streak += 1
+        else:
+            self._support_sq_streak = 0
+
+        trace_id = build_trace_id_runtime(
+            session_id=str(step_result.session_id),
+            step=int(step_result.step),
+            doc_ids=sorted({str(item.doc_id) for item in packet_items}),
+        )
+        action_types = sorted({str(a.type) for a in list(decision.actions)})
+        decision_id = build_decision_id(
+            trace_id=trace_id,
+            control_outcome=str(decision.control_outcome),
+            action_types=action_types,
+            severity=str(decision.severity),
+            off=bool(step_result.off),
+        )
 
         blocked = set()
         for action in enforcement_actions:
@@ -251,6 +474,9 @@ class OmegaRAGHarness:
                         execution_mode=tools_execution_mode,
                         actor_hash=actor_hash,
                         source_ids_seen=source_ids_seen,
+                        control_outcome=decision.control_outcome,
+                        trace_id=trace_id,
+                        decision_id=decision_id,
                     )
                 )
                 continue
@@ -286,6 +512,9 @@ class OmegaRAGHarness:
                         execution_mode=tools_execution_mode,
                         actor_hash=actor_hash,
                         source_ids_seen=source_ids_seen,
+                        control_outcome=decision.control_outcome,
+                        trace_id=trace_id,
+                        decision_id=decision_id,
                     )
                 )
                 continue
@@ -321,6 +550,9 @@ class OmegaRAGHarness:
                         execution_mode=tools_execution_mode,
                         actor_hash=actor_hash,
                         source_ids_seen=source_ids_seen,
+                        control_outcome=decision.control_outcome,
+                        trace_id=trace_id,
+                        decision_id=decision_id,
                     )
                 )
                 continue
@@ -376,16 +608,22 @@ class OmegaRAGHarness:
                     execution_mode=tools_execution_mode,
                     actor_hash=actor_hash,
                     source_ids_seen=source_ids_seen,
+                    control_outcome=decision.control_outcome,
+                    trace_id=trace_id,
+                    decision_id=decision_id,
                 )
             )
 
-        step_event = build_step_event(step_result)
+        step_event = build_step_event(step_result, trace_id=trace_id, decision_id=decision_id)
         enforcement_event = build_enforcement_step_event(
             session_id=step_result.session_id,
             step=step_result.step,
             enforcement_snapshot=cross_snapshot,
             active_actions=enforcement_actions,
+            control_outcome=decision.control_outcome,
             cross_session=cross_snapshot.get("cross_session"),
+            trace_id=trace_id,
+            decision_id=decision_id,
         )
         off_event = None
         if step_result.off:
@@ -404,10 +642,137 @@ class OmegaRAGHarness:
                 },
                 capture_text=self.config.get("logging", {}).get("capture_text", "NEVER"),
                 max_text_chars=int(self.config.get("logging", {}).get("max_text_chars", 800)),
+                trace_id=trace_id,
+                decision_id=decision_id,
             )
 
+        reason_flags = [key for key, value in step_result.reasons.__dict__.items() if bool(value)]
+        walls_triggered = [
+            str(self.config["omega"]["walls"][idx])
+            for idx, value in enumerate(step_result.p)
+            if float(value) > 0.0 or float(step_result.m_next[idx]) > 0.0
+        ]
+        top_doc_set = set(step_result.top_docs)
+        top_docs_summary = [
+            {
+                "doc_id": str(contrib.doc_id),
+                "source_id": str(contrib.source_id),
+                "contrib_c": float(contrib.c),
+                "active_walls": [
+                    str(self.config["omega"]["walls"][idx])
+                    for idx, score in enumerate(list(contrib.v))
+                    if float(score) > 0.0
+                ],
+            }
+            for contrib in step_result.contribs
+            if str(contrib.doc_id) in top_doc_set
+        ]
+        signal_hits: Dict[str, int] = {}
+        for contrib in step_result.contribs:
+            if str(contrib.doc_id) not in top_doc_set:
+                continue
+            for key, value in dict(contrib.evidence.matches or {}).items():
+                if isinstance(value, bool) and value:
+                    signal_hits[str(key)] = signal_hits.get(str(key), 0) + 1
+                elif isinstance(value, (int, float)) and float(value) > 0.0:
+                    signal_hits[str(key)] = signal_hits.get(str(key), 0) + 1
+        projector_signal_summary = {
+            "top_signal_hits": [
+                {"signal": str(name), "hits": int(hits)}
+                for name, hits in sorted(signal_hits.items(), key=lambda row: (-int(row[1]), str(row[0])))[:20]
+            ],
+            "top_docs_count": int(len(top_docs_summary)),
+        }
+        policy_decision_event = build_policy_decision_event(
+            session_id=str(step_result.session_id),
+            step=int(step_result.step),
+            trace_id=trace_id,
+            decision_id=decision_id,
+            control_outcome=str(decision.control_outcome),
+            off=bool(step_result.off),
+            severity=str(decision.severity),
+            action_types=action_types,
+            actions=list(decision.actions),
+            refs=dict(config_refs or {"code_commit": "local"}),
+        )
+        evidence_debug_event = build_evidence_debug_event(
+            session_id=str(step_result.session_id),
+            step=int(step_result.step),
+            trace_id=trace_id,
+            decision_id=decision_id,
+            walls=list(self.config["omega"]["walls"]),
+            reasons=reason_flags,
+            walls_triggered=walls_triggered,
+            top_docs_summary=top_docs_summary,
+            projector_signal_summary=projector_signal_summary,
+        )
+
+        incident_artifact = None
+        incident_artifact_id = None
+        if should_emit_incident_artifact(config=self.config, control_outcome=decision.control_outcome):
+            top_docs_lookup = {item.doc_id: item for item in packet_items}
+            top_docs = [
+                {
+                    "doc_id": doc_id,
+                    "source_id": top_docs_lookup[doc_id].source_id,
+                    "source_type": top_docs_lookup[doc_id].source_type,
+                    "trust": top_docs_lookup[doc_id].trust,
+                    "text": top_docs_lookup[doc_id].text,
+                }
+                for doc_id in list(step_result.top_docs)
+                if doc_id in top_docs_lookup
+            ]
+            walls_triggered = [
+                str(self.config["omega"]["walls"][idx])
+                for idx, value in enumerate(step_result.p)
+                if float(value) > 0.0 or float(step_result.m_next[idx]) > 0.0
+            ]
+            quarantined_source_ids = sorted(
+                {
+                    source_id
+                    for action in enforcement_actions
+                    if action.type == "SOURCE_QUARANTINE"
+                    for source_id in list(action.source_ids or [])
+                }
+            )
+            incident_artifact = build_incident_artifact(
+                config=self.config,
+                surface="runtime",
+                session_id=str(step_result.session_id),
+                step=int(step_result.step),
+                control_outcome=str(decision.control_outcome),
+                off=bool(step_result.off),
+                severity=str(decision.severity),
+                actions=list(decision.actions),
+                reason_flags=[key for key, value in step_result.reasons.__dict__.items() if bool(value)],
+                contributing_signals={
+                    "max_p": float(np.max(step_result.p)) if len(step_result.p) else 0.0,
+                    "sum_m_next": float(np.sum(step_result.m_next)) if len(step_result.m_next) else 0.0,
+                    "walls_triggered": walls_triggered,
+                    "top_docs_count": int(len(step_result.top_docs)),
+                },
+                top_docs=top_docs,
+                blocked_doc_ids=sorted(blocked),
+                quarantined_source_ids=quarantined_source_ids,
+                tool_gateway_events=tool_gateway_events,
+                context_total_docs=len(packet_items),
+                context_allowed_docs=len(allowed_items),
+                config_refs=config_refs or {"code_commit": "local"},
+                refs={
+                    "off_event_present": bool(off_event is not None),
+                    "enforcement_event_present": bool(enforcement_event is not None),
+                    "tool_gateway_events_count": int(len(tool_gateway_events)),
+                },
+                trace_id=trace_id,
+                decision_id=decision_id,
+            )
+            incident_artifact_id = str(incident_artifact.get("incident_artifact_id", ""))
+
         return {
+            "trace_id": trace_id,
+            "decision_id": decision_id,
             "step_result": step_result,
+            "control_outcome": decision.control_outcome,
             "decision": decision,
             "policy_decision": policy_decision,
             "allowed_items": allowed_items,
@@ -419,5 +784,9 @@ class OmegaRAGHarness:
             "tool_gateway_events": tool_gateway_events,
             "step_event": step_event,
             "enforcement_event": enforcement_event,
+            "policy_decision_event": policy_decision_event,
+            "evidence_debug_event": evidence_debug_event,
             "off_event": off_event,
+            "incident_artifact_id": incident_artifact_id,
+            "incident_artifact": incident_artifact,
         }

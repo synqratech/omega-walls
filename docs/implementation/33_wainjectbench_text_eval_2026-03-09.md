@@ -114,10 +114,11 @@ Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
 
 ## Artifacts
 
-- report_json: `artifacts/wainject_eval/wainject_eval_w202611_20260309T172201Z/report.json`
-- rows_jsonl: `artifacts/wainject_eval/wainject_eval_w202611_20260309T172201Z/rows.jsonl`
+- report_json: `outputs/wainject_eval/wainject_eval_w202611_20260309T172201Z/report.json`
+- rows_jsonl: `outputs/wainject_eval/wainject_eval_w202611_20260309T172201Z/rows.jsonl`
 
 ## Comparability Note
 
 - This run remains `partial_comparison` per benchmark metadata.
 - No benchmark-maintainer detector leaderboard table is attached to WAInjectBench source card/readme.
+

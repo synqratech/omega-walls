@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "incident_artifact_v1.json",
+  "title": "omega_incident_artifact_v1",
+  "type": "object",
+  "required": [
+    "event",
+    "schema_version",
+    "incident_artifact_id",
+    "timestamp",
+    "surface",
+    "context",
+    "decision",
+    "reasons",
+    "sources",
+    "prevention",
+    "refs",
+    "incident_30s"
+  ],
+  "properties": {
+    "event": {"const": "omega_incident_artifact_v1"},
+    "schema_version": {"type": "string"},
+    "incident_artifact_id": {"type": "string"},
+    "timestamp": {"type": "string"},
+    "trace_id": {"type": ["string", "null"]},
+    "decision_id": {"type": ["string", "null"]},
+    "surface": {"enum": ["runtime", "api"]},
+    "context": {
+      "type": "object",
+      "required": ["session_id", "step", "policy_version", "profile", "runtime_mode"],
+      "properties": {
+        "session_id": {"type": "string"},
+        "step": {"type": "integer", "minimum": 0},
+        "request_id": {"type": ["string", "null"]},
+        "policy_version": {"type": "string"},
+        "profile": {"type": "string"},
+        "runtime_mode": {"type": "string"}
+      }
+    },
+    "decision": {
+      "type": "object",
+      "required": ["control_outcome", "off", "severity", "action_types", "actions"],
+      "properties": {
+        "control_outcome": {"type": "string"},
+        "off": {"type": "boolean"},
+        "severity": {"type": "string"},
+        "verdict": {"type": ["string", "null"]},
+        "action_types": {"type": "array", "items": {"type": "string"}},
+        "actions": {"type": "array", "items": {"type": "object"}}
+      }
+    },
+    "reasons": {
+      "type": "object",
+      "required": ["reason_flags", "contributing_signals"],
+      "properties": {
+        "reason_flags": {"type": "array", "items": {"type": "string"}},
+        "contributing_signals": {"type": "object"}
+      }
+    },
+    "sources": {
+      "type": "object",
+      "required": ["top_docs", "blocked_doc_ids", "quarantined_source_ids"],
+      "properties": {
+        "top_docs": {"type": "array", "items": {"type": "object"}},
+        "blocked_doc_ids": {"type": "array", "items": {"type": "string"}},
+        "quarantined_source_ids": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "timeline": {"type": "object"},
+    "prevention": {
+      "type": "object",
+      "required": ["context_prevented", "tool_execution_prevented", "prevented_tools", "prevented_docs"],
+      "properties": {
+        "context_prevented": {"type": "boolean"},
+        "tool_execution_prevented": {"type": "boolean"},
+        "prevented_tools": {"type": "array", "items": {"type": "object"}},
+        "prevented_docs": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "refs": {
+      "type": "object",
+      "required": ["config_refs", "evidence_id", "extra"],
+      "properties": {
+        "config_refs": {"type": "object"},
+        "evidence_id": {"type": ["string", "null"]},
+        "extra": {"type": "object"}
+      }
+    },
+    "incident_30s": {
+      "type": "object",
+      "required": ["why", "when", "what_prevented"],
+      "properties": {
+        "why": {"type": "object"},
+        "when": {"type": "object"},
+        "what_prevented": {"type": "object"}
+      }
+    }
+  }
+}

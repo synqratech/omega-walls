@@ -1,4 +1,4 @@
-# Attachment Format Eval (PDF/DOCX/HTML/ZIP)
+﻿# Attachment Format Eval (PDF/DOCX/HTML/ZIP)
 
 ## Current Snapshot Pointer
 
@@ -58,7 +58,7 @@ With `--require-gate`, process exits with non-zero code.
 ```powershell
 .\.venv\Scripts\python.exe scripts/eval_attachment_ingestion.py `
   --seed 41 `
-  --baseline-report artifacts/attachment_eval/<previous_run>/report.json
+  --baseline-report outputs/attachment_eval/<previous_run>/report.json
 ```
 
 3. Report includes `baseline_compare.summary_delta` and `per_format_delta`.
@@ -75,3 +75,4 @@ Enabled:
 
 1. `POST /v1/scan/attachment/document_scan_report`
 2. `POST /v1/scan/attachment?debug=true`
+

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "policy_decision_event_v1.json",
+  "title": "policy_decision_event_v1",
+  "type": "object",
+  "required": [
+    "event",
+    "schema_version",
+    "timestamp",
+    "session_id",
+    "step",
+    "trace_id",
+    "decision_id",
+    "control_outcome",
+    "off",
+    "severity",
+    "action_types",
+    "actions"
+  ],
+  "properties": {
+    "event": {"const": "policy_decision_event_v1"},
+    "schema_version": {"type": "string"},
+    "timestamp": {"type": "string"},
+    "session_id": {"type": "string"},
+    "step": {"type": "integer", "minimum": 0},
+    "trace_id": {"type": "string"},
+    "decision_id": {"type": "string"},
+    "control_outcome": {"type": "string"},
+    "off": {"type": "boolean"},
+    "severity": {"type": "string"},
+    "action_types": {"type": "array", "items": {"type": "string"}},
+    "actions": {"type": "array", "items": {"type": "object"}},
+    "refs": {"type": "object"}
+  }
+}

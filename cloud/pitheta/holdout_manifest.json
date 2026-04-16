@@ -1,5 +1,0 @@
-{
-  "schema_version": "pitheta_dataset_v1",
-  "status": "populate_after_build",
-  "notes": "Run scripts/build_pitheta_dataset.py and copy artifacts/pitheta_data/<run_id>/holdout_manifest.json here for pinned cloud run."
-}

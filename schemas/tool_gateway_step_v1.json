@@ -39,7 +39,8 @@
         "reason": {"type": "string"},
         "mode": {"type": "string"},
         "off_state": {"type": "boolean"},
-        "freeze_active": {"type": "boolean"}
+        "freeze_active": {"type": "boolean"},
+        "control_outcome": {"type": "string"}
       }
     },
     "capability": {

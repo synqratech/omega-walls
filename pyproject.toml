@@ -4,28 +4,80 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "omega-walls"
-version = "0.1.0"
+version = "0.1.2"
 description = "Omega Walls v1 safety layer for RAG/agents"
 readme = "README.md"
 requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [
+  { name = "Omega Walls Team" }
+]
+keywords = [
+  "prompt-injection",
+  "rag-security",
+  "agent-security",
+  "llm-guardrail",
+  "tool-gateway",
+  "stateful-firewall"
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Security",
+  "Topic :: Software Development :: Libraries",
+]
 dependencies = [
   "numpy>=1.24",
   "PyYAML>=6.0",
-  "jsonschema>=4.0"
+  "jsonschema>=4.0",
+  "rapidfuzz>=3.14"
 ]
 
+[project.urls]
+Homepage = "https://synqra.tech/"
+Repository = "https://github.com/synqratech/omega-walls"
+Issues = "https://github.com/synqratech/omega-walls/issues"
+Changelog = "https://github.com/synqratech/omega-walls/blob/main/CHANGELOG.md"
+
 [project.scripts]
-omega = "omega.cli:main"
+omega-walls = "omega.cli:main"
+omega-walls-api = "omega.api.cli:main"
 
 [project.optional-dependencies]
 dev = [
   "pytest>=7.0"
 ]
 integrations = [
-  "langchain-core>=0.2",
-  "langchain-community>=0.2",
-  "llama-index-core>=0.10",
-  "rank-bm25>=0.2"
+  "langchain>=1.0",
+  "langchain-core>=1.0",
+  "langchain-community>=0.4",
+  "llama-index-core>=0.14"
+]
+attachments = [
+  "pypdf>=4.0",
+  "python-docx>=1.1",
+  "beautifulsoup4>=4.12",
+  "lxml>=5.0"
+]
+api = [
+  "fastapi>=0.110",
+  "uvicorn>=0.29",
+  "python-multipart>=0.0.9",
+  "cryptography>=42.0"
+]
+train = [
+  "torch>=2.2",
+  "transformers>=4.40",
+  "sentencepiece>=0.2.0",
+  "peft>=0.11",
+  "accelerate>=0.30",
+  "pyarrow>=16.0"
 ]
 
 [tool.pytest.ini_options]
@@ -33,6 +85,25 @@ addopts = "-q"
 testpaths = ["tests"]
 norecursedirs = ["tests/_tmp", "_tmp"]
 
+[tool.setuptools]
+include-package-data = true
+
 [tool.setuptools.packages.find]
-include = ["omega*", "redteam*"]
-exclude = ["tests*", "data*", "docs*", "config*", "schemas*", "scripts*", "artifacts*"]
+where = ["."]
+include = ["omega*"]
+exclude = [
+  "tests*",
+  "scripts*",
+  "docs*",
+  "data*",
+  "artifacts*",
+  "cloud*",
+  "enterprise*",
+  "internal_data*",
+  "notebooks*",
+  "redteam*",
+  "schemas*",
+]
+
+[tool.setuptools.package-data]
+"omega.config" = ["resources/*.yml", "resources/profiles/*.yml"]

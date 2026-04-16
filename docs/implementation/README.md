@@ -2,6 +2,10 @@
 
 Use this index to navigate current Omega Walls documentation.
 
+Note for Lean OSS:
+- These files are historical implementation snapshots and reproducibility notes.
+- Path examples under `outputs/` are archival references, not required for the 5-minute quickstart flow.
+
 ## Canonical current-state docs
 
 1. [30_reproducibility_snapshot_2026-03-09.md](30_reproducibility_snapshot_2026-03-09.md)  

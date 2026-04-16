@@ -1,0 +1,7 @@
+profiles:
+  env: pilot
+
+api:
+  debug:
+    enable_document_scan_report: true
+    max_report_chunks: 200

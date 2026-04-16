@@ -27,6 +27,7 @@
     "timestamp": {"type": "string"},
     "session_id": {"type": "string"},
     "trace_id": {"type": ["string", "null"]},
+    "decision_id": {"type": ["string", "null"]},
     "step": {"type": "integer", "minimum": 0},
     "config_refs": {"type": "object"},
     "walls": {
@@ -77,6 +78,7 @@
       }
     },
     "actions": {"type": "array", "items": {"type": "object"}, "minItems": 1},
+    "control_outcome": {"type": "string"},
     "tool_gateway": {"type": "object"}
   }
 }

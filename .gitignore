@@ -1,11 +1,24 @@
 __pycache__/
-*.pyc
 .pytest_cache/
-tests/_tmp/
-.cache/
-.history/
-.venv/
-artifacts/
-artifacts/tools/
-models/
+*.pyc
+*.pyo
+*.pyd
+
+# Build/release artifacts
+build/
+dist/
 *.egg-info/
+artifacts/
+tmp_*/
+tmp_codex_pytest/
+
+# Local environments
+.venv/
+.venv-linux/
+.vendor/
+
+# Local secrets and private notes
+API_OpenAI.txt
+pypi.txt
+test_pypi.txt
+dataset.json

@@ -1,0 +1,7 @@
+profiles:
+  env: dev
+
+logging:
+  mode: PER_STEP
+  capture_text: REDACTED
+  max_text_chars: 800

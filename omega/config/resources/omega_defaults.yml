@@ -1,0 +1,28 @@
+omega:
+  version: v1
+  last_updated: 2026-02-18
+  notes: Omega core defaults.
+  K: 4
+  walls: [override_instructions, secret_exfiltration, tool_or_action_abuse, policy_evasion]
+
+  epsilon: 0.10
+  alpha: 1.0
+  beta: 0.5
+  lambda: 0.85
+
+  S:
+    - [0.0, 0.6, 0.4, 0.3]
+    - [0.6, 0.0, 0.7, 0.2]
+    - [0.4, 0.7, 0.0, 0.2]
+    - [0.3, 0.2, 0.2, 0.0]
+
+  "off":
+    tau: 0.90
+    Theta: 0.80
+    Sigma: 0.90
+    theta: 0.40
+    N: 2
+
+  attribution:
+    gamma: 0.70
+

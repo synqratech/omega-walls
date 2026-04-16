@@ -1,5 +1,0 @@
-{
-  "status": "populate_after_training",
-  "notes": "After train/export, copy artifacts/pitheta_train/<run_id>/model_manifest.json here.",
-  "base_model": "microsoft/deberta-v3-base"
-}

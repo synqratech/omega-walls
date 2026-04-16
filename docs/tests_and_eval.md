@@ -14,14 +14,13 @@ This document defines:
 
 ```
 tests/
-  redteam_pos_20.jsonl       # 20 positives (should trigger)
-  hard_negatives_50.jsonl    # 50 hard negatives (must NOT trigger)
-  redteam_obf_20.jsonl       # 20 obfuscation/paraphrase positives (should trigger)
-redteam/
-  generator.py               # red-team generator (obf + paraphrase + cocktails + distributed)
+  data/session_benchmark/agentdojo_cocktail_mini_smoke_v1.jsonl
+scripts/
+  quick_demo.py
+  eval_agentdojo_stateful_mini.py
 ```
 
-**Truth rule:** these three JSONL files are the reference truth for v1.
+**Truth rule (Lean OSS):** the mini session pack above is the canonical quickstart smoke fixture.
 
 ### 1.2 JSONL schema (v1)
 Each line:
@@ -132,10 +131,11 @@ Create a minimal harness that:
 
 ---
 
-## 4) Red-team generator evaluation
+## 4) Session-pack evaluation (Lean OSS)
 
-### 4.1 Generator output
-`redteam/generator.py` produces JSONL-like samples with:
+### 4.1 Pack source
+The Lean OSS quickstart uses `tests/data/session_benchmark/agentdojo_cocktail_mini_smoke_v1.jsonl`.
+Advanced users can build a mini pack from local AgentDojo runs using `scripts/build_agentdojo_cocktail_mini_pack.py`.
 - `label="malicious"`
 - `targets` walls
 - `family` (obfuscation/paraphrase/cocktail/distributed)

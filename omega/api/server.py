@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import hashlib
 import hmac
@@ -11,6 +12,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import threading
 import time
 import uuid
 from typing import Any, Dict, List, Mapping, Optional, Sequence
@@ -19,13 +21,18 @@ import numpy as np
 from fastapi import FastAPI, Header, HTTPException, Request
 
 from omega.api.chunk_pipeline import score_chunks
+from omega.api.session_store import ApiSessionStore
 from omega.config.loader import load_resolved_config
 from omega.core.omega_core import OmegaCoreV1
 from omega.core.params import omega_params_from_config
 from omega.interfaces.contracts_v1 import ContentItem, OmegaState
+from omega.policy.cross_session_state import CrossSessionStateManager
+from omega.policy.control_outcome import control_outcome_from_action_types
 from omega.policy.off_policy_v1 import OffPolicyV1
 from omega.projector.factory import build_projector
 from omega.rag.attachment_ingestion import AttachmentExtractResult, extract_attachment, extract_text_payload
+from omega.telemetry.ids import build_decision_id, build_trace_id_api
+from omega.telemetry.incident_artifact import build_incident_artifact, should_emit_incident_artifact
 
 LOGGER = logging.getLogger(__name__)
 
@@ -97,6 +104,18 @@ def _omega_reason_codes(step_result: Any) -> List[str]:
     if getattr(r, "reason_multi", False):
         out.append("reason_multi")
     return out
+
+
+def _resolve_control_outcome(*, action_types: Sequence[str], verdict: str) -> str:
+    outcome = control_outcome_from_action_types(action_types)
+    if outcome != "ALLOW":
+        return outcome
+    v = str(verdict).strip().lower()
+    if v == "block":
+        return "SOFT_BLOCK"
+    if v == "quarantine":
+        return "WARN"
+    return "ALLOW"
 
 
 @dataclass(frozen=True)
@@ -206,6 +225,50 @@ class ApiDebug:
         )
 
 
+@dataclass(frozen=True)
+class ApiRuntime:
+    mode: str
+    allow_request_override: bool
+    session_store_backend: str
+    session_store_sqlite_path: str
+    session_ttl_sec: int
+    request_cache_ttl_sec: int
+
+    @classmethod
+    def from_cfg(cls, cfg: Mapping[str, Any] | None) -> "ApiRuntime":
+        data = dict(cfg or {})
+        mode = str(data.get("mode", "stateless")).strip().lower()
+        if mode not in {"stateless", "stateful"}:
+            raise ValueError("api.runtime.mode must be stateless|stateful")
+        session_store = data.get("session_store", {}) if isinstance(data.get("session_store", {}), dict) else {}
+        backend = str(session_store.get("backend", "sqlite")).strip().lower()
+        if backend != "sqlite":
+            raise ValueError("api.runtime.session_store.backend must be sqlite")
+        return cls(
+            mode=mode,
+            allow_request_override=bool(data.get("allow_request_override", True)),
+            session_store_backend=backend,
+            session_store_sqlite_path=str(session_store.get("sqlite_path", "artifacts/state/api_session_runtime.db")).strip(),
+            session_ttl_sec=max(60, int(session_store.get("session_ttl_sec", 86_400))),
+            request_cache_ttl_sec=max(60, int(session_store.get("request_cache_ttl_sec", 86_400))),
+        )
+
+
+class SessionLockPool:
+    def __init__(self) -> None:
+        self._guard = threading.Lock()
+        self._locks: Dict[str, asyncio.Lock] = {}
+
+    def get_lock(self, *, tenant_id: str, session_id: str) -> asyncio.Lock:
+        key = f"{tenant_id}:{session_id}"
+        with self._guard:
+            lock = self._locks.get(key)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._locks[key] = lock
+        return lock
+
+
 class NonceReplayCache:
     def __init__(self, *, ttl_sec: int, max_entries: int) -> None:
         self.ttl_sec = max(1, int(ttl_sec))
@@ -246,6 +309,10 @@ class ScanRuntime:
     logging_cfg: ApiLogging
     debug: ApiDebug
     replay_cache: NonceReplayCache
+    runtime_cfg: Optional[ApiRuntime] = None
+    session_store: Optional[ApiSessionStore] = None
+    cross_session: Optional[CrossSessionStateManager] = None
+    session_locks: SessionLockPool = field(default_factory=SessionLockPool)
 
 
 def _valid_api_key(provided: str, configured_keys: Sequence[str]) -> bool:
@@ -276,6 +343,14 @@ def _make_runtime(resolved_config: Dict[str, Any]) -> ScanRuntime:
     api_cfg = resolved_config.get("api", {}) or {}
     limits = ApiLimits.from_cfg(api_cfg.get("limits", {}) or {})
     auth_cfg = ApiAuth.from_cfg(api_cfg.get("auth", {}) or {})
+    runtime_cfg = ApiRuntime.from_cfg(api_cfg.get("runtime", {}) or {})
+    session_store: Optional[ApiSessionStore] = None
+    if runtime_cfg.mode == "stateful" or runtime_cfg.allow_request_override:
+        session_store = ApiSessionStore(
+            sqlite_path=runtime_cfg.session_store_sqlite_path,
+            session_ttl_sec=runtime_cfg.session_ttl_sec,
+            request_cache_ttl_sec=runtime_cfg.request_cache_ttl_sec,
+        )
     return ScanRuntime(
         config=resolved_config,
         projector=build_projector(resolved_config),
@@ -292,7 +367,28 @@ def _make_runtime(resolved_config: Dict[str, Any]) -> ScanRuntime:
             ttl_sec=auth_cfg.replay_nonce_ttl_sec,
             max_entries=auth_cfg.replay_cache_max_entries,
         ),
+        runtime_cfg=runtime_cfg,
+        session_store=session_store,
+        cross_session=CrossSessionStateManager.from_config(resolved_config),
     )
+
+
+def _runtime_config(runtime: ScanRuntime) -> ApiRuntime:
+    if isinstance(runtime.runtime_cfg, ApiRuntime):
+        return runtime.runtime_cfg
+    api_cfg = runtime.config.get("api", {}) if isinstance(runtime.config.get("api", {}), dict) else {}
+    return ApiRuntime.from_cfg(api_cfg.get("runtime", {}) or {})
+
+
+def _effective_runtime_mode(runtime: ScanRuntime, parsed: Mapping[str, Any]) -> str:
+    runtime_cfg = _runtime_config(runtime)
+    mode = str(runtime_cfg.mode)
+    req_mode = str(parsed.get("runtime_mode", "") or "").strip().lower()
+    if runtime_cfg.allow_request_override and req_mode in {"stateless", "stateful"}:
+        mode = req_mode
+    if mode == "stateful" and not str(parsed.get("session_id") or "").strip():
+        raise HTTPException(status_code=400, detail="session_id_required_stateful")
+    return mode
 
 
 async def _parse_request_payload(request: Request, limits: ApiLimits) -> Dict[str, Any]:
@@ -300,6 +396,9 @@ async def _parse_request_payload(request: Request, limits: ApiLimits) -> Dict[st
     payload: Dict[str, Any] = {
         "tenant_id": None,
         "request_id": None,
+        "session_id": None,
+        "actor_id": None,
+        "runtime_mode": None,
         "filename": None,
         "mime": None,
         "file_bytes": None,
@@ -317,6 +416,9 @@ async def _parse_request_payload(request: Request, limits: ApiLimits) -> Dict[st
             raise HTTPException(status_code=400, detail="invalid_json_body")
         payload["tenant_id"] = body.get("tenant_id")
         payload["request_id"] = body.get("request_id")
+        payload["session_id"] = body.get("session_id")
+        payload["actor_id"] = body.get("actor_id")
+        payload["runtime_mode"] = body.get("runtime_mode")
         payload["filename"] = body.get("filename")
         payload["mime"] = body.get("mime")
         if body.get("extracted_text") is not None:
@@ -336,6 +438,9 @@ async def _parse_request_payload(request: Request, limits: ApiLimits) -> Dict[st
         form = await request.form()
         payload["tenant_id"] = form.get("tenant_id")
         payload["request_id"] = form.get("request_id")
+        payload["session_id"] = form.get("session_id")
+        payload["actor_id"] = form.get("actor_id")
+        payload["runtime_mode"] = form.get("runtime_mode")
         payload["filename"] = form.get("filename")
         payload["mime"] = form.get("mime")
         extracted_text = form.get("extracted_text")
@@ -369,6 +474,18 @@ async def _parse_request_payload(request: Request, limits: ApiLimits) -> Dict[st
     payload["request_id_provided"] = bool(str(payload.get("request_id") or "").strip())
     payload["request_id"] = request_id
 
+    session_id = str(payload.get("session_id") or "").strip()
+    payload["session_id"] = session_id or None
+    actor_id = str(payload.get("actor_id") or "").strip()
+    payload["actor_id"] = actor_id or None
+    runtime_mode = str(payload.get("runtime_mode") or "").strip().lower()
+    if runtime_mode:
+        if runtime_mode not in {"stateless", "stateful"}:
+            raise HTTPException(status_code=400, detail="invalid_runtime_mode")
+        payload["runtime_mode"] = runtime_mode
+    else:
+        payload["runtime_mode"] = None
+
     extracted_text = payload.get("extracted_text")
     if extracted_text is not None:
         extracted_text = str(extracted_text)
@@ -383,6 +500,33 @@ async def _parse_request_payload(request: Request, limits: ApiLimits) -> Dict[st
 
     payload["use_extracted_text"] = has_extracted
     return payload
+
+
+async def _parse_session_reset_payload(request: Request) -> Dict[str, Any]:
+    ctype = str(request.headers.get("content-type", "")).lower()
+    if "application/json" not in ctype:
+        raise HTTPException(status_code=415, detail="unsupported_content_type")
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="invalid_json_body") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="invalid_json_body")
+
+    tenant_id = str(body.get("tenant_id") or "").strip()
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="tenant_id_required")
+    request_id = str(body.get("request_id") or "").strip() or str(uuid.uuid4())
+    session_id = str(body.get("session_id") or "").strip()
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id_required")
+    actor_id = str(body.get("actor_id") or "").strip() or None
+    return {
+        "tenant_id": tenant_id,
+        "request_id": request_id,
+        "session_id": session_id,
+        "actor_id": actor_id,
+    }
 
 
 def _request_is_https_proxy_mode(request: Request) -> bool:
@@ -552,6 +696,8 @@ def _audit_log_api_response(
         "event": "api_scan_audit",
         "ts": _utc_now(),
         "request_id": str(response_payload.get("request_id", "")),
+        "trace_id": str(response_payload.get("trace_id", "")),
+        "decision_id": str(response_payload.get("decision_id", "")),
         "tenant_id_hash": _sha256_hex(str(parsed.get("tenant_id", ""))),
         "path": str(request.url.path),
         "method": str(request.method).upper(),
@@ -559,15 +705,19 @@ def _audit_log_api_response(
         "filename_ext": ext,
         "payload_size": int(len(body_bytes)),
         "verdict": str(response_payload.get("verdict", "")),
+        "control_outcome": str(response_payload.get("control_outcome", "ALLOW")),
         "risk_score": int(response_payload.get("risk_score", 0)),
         "reasons": list(response_payload.get("reasons", []) or []),
         "evidence_id": str(response_payload.get("evidence_id", "")),
+        "incident_artifact_id": str(response_payload.get("incident_artifact_id", "")),
         "pattern_ids": sorted(set(pattern_ids)),
     }
     if runtime.logging_cfg.include_policy_trace:
         log_event["policy_trace"] = {
             "off": bool(policy_trace.get("off", False)),
             "severity": str(policy_trace.get("severity", "")),
+            "trace_id": str(policy_trace.get("trace_id", "")),
+            "decision_id": str(policy_trace.get("decision_id", "")),
             "walls_triggered": list(policy_trace.get("walls_triggered", []) or []),
             "action_types": list(policy_trace.get("action_types", []) or []),
             "chunk_pipeline": {
@@ -634,6 +784,26 @@ def _scan_request(
     mime = str(parsed.get("mime") or "").strip() or None
     tenant_id = str(parsed["tenant_id"])
     request_id = str(parsed["request_id"])
+    runtime_mode = _effective_runtime_mode(runtime, parsed)
+    session_id = str(parsed.get("session_id") or "").strip() if runtime_mode == "stateful" else None
+    actor_id = str(parsed.get("actor_id") or "").strip() if runtime_mode == "stateful" else None
+    state_step_prev = 0
+    cross_carryover_applied = False
+    cross_active_action_types: List[str] = []
+    cross_actor_hash: Optional[str] = None
+    cross_active_actions: List[Any] = []
+    session_store = runtime.session_store
+    if runtime_mode == "stateful":
+        if session_store is None or not session_id:
+            raise HTTPException(status_code=503, detail="stateful_runtime_not_configured")
+        cached = session_store.get_cached_response(tenant_id=tenant_id, session_id=session_id, request_id=request_id)
+        if cached is not None:
+            return cached
+
+    source_id = f"api:{tenant_id}:{request_id}"
+    if runtime_mode == "stateful" and session_id:
+        source_id = f"api:{tenant_id}:{session_id}"
+
     ingestion_flags: List[str] = []
 
     if bool(parsed.get("use_extracted_text", False)):
@@ -677,7 +847,6 @@ def _scan_request(
             chunks = ["[attachment_ingestion_empty]"]
 
     source_type = _source_type_for_format(fmt)
-    source_id = f"api:{tenant_id}:{request_id}"
     items: List[ContentItem] = []
     for idx, chunk in enumerate(chunks):
         items.append(
@@ -703,15 +872,60 @@ def _scan_request(
         cfg=api_cfg.get("chunk_pipeline", {}) if isinstance(api_cfg.get("chunk_pipeline", {}), dict) else {},
     )
     projections = list(chunk_agg.projections)
-    state = OmegaState(session_id=f"api:{tenant_id}:{request_id}", m=np.zeros(4, dtype=float), step=0)
+    if runtime_mode == "stateful":
+        state_vec = np.zeros(4, dtype=float)
+        if session_store is None or not session_id:
+            raise HTTPException(status_code=503, detail="stateful_runtime_not_configured")
+        state_row = session_store.load_session_state(tenant_id=tenant_id, session_id=session_id)
+        if state_row is not None:
+            state_step_prev = int(state_row.step)
+            state_vec = np.asarray(state_row.m, dtype=float)
+            if not actor_id:
+                actor_id = str(state_row.actor_id)
+        if not actor_id:
+            actor_id = str(session_id)
+        state = OmegaState(
+            session_id=f"api:{tenant_id}:{session_id}",
+            m=np.asarray(state_vec, dtype=float),
+            step=int(state_step_prev),
+        )
+        if runtime.cross_session is not None:
+            hydrated = runtime.cross_session.hydrate_actor_state(actor_id=actor_id, session_id=state.session_id)
+            state.m = np.maximum(state.m, np.asarray(hydrated.carried_scars_after_decay, dtype=float))
+            cross_carryover_applied = bool(hydrated.carryover_applied)
+    else:
+        state = OmegaState(session_id=f"api:{tenant_id}:{request_id}", m=np.zeros(4, dtype=float), step=0)
     step_result = runtime.omega_core.step(state=state, items=items, projections=projections)
     decision = runtime.off_policy.select_actions(step_result=step_result, items=items)
+    if runtime_mode == "stateful" and session_id and actor_id and runtime.cross_session is not None:
+        runtime.cross_session.record_step(
+            actor_id=actor_id,
+            session_id=state.session_id,
+            step_result=step_result,
+            policy_actions=decision.actions,
+            packet_items=items,
+        )
+        cross_active_actions = runtime.cross_session.active_actions(
+            actor_id=actor_id,
+            session_id=state.session_id,
+            step=int(step_result.step),
+        )
+        cross_snapshot = runtime.cross_session.snapshot(
+            actor_id=actor_id,
+            session_id=state.session_id,
+            step=int(step_result.step),
+        )
+        cross_active_action_types = sorted({str(a.type) for a in cross_active_actions})
+        cross_part = (cross_snapshot.get("cross_session", {}) if isinstance(cross_snapshot, dict) else {}) or {}
+        cross_carryover_applied = bool(cross_part.get("carryover_applied", cross_carryover_applied))
+        actor_hash_val = str(cross_part.get("actor_hash", "")).strip()
+        cross_actor_hash = actor_hash_val if actor_hash_val else None
 
     walls_triggered: List[str] = []
     for idx, wall in enumerate(cfg["omega"]["walls"]):
         if float(step_result.p[idx]) > 0.0 or float(step_result.m_next[idx]) > 0.0:
             walls_triggered.append(str(wall))
-    action_types = sorted({str(a.type) for a in decision.actions})
+    action_types = sorted({str(a.type) for a in list(decision.actions) + list(cross_active_actions)})
 
     reasons = sorted(
         set(
@@ -754,6 +968,18 @@ def _scan_request(
         verdict = "quarantine"
     else:
         verdict = "allow"
+    source_quarantine_active = any(
+        str(a.type) == "SOURCE_QUARANTINE" and source_id in set(a.source_ids or [])
+        for a in cross_active_actions
+    )
+    tool_freeze_active = any(str(a.type) == "TOOL_FREEZE" for a in cross_active_actions)
+    if source_quarantine_active and verdict == "allow":
+        verdict = "quarantine"
+    if source_quarantine_active:
+        reasons.append("source_quarantine_active")
+    if tool_freeze_active:
+        reasons.append("tool_freeze_active")
+    control_outcome = _resolve_control_outcome(action_types=action_types, verdict=verdict)
 
     max_p = float(np.max(step_result.p)) if len(step_result.p) else 0.0
     sum_m_next = float(np.sum(step_result.m_next))
@@ -770,23 +996,40 @@ def _scan_request(
 
     reasons_sorted = sorted(reasons)
     evidence_id = str(uuid.uuid4())
+    trace_id = build_trace_id_api(tenant_id=str(tenant_id), request_id=str(request_id))
+    decision_id = build_decision_id(
+        trace_id=trace_id,
+        control_outcome=control_outcome,
+        action_types=action_types,
+        severity=severity,
+        off=off,
+    )
     evidence_summary = {
         "walls_triggered": list(walls_triggered),
         "rule_ids": list(getattr(chunk_agg, "rule_ids", []) or []),
         "chunk_ids": list(getattr(chunk_agg, "triggered_chunk_ids", []) or []),
         "top_chunk_ids": [str(x.get("doc_id", "")) for x in list(chunk_agg.top_chunks)],
         "text_included": False,
+        "control_outcome": control_outcome,
+        "trace_id": trace_id,
+        "decision_id": decision_id,
     }
 
     payload: Dict[str, Any] = {
         "request_id": request_id,
+        "trace_id": trace_id,
+        "decision_id": decision_id,
         "tenant_id": tenant_id,
         "risk_score": int(risk_score),
         "verdict": verdict,
+        "control_outcome": control_outcome,
         "reasons": reasons_sorted,
         "evidence_id": evidence_id,
         "evidence": evidence_summary,
         "policy_trace": {
+            "trace_id": trace_id,
+            "decision_id": decision_id,
+            "control_outcome": control_outcome,
             "off": off,
             "severity": severity,
             "walls_triggered": walls_triggered,
@@ -794,6 +1037,9 @@ def _scan_request(
             "max_p": max_p,
             "sum_m_next": sum_m_next,
             "top_docs_count": int(len(step_result.top_docs)),
+            "runtime_mode": runtime_mode,
+            "state_step_prev": int(state_step_prev),
+            "state_step_next": int(step_result.step),
             "ingestion_flags": sorted(set(ingestion_flags)),
             "chunk_pipeline": {
                 "chunks_total": int(len(items)),
@@ -808,6 +1054,92 @@ def _scan_request(
             "evidence": evidence_summary,
         },
     }
+    if runtime_mode == "stateful" and session_id:
+        payload["session_id"] = str(session_id)
+        payload["policy_trace"]["session_id"] = str(session_id)
+        payload["policy_trace"]["cross_session"] = {
+            "carryover_applied": bool(cross_carryover_applied),
+            "active_action_types": list(cross_active_action_types),
+            "actor_hash": cross_actor_hash,
+        }
+    if should_emit_incident_artifact(config=runtime.config, control_outcome=control_outcome):
+        item_by_id = {item.doc_id: item for item in items}
+        top_chunk_ids = [str(x) for x in list(evidence_summary.get("top_chunk_ids", []) or []) if str(x).strip()]
+        if not top_chunk_ids:
+            top_chunk_ids = [str(x) for x in list(evidence_summary.get("chunk_ids", []) or []) if str(x).strip()]
+        top_docs = []
+        for doc_id in top_chunk_ids:
+            item = item_by_id.get(doc_id)
+            if item is None:
+                continue
+            top_docs.append(
+                {
+                    "doc_id": item.doc_id,
+                    "source_id": item.source_id,
+                    "source_type": item.source_type,
+                    "trust": item.trust,
+                    "text": item.text,
+                }
+            )
+        blocked_doc_ids: List[str] = []
+        if verdict in {"block", "quarantine"}:
+            blocked_doc_ids = [doc_id for doc_id in top_chunk_ids if doc_id in item_by_id]
+        quarantined_source_ids = sorted(
+            {
+                str(source_item)
+                for action in cross_active_actions
+                if str(getattr(action, "type", "")) == "SOURCE_QUARANTINE"
+                for source_item in list(getattr(action, "source_ids", []) or [])
+                if str(source_item).strip()
+            }
+        )
+        if verdict == "quarantine":
+            quarantined_source_ids = sorted(set(quarantined_source_ids) | {str(source_id)})
+        config_sha = _sha256_hex(json.dumps(runtime.config, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        incident_artifact = build_incident_artifact(
+            config=runtime.config,
+            surface="api",
+            session_id=str(session_id) if session_id else f"req:{request_id}",
+            step=int(step_result.step),
+            request_id=request_id,
+            control_outcome=control_outcome,
+            off=off,
+            severity=severity,
+            verdict=verdict,
+            actions=list(decision.actions) + list(cross_active_actions),
+            reason_flags=reasons_sorted,
+            contributing_signals={
+                "max_p": max_p,
+                "sum_m_next": sum_m_next,
+                "walls_triggered": list(walls_triggered),
+                "chunk_pipeline": {
+                    "doc_score": float(chunk_agg.doc_score),
+                    "worst_chunk_score": float(chunk_agg.worst_chunk_score),
+                    "pattern_synergy": float(chunk_agg.pattern_synergy),
+                    "confidence": float(chunk_agg.confidence),
+                    "wall_max": dict(chunk_agg.wall_max),
+                },
+            },
+            top_docs=top_docs,
+            blocked_doc_ids=blocked_doc_ids,
+            quarantined_source_ids=quarantined_source_ids,
+            context_total_docs=len(items),
+            context_allowed_docs=max(0, len(items) - len(set(blocked_doc_ids))),
+            evidence_id=evidence_id,
+            config_refs={
+                "api_config_sha256": config_sha,
+                "policy_version": str((runtime.config.get("off_policy", {}) or {}).get("policy_version", "")),
+            },
+            refs={
+                "source_id": str(source_id),
+                "cross_active_action_types": list(cross_active_action_types),
+                "cross_actor_hash": cross_actor_hash,
+            },
+            trace_id=trace_id,
+            decision_id=decision_id,
+        )
+        payload["incident_artifact_id"] = str(incident_artifact.get("incident_artifact_id", ""))
+        payload["incident_artifact"] = incident_artifact
 
     att, att_reason = _attestation_block(response_wo_attestation=payload, runtime=runtime)
     if att is not None:
@@ -822,6 +1154,20 @@ def _scan_request(
             fmt=fmt,
             ingestion_flags=ingestion_flags,
             max_chunks=runtime.debug.max_report_chunks,
+        )
+    if runtime_mode == "stateful" and session_id and actor_id and session_store is not None:
+        session_store.save_session_state(
+            tenant_id=tenant_id,
+            session_id=session_id,
+            actor_id=actor_id,
+            m=np.asarray(step_result.m_next, dtype=float),
+            step=int(step_result.step),
+        )
+        session_store.save_cached_response(
+            tenant_id=tenant_id,
+            session_id=session_id,
+            request_id=request_id,
+            response_payload=payload,
         )
     return payload
 
@@ -856,11 +1202,21 @@ def create_app(*, resolved_config: Optional[Dict[str, Any]] = None, profile: str
         )
         if debug and not runtime.debug.enable_document_scan_report:
             raise HTTPException(status_code=403, detail="debug_mode_disabled")
-        payload = _scan_request(
-            runtime=runtime,
-            parsed=parsed,
-            include_document_scan_report=bool(debug),
-        )
+        mode = _effective_runtime_mode(runtime, parsed)
+        if mode == "stateful":
+            lock = runtime.session_locks.get_lock(tenant_id=str(parsed["tenant_id"]), session_id=str(parsed["session_id"]))
+            async with lock:
+                payload = _scan_request(
+                    runtime=runtime,
+                    parsed=parsed,
+                    include_document_scan_report=bool(debug),
+                )
+        else:
+            payload = _scan_request(
+                runtime=runtime,
+                parsed=parsed,
+                include_document_scan_report=bool(debug),
+            )
         _audit_log_api_response(
             runtime=runtime,
             request=request,
@@ -890,7 +1246,13 @@ def create_app(*, resolved_config: Optional[Dict[str, Any]] = None, profile: str
             body_bytes=body_bytes,
             provided_api_key=str(x_api_key),
         )
-        payload = _scan_request(runtime=runtime, parsed=parsed, include_document_scan_report=True)
+        mode = _effective_runtime_mode(runtime, parsed)
+        if mode == "stateful":
+            lock = runtime.session_locks.get_lock(tenant_id=str(parsed["tenant_id"]), session_id=str(parsed["session_id"]))
+            async with lock:
+                payload = _scan_request(runtime=runtime, parsed=parsed, include_document_scan_report=True)
+        else:
+            payload = _scan_request(runtime=runtime, parsed=parsed, include_document_scan_report=True)
         _audit_log_api_response(
             runtime=runtime,
             request=request,
@@ -899,5 +1261,39 @@ def create_app(*, resolved_config: Optional[Dict[str, Any]] = None, profile: str
             response_payload=payload,
         )
         return payload
+
+    @app.post("/v1/session/reset")
+    async def reset_session(
+        request: Request,
+        x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
+    ) -> Dict[str, Any]:
+        runtime: ScanRuntime = app.state.scan_runtime
+        _enforce_transport_security(request=request, security=runtime.security)
+        if not x_api_key or not _valid_api_key(str(x_api_key), runtime.api_keys):
+            raise HTTPException(status_code=401, detail="unauthorized")
+        body_bytes = await request.body()
+        parsed = await _parse_session_reset_payload(request=request)
+        _verify_hmac_request(
+            request=request,
+            runtime=runtime,
+            parsed=parsed,
+            body_bytes=body_bytes,
+            provided_api_key=str(x_api_key),
+        )
+        if runtime.session_store is None:
+            raise HTTPException(status_code=503, detail="stateful_runtime_not_configured")
+        lock = runtime.session_locks.get_lock(tenant_id=str(parsed["tenant_id"]), session_id=str(parsed["session_id"]))
+        async with lock:
+            existed = runtime.session_store.clear_session(
+                tenant_id=str(parsed["tenant_id"]),
+                session_id=str(parsed["session_id"]),
+            )
+        return {
+            "request_id": str(parsed["request_id"]),
+            "tenant_id": str(parsed["tenant_id"]),
+            "session_id": str(parsed["session_id"]),
+            "reset": True,
+            "existed": bool(existed),
+        }
 
     return app

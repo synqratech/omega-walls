@@ -1,4 +1,4 @@
-# Strict PI-Only Gate (Honest Slice)
+﻿# Strict PI-Only Gate (Honest Slice)
 
 ## Current Snapshot Pointer
 
@@ -57,7 +57,7 @@ Artifacts:
   --holdout-jsonl tests/data/strict_pi_holdout/strict_pi_holdout_seed41.jsonl `
   --seed 41 `
   --weekly-regression `
-  --baseline-report artifacts/strict_pi_eval/<previous_run>/report.json
+  --baseline-report outputs/strict_pi_eval/<previous_run>/report.json
 ```
 
 The report includes:
@@ -67,3 +67,4 @@ The report includes:
 3. `gate.checks`
 4. `baseline_compare.summary_delta`
 5. `baseline_compare.per_family_delta`
+

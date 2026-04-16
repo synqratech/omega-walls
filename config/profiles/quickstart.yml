@@ -1,0 +1,38 @@
+profiles:
+  env: quickstart
+
+runtime:
+  mode: quickstart
+
+logging:
+  mode: PER_STEP
+  capture_text: REDACTED
+  max_text_chars: 400
+
+projector:
+  mode: pi0
+  fallback_to_pi0: true
+  api_perception:
+    enabled: false
+  pitheta:
+    enabled: false
+
+pi0:
+  semantic:
+    enabled: false
+
+tools:
+  execution_mode: DRY_RUN
+
+off_policy:
+  cross_session:
+    enabled: false
+
+api:
+  security:
+    transport_mode: disabled
+    require_https: false
+  auth:
+    api_keys:
+      - quickstart-api-key
+    require_hmac: false

@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "evidence_debug_event_v1.json",
+  "title": "evidence_debug_event_v1",
+  "type": "object",
+  "required": [
+    "event",
+    "schema_version",
+    "timestamp",
+    "session_id",
+    "step",
+    "trace_id",
+    "decision_id",
+    "walls",
+    "reasons",
+    "walls_triggered",
+    "top_docs_summary",
+    "projector_signal_summary"
+  ],
+  "properties": {
+    "event": {"const": "evidence_debug_event_v1"},
+    "schema_version": {"type": "string"},
+    "timestamp": {"type": "string"},
+    "session_id": {"type": "string"},
+    "step": {"type": "integer", "minimum": 0},
+    "trace_id": {"type": "string"},
+    "decision_id": {"type": "string"},
+    "walls": {"type": "array", "items": {"type": "string"}},
+    "reasons": {"type": "array", "items": {"type": "string"}},
+    "walls_triggered": {"type": "array", "items": {"type": "string"}},
+    "top_docs_summary": {"type": "array", "items": {"type": "object"}},
+    "projector_signal_summary": {"type": "object"}
+  }
+}

@@ -1,0 +1,16 @@
+profiles:
+  env: local_dev
+
+runtime:
+  mode: local_dev
+
+logging:
+  mode: PER_STEP
+  capture_text: REDACTED
+  max_text_chars: 800
+
+off_policy:
+  enforcement_mode: LOG_ONLY
+
+tools:
+  execution_mode: DRY_RUN

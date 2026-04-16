@@ -1,6 +1,6 @@
 pitheta_dataset_registry:
   version: v1
-  schema_version: pitheta_dataset_v1
+  schema_version: pitheta_dataset_v2
   license_policy: permissive_only
   sampling:
     temperature: 1.0

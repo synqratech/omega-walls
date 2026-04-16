@@ -1,8 +1,94 @@
-# Changelog
+﻿# Changelog
 
 All notable changes to this project are documented in this file.
 
-This project follows a date-based changelog style for now (pre-tag OSS phase).
+## [0.1.2] - 2026-04-14
+
+### Added
+
+- 5-minute OSS demo path for repo-clone onboarding:
+  - unified orchestrator CLI: `scripts/quick_demo.py`
+  - one-command wrappers:
+    - `scripts/run_quick_demo.ps1`
+    - `scripts/run_quick_demo.sh`
+  - compact summary output with:
+    - `session_attack_off_rate`
+    - `session_benign_off_rate`
+    - `mssr_core`
+    - `mssr_cross_primary`
+    - explicit `blocked behavior observed` signal
+  - explicit semantic fallback warning when `semantic_active=false` (run does not fail).
+- Advanced quick-demo dataset mode:
+  - `--dataset-source agentdojo_runs` builds mini-pack from local AgentDojo cached runs before evaluation.
+
+### Changed
+
+- README now documents a dedicated **5-Minute Demo (Repo Clone)** flow with:
+  - API-key-based default (`hybrid_api`)
+  - cross-platform one-command launch examples
+  - offline fallback (`--mode pi0`) troubleshooting path.
+- Lean OSS repo curation:
+  - removed research-only directories/scripts from the public tree
+  - retained onboarding/runtime scripts and minimal smoke test set.
+- `omega-walls` CLI default profile switched from `dev` to `quickstart` for pip-first onboarding.
+- Release notes now include latency optimization references in:
+  - `docs/reports/omega_latency_optimization_plan_20260403.md`
+  - `docs/reports/omega_latency_benchmark_20260403.md`
+
+### Fixed
+
+- Packaging metadata hygiene:
+  - added strict `MANIFEST.in` exclusions so `sdist` does not include internal/large local assets.
+  - added root `LICENSE` file to match declared Apache-2.0 license and eliminate sdist warning.
+
+## [0.1.1] - 2026-04-02
+
+### Changed
+
+- README was simplified for PyPI/GitHub first-contact readability:
+  - shorter top-level narrative
+  - clearer install + quickstart flow
+  - compact optional runtime modes
+  - explicit security model and limitations
+  - cleaned documentation section
+- SDK default profile switched to `quickstart` for low-friction onboarding in clean environments.
+- `omega-walls-api` now returns a friendly missing-dependency message (with install hint for `omega-walls[api]`) instead of raw traceback when API extras are absent.
+
+## [0.1.0] - 2026-04-01
+
+First public package release for `omega-walls`.
+
+### Added
+
+- Public SDK facade and import contract:
+  - `from omega import OmegaWalls`
+  - typed result model: `DetectionResult`, `GuardDecision`, `GuardAction`
+  - typed SDK error model: `OmegaConfigError`, `OmegaAPIError`, `OmegaRuntimeError`, etc.
+- Package-safe config loading from bundled resources (`omega.config.resources`), so install/import works without copying `config/` folders.
+- CLI entrypoints in package metadata:
+  - `omega-walls`
+  - `omega-walls-api`
+- Low-friction `quickstart` profile for local onboarding.
+- Package install contract checks:
+  - wheel install smoke script (`scripts/smoke_package_install.py`)
+  - CI workflow for Linux/Windows installability (`.github/workflows/package-install-smoke.yml`)
+
+### Changed
+
+- README quickstart was rewritten as "3-step" onboarding with clear split:
+  - `rule-only`
+  - `hybrid_api`
+- Optional dependency groups are explicit and decomposed:
+  - `omega-walls[api]`
+  - `omega-walls[integrations]`
+  - `omega-walls[attachments]`
+- `pyproject.toml` metadata was completed for publication:
+  - `authors`, `license`, `classifiers`, `keywords`, `project.urls`.
+
+### Packaging hygiene
+
+- Distribution scope constrained to `omega*` packages.
+- Exclusions for local artifacts/models/secrets are enforced (`MANIFEST.in` + tests).
 
 ## [2026-03-09] - Rule-based hardening milestone (stateful PI firewall, pre-v1 OSS snapshot)
 
@@ -45,6 +131,7 @@ This project follows a date-based changelog style for now (pre-tag OSS phase).
   - unified report builder: `scripts/build_comparative_report.py`
 - Reproducibility and release docs:
   - `docs/implementation/30_reproducibility_snapshot_2026-03-09.md`
+  - `docs/implementation/31_oss_repo_curation_internal.md`
   - `docs/implementation/32_external_assets_bootstrap.md`
   - `docs/implementation/33_wainjectbench_text_eval_2026-03-09.md`
 - WAInjectBench reporting utility:
@@ -97,3 +184,4 @@ This project follows a date-based changelog style for now (pre-tag OSS phase).
 - Strict gate and comparative docs:
   - `docs/implementation/28_strict_pi_gate.md`
   - `docs/implementation/29_post_patch_contour_and_comparative.md`
+

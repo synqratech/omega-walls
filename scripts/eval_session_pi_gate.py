@@ -5,6 +5,7 @@ from collections import Counter, defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import hashlib
 import json
 from pathlib import Path
 import random
@@ -74,6 +75,7 @@ class SessionTurnRow:
     label_session: str
     family: str
     source_ref: str
+    source_type: str
     actor_id: str
     bucket: str
     eval_slice: str
@@ -115,16 +117,80 @@ class SessionRunner(Protocol):
 
 
 class OmegaHarnessRunner:
-    def __init__(self, *, profile: str, mode: str, seed: int, state_db_path: Path) -> None:
+    def __init__(
+        self,
+        *,
+        profile: str,
+        mode: str,
+        seed: int,
+        state_db_path: Path,
+        strict_projector: bool = False,
+        require_api_adapter: bool = False,
+        api_model: Optional[str] = None,
+        api_base_url: Optional[str] = None,
+        api_timeout_sec: Optional[float] = None,
+        api_retries: Optional[int] = None,
+        api_cache_path: Optional[str] = None,
+        api_error_log_path: Optional[str] = None,
+        blind_eval: bool = False,
+        enable_stateful_support_tuning: bool = False,
+    ) -> None:
         random.seed(int(seed))
-        snapshot = load_resolved_config(profile=profile, cli_overrides={"projector": {"mode": str(mode)}})
+        mode_norm = str(mode).strip().lower()
+        projector_override: Dict[str, Any] = {"mode": mode_norm}
+        if mode_norm == "hybrid_api":
+            api_perception: Dict[str, Any] = {
+                "enabled": "true",
+                **({"strict": True} if bool(strict_projector) else {}),
+                **({"model": str(api_model)} if api_model else {}),
+                **({"base_url": str(api_base_url)} if api_base_url else {}),
+                **({"timeout_sec": float(api_timeout_sec)} if api_timeout_sec is not None else {}),
+                **({"max_retries": int(api_retries)} if api_retries is not None else {}),
+                **({"cache_path": str(api_cache_path)} if api_cache_path else {}),
+                **({"error_log_path": str(api_error_log_path)} if api_error_log_path else {}),
+            }
+            projector_override = {
+                "mode": "hybrid_api",
+                "fallback_to_pi0": not bool(strict_projector),
+                "api_perception": api_perception,
+            }
+        elif bool(strict_projector):
+            projector_override = {
+                "mode": mode_norm,
+                "fallback_to_pi0": False,
+                **({"pitheta": {"enabled": "true"}} if mode_norm in {"pitheta", "hybrid"} else {}),
+            }
+
+        cli_overrides: Dict[str, Any] = {"projector": projector_override}
+        if bool(enable_stateful_support_tuning):
+            cli_overrides["off_policy"] = {"stateful_support_tuning": {"enabled": True}}
+        snapshot = load_resolved_config(profile=profile, cli_overrides=cli_overrides)
         cfg = deepcopy(snapshot.resolved)
         cfg.setdefault("off_policy", {}).setdefault("cross_session", {})
         cfg["off_policy"]["cross_session"]["sqlite_path"] = str(state_db_path.as_posix())
         state_db_path.parent.mkdir(parents=True, exist_ok=True)
+        projector = build_projector(cfg)
+        if mode_norm == "hybrid_api" and bool(require_api_adapter):
+            ensure_api = getattr(projector, "ensure_api_adapter_active", None)
+            if not callable(ensure_api):
+                raise RuntimeError("hybrid_api adapter verification is not supported by the current projector")
+            if not bool(ensure_api()):
+                status_fn = getattr(projector, "api_perception_status", None)
+                status = status_fn() if callable(status_fn) else {}
+                err = (
+                    status.get("api_adapter_error", "unknown")
+                    if isinstance(status, Mapping)
+                    else "unknown"
+                )
+                raise RuntimeError(f"hybrid_api adapter inactive: {err}")
+
+        self._mode = mode_norm
+        self._strict_projector = bool(strict_projector)
+        self._require_api_adapter = bool(require_api_adapter)
+        self._blind_eval = bool(blind_eval)
 
         self._harness = OmegaRAGHarness(
-            projector=build_projector(cfg),
+            projector=projector,
             omega_core=OmegaCoreV1(omega_params_from_config(cfg)),
             off_policy=OffPolicyV1(cfg),
             tool_gateway=ToolGatewayV1(cfg),
@@ -132,15 +198,56 @@ class OmegaHarnessRunner:
             llm_backend=MockLLM(),
         )
 
+    def projector_status(self) -> Dict[str, Any]:
+        status: Dict[str, Any] = {
+            "mode": str(self._mode),
+            "strict_projector": bool(self._strict_projector),
+            "require_api_adapter": bool(self._require_api_adapter),
+            "blind_eval": bool(self._blind_eval),
+        }
+        projector = getattr(self._harness, "projector", None)
+        semantic_status_fn = getattr(projector, "semantic_status", None)
+        semantic_status = semantic_status_fn() if callable(semantic_status_fn) else {}
+        if isinstance(semantic_status, Mapping):
+            status["semantic"] = dict(semantic_status)
+            status["semantic_active"] = bool(semantic_status.get("active", False))
+        if str(self._mode) == "hybrid_api":
+            api_status_fn = getattr(projector, "api_perception_status", None)
+            api_status = api_status_fn() if callable(api_status_fn) else {}
+            if isinstance(api_status, Mapping):
+                status["api_perception"] = dict(api_status)
+        return status
+
     def reset(self, *, session_id: str, actor_id: str) -> None:
         self._harness.reset_state(session_id=session_id, actor_id=actor_id)
 
+    @staticmethod
+    def _blind_source_id(turn: SessionTurnRow) -> str:
+        seed_source = str(turn.source_ref).strip()
+        if not seed_source or seed_source.lower() == "unknown":
+            seed_source = f"session::{turn.session_id}"
+        digest = hashlib.sha1(seed_source.encode("utf-8")).hexdigest()[:16]
+        return f"session_benchmark_blind:{digest}"
+
+    @staticmethod
+    def _blind_trust_for_source_type(source_type: str) -> str:
+        st = str(source_type).strip().lower()
+        if st in {"trusted", "internal_trusted", "policy"}:
+            return "trusted"
+        return "untrusted"
+
     def run_turn(self, *, session_id: str, actor_id: str, turn: SessionTurnRow) -> Dict[str, Any]:
-        trust = "untrusted" if str(turn.label_turn) == "attack" else "semi"
+        source_type = str(turn.source_type or "other").strip() or "other"
+        if bool(self._blind_eval):
+            trust = self._blind_trust_for_source_type(source_type)
+            source_id = self._blind_source_id(turn)
+        else:
+            trust = "untrusted" if str(turn.label_turn) == "attack" else "semi"
+            source_id = f"session_benchmark:{turn.bucket}:{turn.family}"
         item = ContentItem(
             doc_id=f"{session_id}:turn:{int(turn.turn_id):03d}",
-            source_id=f"session_benchmark:{turn.bucket}:{turn.family}",
-            source_type="other",
+            source_id=source_id,
+            source_type=source_type,
             trust=trust,
             text=turn.text,
         )
@@ -204,6 +311,7 @@ def load_pack_rows(path: Path) -> List[SessionTurnRow]:
                 label_session=label_session,
                 family=str(raw.get("family", "unknown")).strip() or "unknown",
                 source_ref=str(raw.get("source_ref", "unknown")).strip() or "unknown",
+                source_type=str(raw.get("source_type", "other")).strip() or "other",
                 actor_id=str(raw.get("actor_id", session_id)).strip() or session_id,
                 bucket=str(raw.get("bucket", "core")).strip() or "core",
                 eval_slice=str(raw.get("eval_slice", "")).strip() or infer_eval_slice_from_source_ref(str(raw.get("source_ref", ""))),
@@ -469,12 +577,21 @@ def _baseline_compare(current: Mapping[str, Any], baseline: Mapping[str, Any]) -
 def main() -> int:
     parser = argparse.ArgumentParser(description="Evaluate session-based prompt-injection benchmark without per-turn reset.")
     parser.add_argument("--profile", default="dev")
-    parser.add_argument("--mode", choices=["pi0", "hybrid"], default="pi0")
+    parser.add_argument("--mode", choices=["pi0", "hybrid", "hybrid_api"], default="pi0")
     parser.add_argument("--pack", default="tests/data/session_benchmark/session_pack_seed41_v1.jsonl")
     parser.add_argument("--seed", type=int, default=41)
     parser.add_argument("--artifacts-root", default="artifacts/session_eval")
     parser.add_argument("--weekly-regression", action="store_true")
     parser.add_argument("--baseline-report", default=None)
+    parser.add_argument("--strict-projector", action="store_true")
+    parser.add_argument("--allow-api-fallback", action="store_true")
+    parser.add_argument("--api-model", default=None)
+    parser.add_argument("--api-base-url", default=None)
+    parser.add_argument("--api-timeout-sec", type=float, default=None)
+    parser.add_argument("--api-retries", type=int, default=None)
+    parser.add_argument("--api-cache-path", default=None)
+    parser.add_argument("--api-error-log-path", default=None)
+    parser.add_argument("--blind-eval", action="store_true")
     args = parser.parse_args()
 
     rows = load_pack_rows((ROOT / str(args.pack)).resolve())
@@ -498,12 +615,30 @@ def main() -> int:
         mode=str(args.mode),
         seed=int(args.seed),
         state_db_path=(out_dir / "cross_session_core.db"),
+        strict_projector=bool(args.strict_projector),
+        require_api_adapter=(str(args.mode) == "hybrid_api" and not bool(args.allow_api_fallback)),
+        api_model=(str(args.api_model) if args.api_model else None),
+        api_base_url=(str(args.api_base_url) if args.api_base_url else None),
+        api_timeout_sec=(float(args.api_timeout_sec) if args.api_timeout_sec is not None else None),
+        api_retries=(int(args.api_retries) if args.api_retries is not None else None),
+        api_cache_path=(str(args.api_cache_path) if args.api_cache_path else None),
+        api_error_log_path=(str(args.api_error_log_path) if args.api_error_log_path else None),
+        blind_eval=bool(args.blind_eval),
     )
     cross_runner = OmegaHarnessRunner(
         profile=str(args.profile),
         mode=str(args.mode),
         seed=int(args.seed),
         state_db_path=(out_dir / "cross_session_slice.db"),
+        strict_projector=bool(args.strict_projector),
+        require_api_adapter=(str(args.mode) == "hybrid_api" and not bool(args.allow_api_fallback)),
+        api_model=(str(args.api_model) if args.api_model else None),
+        api_base_url=(str(args.api_base_url) if args.api_base_url else None),
+        api_timeout_sec=(float(args.api_timeout_sec) if args.api_timeout_sec is not None else None),
+        api_retries=(int(args.api_retries) if args.api_retries is not None else None),
+        api_cache_path=(str(args.api_cache_path) if args.api_cache_path else None),
+        api_error_log_path=(str(args.api_error_log_path) if args.api_error_log_path else None),
+        blind_eval=bool(args.blind_eval),
     )
     result = evaluate_pack_with_runner(rows=rows, core_runner=core_runner, cross_runner=cross_runner)
 
@@ -519,6 +654,7 @@ def main() -> int:
         "status": "ok",
         "profile": str(args.profile),
         "mode": str(args.mode),
+        "blind_eval": bool(args.blind_eval),
         "seed": int(args.seed),
         "pack": str((ROOT / str(args.pack)).resolve()),
         "summary_core_text_intrinsic": result["core"]["summary_text_intrinsic"],
@@ -527,6 +663,14 @@ def main() -> int:
         # Backward compatibility key.
         "summary_core": result["core"]["summary_text_intrinsic"],
         "cross_session": result["cross_session"]["summary"],
+        "projector": {
+            "strict_projector": bool(args.strict_projector),
+            "require_api_adapter": bool(str(args.mode) == "hybrid_api" and not bool(args.allow_api_fallback)),
+            "api_model": str(args.api_model) if args.api_model else None,
+            "api_base_url": str(args.api_base_url) if args.api_base_url else None,
+            "core_runtime": core_runner.projector_status(),
+            "cross_runtime": cross_runner.projector_status(),
+        },
         "artifacts": {
             "report_json": str((out_dir / "report.json").resolve()),
             "rows_jsonl": str(rows_jsonl.resolve()),

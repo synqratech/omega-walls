@@ -1,4 +1,4 @@
-# Rule Cycle Baseline + Repro Runbook
+﻿# Rule Cycle Baseline + Repro Runbook
 
 ## Goal
 Freeze one reproducible baseline and standardize one control loop for every RB step:
@@ -31,10 +31,10 @@ Run:
 
 Outputs:
 
-1. `artifacts/rule_cycle/<run_id>/cycle_manifest.json`
-2. `artifacts/rule_cycle/<run_id>/baseline_snapshot/*`
-3. `artifacts/rule_cycle/LATEST.json`
-4. `artifacts/rule_cycle/BASELINE_LATEST.json`
+1. `outputs/rule_cycle/<run_id>/cycle_manifest.json`
+2. `outputs/rule_cycle/<run_id>/baseline_snapshot/*`
+3. `outputs/rule_cycle/LATEST.json`
+4. `outputs/rule_cycle/BASELINE_LATEST.json`
 
 ## Standard cycle for each RB patch
 Run the same script without `--freeze-baseline` and with a new label:
@@ -63,7 +63,7 @@ When needed, compare current run with baseline metrics:
 .\.venv\Scripts\python.exe scripts/run_rule_cycle.py `
   --label rb_repro_check `
   --seed 41 `
-  --baseline-manifest artifacts/rule_cycle/<baseline_run_id>/cycle_manifest.json `
+  --baseline-manifest outputs/rule_cycle/<baseline_run_id>/cycle_manifest.json `
   --require-reproducible `
   --repro-tolerance 1e-9
 ```
@@ -79,5 +79,6 @@ The run fails if tracked metrics drift beyond tolerance:
 
 ## Notes
 
-1. `release_metrics.json` for pareto is auto-resolved from the latest `artifacts/release_gate/*`; override with `--release-metrics-json` if needed.
+1. `release_metrics.json` for pareto is auto-resolved from the latest `outputs/release_gate/*`; override with `--release-metrics-json` if needed.
 2. Full command stdout/stderr for each step is stored under the run directory.
+

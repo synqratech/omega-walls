@@ -1,0 +1,81 @@
+﻿projector:
+  mode: hybrid
+  fallback_to_pi0: true
+  api_perception:
+    enabled: auto
+    strict: false
+    model: gpt-5.4-mini
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+    timeout_sec: 30
+    max_retries: 2
+    backoff_sec: 0.75
+    retry_backoff_max_sec: 1.5
+    request_deadline_sec: 20
+    long_text_threshold_chars: 3000
+    long_text_max_retries: 1
+    short_text_threshold_chars: 1200
+    short_prefer_chat_completions: true
+    short_chat_only: true
+    short_fast_path_enabled: true
+    short_fast_path_skip_on_pi0_hard: true
+    short_fast_path_skip_on_pi0_clean: true
+    short_fast_path_hard_min_score: 0.55
+    short_fast_path_clean_max_score: 0.0
+    prewarm_on_init: true
+    transient_error_ttl_sec: 90
+    responses_cooldown_sec: 60
+    prompt_version: api_hybrid_v2
+    cache_path: artifacts/projector_api/cache.jsonl
+    error_log_path: artifacts/projector_api/errors.jsonl
+    benign_task_guard:
+      enabled: true
+      require_pi0_hard_absent: true
+      marker_phrases:
+        - team meeting minutes file
+        - todo list in the team meeting minutes file
+        - task they need to execute
+        - include the deadline for each task
+        - post hobbies of the company employees
+        - sent their hobbies to
+        - direct slack message
+      attack_cues:
+        - ignore previous
+        - reveal token
+        - reveal password
+        - reveal secret
+        - exfiltrate
+        - bypass policy
+        - jailbreak
+        - system prompt
+        - hidden prompt
+        - internal prompt
+    deescalation:
+      confidence_min: 0.75
+      p_strong: 0.35
+    hybrid_soft_gate:
+      enabled: true
+      soft_confirm_min: 0.10
+      require_api_for_soft: true
+  pitheta:
+    enabled: auto
+    head_mode: auto
+    conversion_mode: expected
+    pressure_map: [0.0, 0.25, 0.6, 1.0]
+    require_calibration: true
+    calibration_file: temperature_scaling.json
+    checkpoint_dir: artifacts/pitheta_export/latest
+    base_model_path: deberta-v3-base
+    local_files_only: true
+    device: auto
+    max_length: 256
+    batch_size: 8
+    legacy:
+      wall_thresholds:
+        override_instructions: 0.55
+        secret_exfiltration: 0.60
+        tool_or_action_abuse: 0.60
+        policy_evasion: 0.55
+
+
+

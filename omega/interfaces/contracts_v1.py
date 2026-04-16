@@ -114,6 +114,7 @@ class OffDecision:
     off: bool
     severity: str
     actions: List[OffAction]
+    control_outcome: str = "ALLOW"
 
 
 @dataclass
@@ -150,7 +151,9 @@ class OffEvent:
     config_refs: Dict[str, str]
     thresholds: Dict[str, Any]
     walls: List[str]
+    control_outcome: str = "ALLOW"
     trace_id: Optional[str] = None
+    decision_id: Optional[str] = None
 
 
 @dataclass
@@ -165,6 +168,8 @@ class OmegaStepEvent:
     m_prev: List[float]
     m_next: List[float]
     off: bool
+    trace_id: Optional[str] = None
+    decision_id: Optional[str] = None
 
 
 @dataclass
@@ -177,7 +182,10 @@ class EnforcementStepEvent:
     freeze: Dict[str, Any]
     quarantine: Dict[str, Any]
     active_actions: List[Dict[str, Any]]
+    control_outcome: str = "ALLOW"
     cross_session: Optional[Dict[str, Any]] = None
+    trace_id: Optional[str] = None
+    decision_id: Optional[str] = None
 
 
 @dataclass
@@ -193,6 +201,9 @@ class ToolGatewayStepEvent:
     approval: Dict[str, Any]
     execution: Dict[str, Any]
     trace: Dict[str, Any]
+    control_outcome: str = "ALLOW"
+    trace_id: Optional[str] = None
+    decision_id: Optional[str] = None
 
 
 class Projector(Protocol):

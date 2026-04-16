@@ -1,12 +1,9 @@
-.PHONY: test eval eval-advanced check smoke-real demo-attack demo-benign
+.PHONY: test eval check smoke-real
 
 test:
 	python -m pytest
 
 eval:
-	python -m omega eval --suite quick --strict
-
-eval-advanced:
 	python scripts/run_eval.py
 
 check:
@@ -14,9 +11,3 @@ check:
 
 smoke-real:
 	powershell -ExecutionPolicy Bypass -File scripts/run_real_smoke.ps1
-
-demo-attack:
-	python -m omega demo attack
-
-demo-benign:
-	python -m omega demo benign

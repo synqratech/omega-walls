@@ -1,4 +1,4 @@
-# Post-Patch Contour + Comparative Report
+﻿# Post-Patch Contour + Comparative Report
 
 ## Current Snapshot Pointer
 
@@ -34,7 +34,7 @@ This runbook adds one orchestration entrypoint for post-patch validation and one
 
 Output:
 
-- `artifacts/post_patch_contour/<run_id>/manifest.json`
+- `outputs/post_patch_contour/<run_id>/manifest.json`
 - step stdout/stderr captures for all subprocesses
 - references to internal and external reports
 
@@ -47,9 +47,9 @@ Output:
 
 Outputs:
 
-- `artifacts/pint_eval/<run_id>/report.json`
-- `artifacts/wainject_eval/<run_id>/report.json`
-- `artifacts/external_refs/wainjectbench_refs.json`
+- `outputs/pint_eval/<run_id>/report.json`
+- `outputs/wainject_eval/<run_id>/report.json`
+- `outputs/external_refs/wainjectbench_refs.json`
 
 ## 3) Unified comparative report
 
@@ -59,11 +59,12 @@ Outputs:
 
 Output:
 
-- `artifacts/comparative_report/<run_id>/report.json`
-- `artifacts/comparative_report/<run_id>/report.md`
+- `outputs/comparative_report/<run_id>/report.json`
+- `outputs/comparative_report/<run_id>/report.md`
 
 ## Notes
 
 - Evidence policy is `benchmark-maintainer only`.
 - `BIPIA` is included in external-compare only when `prepare_bipia_contexts` marks `qa/abstract` readiness as `true`.
 - `WAInjectBench` is currently emitted as `partial_comparison` unless a benchmark-maintainer detector leaderboard table is available.
+

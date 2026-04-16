@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import random
-from dataclasses import dataclass
+import re
+import time
+from urllib import error as urlerror
+from urllib import request as urlrequest
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence, Tuple
 
@@ -22,6 +27,276 @@ PI_THETA_SCHEMA_VERSION = "pitheta_dataset_v2"
 WALL_ORDER = list(WALLS_V1)
 SOURCE_TRUST_VALUES = {"trusted", "semi_trusted", "untrusted"}
 CHUNK_BUCKET_VALUES = {"64", "128_256", "512"}
+CONTENT_FILTER_MODE_OFF = "off"
+CONTENT_FILTER_MODE_HEURISTIC = "heuristic"
+CONTENT_FILTER_MODE_OPENAI = "openai"
+CONTENT_FILTER_MODE_OPENAI_THEN_HEURISTIC = "openai_then_heuristic"
+CONTENT_FILTER_MODES = {
+    CONTENT_FILTER_MODE_OFF,
+    CONTENT_FILTER_MODE_HEURISTIC,
+    CONTENT_FILTER_MODE_OPENAI,
+    CONTENT_FILTER_MODE_OPENAI_THEN_HEURISTIC,
+}
+OPENAI_MODERATION_BLOCK_CATEGORIES_DEFAULT = (
+    "violence",
+    "violence/graphic",
+    "harassment/threatening",
+    "hate/threatening",
+    "self-harm/instructions",
+    "self-harm/intent",
+    "sexual/minors",
+    "illicit/violent",
+)
+HEURISTIC_HARD_BLOCK_PATTERNS: Tuple[re.Pattern[str], ...] = (
+    re.compile(
+        r"\b(?:how to|instructions?|guide|steps?)\b.{0,64}\b(?:kill|murder|assassinat(?:e|ion)|shoot|stab)\b.{0,32}\b(?:person|people|someone|him|her|them|crowd|civilian)\b",
+        flags=re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:make|build|assemble|craft)\b.{0,32}\b(?:bomb|explosive|ied|pipe bomb|molotov)\b",
+        flags=re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:how to|instructions?|guide|steps?)\b.{0,64}\b(?:make|build|assemble)\b.{0,32}\b(?:bomb|explosive|ied|pipe bomb|molotov|silencer|ghost gun)\b",
+        flags=re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:mass shooting|school shooting|terror attack|suicide attack|car bomb)\b",
+        flags=re.IGNORECASE,
+    ),
+)
+HEURISTIC_HARD_BLOCK_ALLOW_PATTERNS: Tuple[re.Pattern[str], ...] = (
+    re.compile(r"\bkill\s+process(?:es)?\b", flags=re.IGNORECASE),
+    re.compile(r"\bterminate\s+process(?:es)?\b", flags=re.IGNORECASE),
+)
+
+
+class APIRequestError(RuntimeError):
+    def __init__(self, *, code: int, body: str):
+        self.code = int(code)
+        self.body = str(body)
+        super().__init__(f"HTTP {self.code}: {self.body}")
+
+
+@dataclass(frozen=True)
+class ContentFilterDecision:
+    blocked: bool
+    provider: str
+    reason: str
+    categories: Tuple[str, ...]
+    error: str = ""
+
+
+@dataclass
+class DatasetContentFilter:
+    mode: str = CONTENT_FILTER_MODE_OFF
+    fail_closed: bool = False
+    api_key_env: str = "OPENAI_API_KEY"
+    base_url: str = "https://api.openai.com/v1"
+    model: str = "omni-moderation-latest"
+    timeout_sec: float = 20.0
+    max_retries: int = 2
+    backoff_sec: float = 0.75
+    block_categories: Tuple[str, ...] = OPENAI_MODERATION_BLOCK_CATEGORIES_DEFAULT
+    block_score_threshold: float = 0.0
+    apply_splits: Tuple[str, ...] = ("train", "dev", "holdout")
+    log_path: Optional[Path] = None
+    _cache: Dict[str, ContentFilterDecision] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        mode_norm = str(self.mode or CONTENT_FILTER_MODE_OFF).strip().lower()
+        if mode_norm not in CONTENT_FILTER_MODES:
+            raise ValueError(f"invalid content filter mode: {self.mode}")
+        self.mode = mode_norm
+        self.base_url = str(self.base_url or "https://api.openai.com/v1").rstrip("/")
+        self.timeout_sec = max(1.0, float(self.timeout_sec))
+        self.max_retries = max(0, int(self.max_retries))
+        self.backoff_sec = max(0.0, float(self.backoff_sec))
+        self.block_score_threshold = max(0.0, float(self.block_score_threshold))
+        self.block_categories = tuple(str(x).strip() for x in list(self.block_categories or ()) if str(x).strip())
+        apply = []
+        for split in list(self.apply_splits or ()):
+            try:
+                apply.append(_sanitize_split(str(split)))
+            except ValueError:
+                continue
+        self.apply_splits = tuple(sorted(set(apply))) if apply else ("train", "dev", "holdout")
+
+    @property
+    def active(self) -> bool:
+        return self.mode != CONTENT_FILTER_MODE_OFF
+
+    def should_apply_to_split(self, split: str) -> bool:
+        return _sanitize_split(split) in set(self.apply_splits)
+
+    def _cache_key(self, text: str) -> str:
+        return _sha256_bytes(str(text).encode("utf-8"))
+
+    def _heuristic_decision(self, text: str) -> ContentFilterDecision:
+        norm = " ".join(str(text or "").strip().split())
+        if not norm:
+            return ContentFilterDecision(blocked=False, provider="heuristic", reason="", categories=tuple())
+        for allow_pattern in HEURISTIC_HARD_BLOCK_ALLOW_PATTERNS:
+            if allow_pattern.search(norm):
+                return ContentFilterDecision(blocked=False, provider="heuristic", reason="", categories=tuple())
+        for idx, pattern in enumerate(HEURISTIC_HARD_BLOCK_PATTERNS, start=1):
+            if pattern.search(norm):
+                return ContentFilterDecision(
+                    blocked=True,
+                    provider="heuristic",
+                    reason=f"violent_or_weapon_pattern_{idx}",
+                    categories=("violent_or_weapon",),
+                )
+        return ContentFilterDecision(blocked=False, provider="heuristic", reason="", categories=tuple())
+
+    def _api_key(self) -> str:
+        return str(os.getenv(self.api_key_env, "")).strip()
+
+    def _moderate_openai(self, text: str) -> ContentFilterDecision:
+        api_key = self._api_key()
+        if not api_key:
+            raise RuntimeError(f"missing_api_key_env:{self.api_key_env}")
+        url = self.base_url + "/moderations"
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        payload = {"model": self.model, "input": str(text)}
+
+        def _is_retryable_http(code: int) -> bool:
+            c = int(code)
+            return c in {408, 409, 429} or c >= 500
+
+        last_exc: Optional[Exception] = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                resp = _post_json(url=url, payload=payload, headers=headers, timeout_sec=self.timeout_sec)
+                results = resp.get("results", [])
+                first = results[0] if isinstance(results, list) and results else {}
+                if not isinstance(first, Mapping):
+                    raise ValueError("moderation response missing results[0]")
+                flagged = bool(first.get("flagged", False))
+                categories_obj = first.get("categories", {})
+                scores_obj = first.get("category_scores", {})
+                categories_map = categories_obj if isinstance(categories_obj, Mapping) else {}
+                scores_map = scores_obj if isinstance(scores_obj, Mapping) else {}
+                matched: List[str] = []
+                for name in self.block_categories:
+                    cat_flag = categories_map.get(name)
+                    if isinstance(cat_flag, bool) and cat_flag:
+                        matched.append(name)
+                        continue
+                    if self.block_score_threshold > 0.0:
+                        try:
+                            score = float(scores_map.get(name, 0.0))
+                        except Exception:  # noqa: BLE001
+                            score = 0.0
+                        if score >= self.block_score_threshold:
+                            matched.append(f"{name}@{score:.3f}")
+                if flagged and not matched:
+                    matched.append("flagged")
+                matched_sorted = tuple(sorted(set(matched)))
+                return ContentFilterDecision(
+                    blocked=bool(matched_sorted),
+                    provider="openai_moderation",
+                    reason=",".join(matched_sorted) if matched_sorted else "",
+                    categories=matched_sorted,
+                )
+            except APIRequestError as exc:
+                last_exc = exc
+                if (not _is_retryable_http(exc.code)) or attempt >= self.max_retries:
+                    break
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                if attempt >= self.max_retries:
+                    break
+            if attempt < self.max_retries:
+                time.sleep(self.backoff_sec * (2**attempt))
+        raise RuntimeError(f"openai_moderation_failed:{last_exc}")
+
+    def decide(self, text: str) -> ContentFilterDecision:
+        cache_key = self._cache_key(text)
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        if self.mode == CONTENT_FILTER_MODE_HEURISTIC:
+            decision = self._heuristic_decision(text)
+            self._cache[cache_key] = decision
+            return decision
+        if self.mode == CONTENT_FILTER_MODE_OPENAI:
+            try:
+                decision = self._moderate_openai(text)
+            except Exception as exc:  # noqa: BLE001
+                if self.fail_closed:
+                    decision = ContentFilterDecision(
+                        blocked=True,
+                        provider="openai_moderation",
+                        reason="moderation_api_error_fail_closed",
+                        categories=("moderation_api_error",),
+                        error=str(exc),
+                    )
+                else:
+                    decision = ContentFilterDecision(
+                        blocked=False,
+                        provider="openai_moderation",
+                        reason="",
+                        categories=tuple(),
+                        error=str(exc),
+                    )
+            self._cache[cache_key] = decision
+            return decision
+
+        # openai_then_heuristic
+        try:
+            decision = self._moderate_openai(text)
+        except Exception as exc:  # noqa: BLE001
+            if self.fail_closed:
+                decision = ContentFilterDecision(
+                    blocked=True,
+                    provider="openai_moderation",
+                    reason="moderation_api_error_fail_closed",
+                    categories=("moderation_api_error",),
+                    error=str(exc),
+                )
+            else:
+                fallback = self._heuristic_decision(text)
+                if fallback.blocked:
+                    decision = fallback
+                else:
+                    decision = ContentFilterDecision(
+                        blocked=False,
+                        provider="openai_then_heuristic",
+                        reason="",
+                        categories=tuple(),
+                        error=str(exc),
+                    )
+        self._cache[cache_key] = decision
+        return decision
+
+
+def _post_json(*, url: str, payload: Mapping[str, Any], headers: Mapping[str, str], timeout_sec: float) -> Dict[str, Any]:
+    data = json.dumps(dict(payload), ensure_ascii=False).encode("utf-8")
+    req = urlrequest.Request(url=url, data=data, headers=dict(headers), method="POST")
+    try:
+        with urlrequest.urlopen(req, timeout=float(timeout_sec)) as resp:
+            raw = resp.read().decode("utf-8")
+    except urlerror.HTTPError as exc:
+        body = ""
+        try:
+            body = exc.read().decode("utf-8", errors="replace")
+        except Exception:  # noqa: BLE001
+            body = str(exc)
+        raise APIRequestError(code=int(exc.code), body=body) from exc
+    except urlerror.URLError as exc:
+        raise RuntimeError(f"url_error: {exc}") from exc
+    parsed = json.loads(raw)
+    if not isinstance(parsed, dict):
+        raise ValueError("api response is not a JSON object")
+    return parsed
+
+
+def _append_jsonl_row(path: Path, row: Mapping[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(dict(row), ensure_ascii=True) + "\n")
 
 
 @dataclass(frozen=True)
@@ -700,6 +975,99 @@ def _validate_license_policy(dataset_cfg: Mapping[str, Any]) -> None:
         raise ValueError("dataset marked as not allowed_for_train")
 
 
+def _resolve_content_filter_config(
+    *,
+    snapshot: Mapping[str, Any],
+    output_dir: Path,
+    content_filter: Optional[Mapping[str, Any]],
+) -> DatasetContentFilter:
+    cfg_from_resolved = ((snapshot.get("pitheta_train", {}) or {}).get("content_filter", {}) or {})
+    merged: Dict[str, Any] = dict(cfg_from_resolved if isinstance(cfg_from_resolved, Mapping) else {})
+    if isinstance(content_filter, Mapping):
+        merged.update(dict(content_filter))
+
+    env_mode = str(os.getenv("PITHETA_CONTENT_FILTER_MODE", "")).strip().lower()
+    if env_mode:
+        merged["mode"] = env_mode
+
+    mode = str(merged.get("mode", CONTENT_FILTER_MODE_OFF)).strip().lower()
+    if mode not in CONTENT_FILTER_MODES:
+        raise ValueError(f"invalid content filter mode: {mode}")
+
+    log_path_raw = str(merged.get("log_path", "")).strip()
+    log_path: Optional[Path] = (output_dir / "content_filter_drops.jsonl") if (mode != CONTENT_FILTER_MODE_OFF) else None
+    if log_path_raw:
+        candidate = Path(log_path_raw)
+        if not candidate.is_absolute():
+            candidate = (output_dir / candidate).resolve()
+        log_path = candidate
+
+    return DatasetContentFilter(
+        mode=mode,
+        fail_closed=bool(merged.get("fail_closed", False)),
+        api_key_env=str(merged.get("api_key_env", "OPENAI_API_KEY")),
+        base_url=str(merged.get("base_url", os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"))),
+        model=str(merged.get("model", "omni-moderation-latest")),
+        timeout_sec=float(merged.get("timeout_sec", 20.0)),
+        max_retries=int(merged.get("max_retries", 2)),
+        backoff_sec=float(merged.get("backoff_sec", 0.75)),
+        block_categories=tuple(merged.get("block_categories", OPENAI_MODERATION_BLOCK_CATEGORIES_DEFAULT)),
+        block_score_threshold=float(merged.get("block_score_threshold", 0.0)),
+        apply_splits=tuple(merged.get("apply_splits", ("train", "dev", "holdout"))),
+        log_path=log_path,
+    )
+
+
+def _apply_content_filter_to_rows(
+    *,
+    rows: Sequence[Mapping[str, Any]],
+    split: str,
+    content_filter: DatasetContentFilter,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    if (not content_filter.active) or (not content_filter.should_apply_to_split(split)):
+        return [dict(r) for r in rows], {"checked": 0, "dropped": 0, "errors": 0, "drop_reasons": {}}
+
+    kept: List[Dict[str, Any]] = []
+    checked = 0
+    dropped = 0
+    errors = 0
+    drop_reasons: Dict[str, int] = {}
+
+    for row in rows:
+        row_dict = dict(row)
+        text = str(row_dict.get("text", ""))
+        decision = content_filter.decide(text)
+        checked += 1
+        if decision.error:
+            errors += 1
+        if decision.blocked:
+            dropped += 1
+            reason = str(decision.reason or "blocked")
+            drop_reasons[reason] = int(drop_reasons.get(reason, 0)) + 1
+            if content_filter.log_path is not None:
+                _append_jsonl_row(
+                    content_filter.log_path,
+                    {
+                        "sample_id": str(row_dict.get("sample_id", "")),
+                        "split": str(split),
+                        "source": str(row_dict.get("source", "")),
+                        "provider": str(decision.provider),
+                        "reason": reason,
+                        "categories": list(decision.categories),
+                        "error": str(decision.error or ""),
+                    },
+                )
+            continue
+        kept.append(row_dict)
+
+    return kept, {
+        "checked": int(checked),
+        "dropped": int(dropped),
+        "errors": int(errors),
+        "drop_reasons": dict(sorted(drop_reasons.items())),
+    }
+
+
 def _build_manifests(
     *,
     output_dir: Path,
@@ -711,6 +1079,7 @@ def _build_manifests(
     rows_dev: Sequence[Mapping[str, Any]],
     rows_holdout: Sequence[Mapping[str, Any]],
     strict: bool,
+    content_filter_summary: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     registry_hash = _sha256_file(Path(registry_path))
     schema_hash = _sha256_bytes(json.dumps({"schema_version": PI_THETA_SCHEMA_VERSION, "walls": WALL_ORDER}).encode("utf-8"))
@@ -742,6 +1111,8 @@ def _build_manifests(
         "records_sha256": split_records_sha,
         "schema_hash": schema_hash,
     }
+    if isinstance(content_filter_summary, Mapping):
+        dataset_manifest["content_filter"] = dict(content_filter_summary)
     holdout_manifest = {
         "schema_version": PI_THETA_SCHEMA_VERSION,
         "seed": int(seed),
@@ -814,6 +1185,7 @@ def build_pitheta_dataset_artifacts(
     profile: str = "dev",
     strict: bool = False,
     use_semantic_labeling: bool = False,
+    content_filter: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
@@ -837,6 +1209,11 @@ def build_pitheta_dataset_artifacts(
     labeling_cfg = (snapshot.resolved.get("pitheta_train", {}) or {}).get("labeling", {}) or {}
     ordinal_bins = list(labeling_cfg.get("ordinal_bins", [0.45, 1.10, 2.00]))
     active_floor_gold = int(labeling_cfg.get("active_floor_gold", 2))
+    content_filter_engine = _resolve_content_filter_config(
+        snapshot=snapshot.resolved,
+        output_dir=output,
+        content_filter=content_filter,
+    )
 
     dataset_rows: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
     for ds_cfg_raw in registry.get("datasets", []):
@@ -932,6 +1309,38 @@ def build_pitheta_dataset_artifacts(
         _validate_record(row_norm)
         dev_rows[idx] = row_norm
 
+    train_rows, train_filter_stats = _apply_content_filter_to_rows(
+        rows=train_rows,
+        split="train",
+        content_filter=content_filter_engine,
+    )
+    dev_rows, dev_filter_stats = _apply_content_filter_to_rows(
+        rows=dev_rows,
+        split="dev",
+        content_filter=content_filter_engine,
+    )
+    holdout_rows, holdout_filter_stats = _apply_content_filter_to_rows(
+        rows=holdout_rows,
+        split="holdout",
+        content_filter=content_filter_engine,
+    )
+    content_filter_summary = {
+        "mode": content_filter_engine.mode,
+        "fail_closed": bool(content_filter_engine.fail_closed),
+        "apply_splits": list(content_filter_engine.apply_splits),
+        "stats": {
+            "train": train_filter_stats,
+            "dev": dev_filter_stats,
+            "holdout": holdout_filter_stats,
+            "dropped_total": int(
+                int(train_filter_stats.get("dropped", 0))
+                + int(dev_filter_stats.get("dropped", 0))
+                + int(holdout_filter_stats.get("dropped", 0))
+            ),
+        },
+        "log_path": (content_filter_engine.log_path.as_posix() if content_filter_engine.log_path is not None else None),
+    }
+
     _jsonl_write(output / "train.jsonl", train_rows)
     _jsonl_write(output / "dev.jsonl", dev_rows)
     _jsonl_write(output / "holdout.jsonl", holdout_rows)
@@ -959,6 +1368,7 @@ def build_pitheta_dataset_artifacts(
         rows_dev=dev_rows,
         rows_holdout=holdout_rows,
         strict=strict,
+        content_filter_summary=content_filter_summary,
     )
 
     report = {
@@ -979,6 +1389,7 @@ def build_pitheta_dataset_artifacts(
             "holdout_manifest": (output / "holdout_manifest.json").as_posix(),
             "config_hashes": (output / "config_hashes.json").as_posix(),
         },
+        "content_filter": content_filter_summary,
         "fingerprints": {
             "train_sha256": _sha256_file(output / "train.jsonl"),
             "dev_sha256": _sha256_file(output / "dev.jsonl"),

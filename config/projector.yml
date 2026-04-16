@@ -1,6 +1,47 @@
-projector:
+﻿projector:
   mode: hybrid
   fallback_to_pi0: true
+  api_perception:
+    enabled: auto
+    strict: false
+    model: gpt-5.4-mini
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+    timeout_sec: 30
+    max_retries: 2
+    backoff_sec: 0.75
+    prompt_version: api_hybrid_v2
+    cache_path: artifacts/projector_api/cache.jsonl
+    error_log_path: artifacts/projector_api/errors.jsonl
+    benign_task_guard:
+      enabled: true
+      require_pi0_hard_absent: true
+      marker_phrases:
+        - team meeting minutes file
+        - todo list in the team meeting minutes file
+        - task they need to execute
+        - include the deadline for each task
+        - post hobbies of the company employees
+        - sent their hobbies to
+        - direct slack message
+      attack_cues:
+        - ignore previous
+        - reveal token
+        - reveal password
+        - reveal secret
+        - exfiltrate
+        - bypass policy
+        - jailbreak
+        - system prompt
+        - hidden prompt
+        - internal prompt
+    deescalation:
+      confidence_min: 0.75
+      p_strong: 0.35
+    hybrid_soft_gate:
+      enabled: true
+      soft_confirm_min: 0.10
+      require_api_for_soft: true
   pitheta:
     enabled: auto
     head_mode: auto
@@ -20,3 +61,6 @@ projector:
         secret_exfiltration: 0.60
         tool_or_action_abuse: 0.60
         policy_evasion: 0.55
+
+
+

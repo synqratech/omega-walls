@@ -1,4 +1,4 @@
-# External Assets Bootstrap (Models + Datasets)
+﻿# External Assets Bootstrap (Models + Datasets)
 
 ## Purpose
 
@@ -179,7 +179,7 @@ python scripts/run_rule_cycle.py `
 
 1. Local model directories (`e5-small-v2`, `deberta-v3-base`, etc.)
 2. Full heavyweight benchmark mirrors under `data/` (unless license permits and size policy allows)
-3. Generated artifacts under `artifacts/`
+3. Generated artifacts under `outputs/`
 
 Publish instructions + manifests + small deterministic test packs instead.
 
@@ -190,3 +190,4 @@ This project references third-party models/datasets. Users are responsible for:
 1. Accepting upstream licenses and usage terms.
 2. Respecting redistribution limits (especially BIPIA `qa`/`abstract` source material).
 3. Pinning exact revisions for regulated environments.
+
