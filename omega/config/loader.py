@@ -519,9 +519,10 @@ def validate_resolved_config(config: Dict[str, Any]) -> None:
             if isinstance(outreach_cfg, dict):
                 if bool(outreach_cfg.get("enabled", True)):
                     for key, default in (
-                        ("github_url", "https://github.com/omega-walls/omega-walls"),
-                        ("docs_url", "https://github.com/omega-walls/omega-walls/tree/main/docs"),
-                        ("linkedin_url", "https://www.linkedin.com/company/omega-walls"),
+                        ("github_url", "https://github.com/synqratech/omega-walls"),
+                        ("docs_url", "https://github.com/synqratech/omega-walls/tree/main/docs"),
+                        ("linkedin_url", "https://www.linkedin.com/in/anvifedotov/"),
+                        ("contact_email", "anton.f@synqra.tech"),
                     ):
                         if not str(outreach_cfg.get(key, default)).strip():
                             raise ValueError(f"notifications.startup.outreach.{key} must be non-empty")

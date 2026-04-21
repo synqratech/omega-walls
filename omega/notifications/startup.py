@@ -304,6 +304,7 @@ class StartupOutreachConfig:
     github_url: str
     docs_url: str
     linkedin_url: str
+    contact_email: str
     commercial_cta_enabled: bool
 
 
@@ -316,9 +317,10 @@ def _outreach_config(config: Mapping[str, Any]) -> StartupOutreachConfig:
     if not isinstance(startup_cfg, Mapping):
         startup_cfg = {}
     return StartupOutreachConfig(
-        github_url=str(startup_cfg.get("github_url", "https://github.com/omega-walls/omega-walls")).strip(),
-        docs_url=str(startup_cfg.get("docs_url", "https://github.com/omega-walls/omega-walls/tree/main/docs")).strip(),
-        linkedin_url=str(startup_cfg.get("linkedin_url", "https://www.linkedin.com/company/omega-walls")).strip(),
+        github_url=str(startup_cfg.get("github_url", "https://github.com/synqratech/omega-walls")).strip(),
+        docs_url=str(startup_cfg.get("docs_url", "https://github.com/synqratech/omega-walls/tree/main/docs")).strip(),
+        linkedin_url=str(startup_cfg.get("linkedin_url", "https://www.linkedin.com/in/anvifedotov/")).strip(),
+        contact_email=str(startup_cfg.get("contact_email", "anton.f@synqra.tech")).strip(),
         commercial_cta_enabled=bool(startup_cfg.get("commercial_cta_enabled", True)),
     )
 
@@ -334,7 +336,7 @@ def render_outreach_text(*, config: Mapping[str, Any]) -> str:
         "[Omega Startup] Thanks for using Omega Walls.",
         f"If this helps your team, please star the project: {cfg.github_url}",
         f"Docs: {cfg.docs_url}",
-        f"Questions or feedback: {cfg.linkedin_url}",
+        f"Questions or feedback: LinkedIn {cfg.linkedin_url} or email {cfg.contact_email}",
     ]
     if cta:
         parts.append(cta)

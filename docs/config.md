@@ -350,9 +350,10 @@ notifications:
       terminal: true
       channels: true
       once_per_process: true
-      github_url: https://github.com/omega-walls/omega-walls
-      docs_url: https://github.com/omega-walls/omega-walls/tree/main/docs
-      linkedin_url: https://www.linkedin.com/company/omega-walls
+      github_url: https://github.com/synqratech/omega-walls
+      docs_url: https://github.com/synqratech/omega-walls/tree/main/docs
+      linkedin_url: https://www.linkedin.com/in/anvifedotov/
+      contact_email: anton.f@synqra.tech
       commercial_cta_enabled: true
   approvals:
     backend: sqlite   # memory|sqlite
@@ -384,7 +385,7 @@ notifications:
 
 Startup behavior:
 - `startup.preflight`: emits a startup checklist with `OK|WARN|MISSING|DISABLED` statuses.
-- `startup.outreach`: emits a short one-time onboarding message (GitHub/docs/LinkedIn).
+- `startup.outreach`: emits a short one-time onboarding message (GitHub/docs/LinkedIn/email).
 - Channel delivery requires `notifications.enabled=true`; terminal output can still be enabled independently.
 - `once_per_process=true` deduplicates per process.
 
