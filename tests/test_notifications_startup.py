@@ -8,7 +8,7 @@ import pytest
 
 from omega.notifications.dispatcher import NotificationDispatcher
 from omega.notifications.models import ActionRequestEvent, RiskEvent, new_event_id, utc_now_iso
-from omega.notifications.startup import build_preflight_checklist
+from omega.notifications.startup import build_preflight_checklist, render_preflight_text
 from omega.notifications.store import InMemoryApprovalStore
 
 
@@ -99,6 +99,9 @@ def test_preflight_builder_semantic_fallback_and_channel_missing(monkeypatch: py
     assert statuses["semantic_readiness"] == "WARN"
     assert statuses["slack_channel"] == "MISSING"
     assert checklist["overall_status"] in {"WARN", "MISSING"}
+    text = render_preflight_text(checklist)
+    assert "Slack alerts are not fully configured." in text
+    assert "Semantic fallback appears active." in text
 
 
 def test_preflight_builder_notifications_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -119,6 +122,8 @@ def test_preflight_builder_notifications_disabled(monkeypatch: pytest.MonkeyPatc
     statuses = {str(item["name"]): str(item["status"]) for item in checklist["items"]}
     assert statuses["notifications_enabled"] == "DISABLED"
     assert statuses["semantic_readiness"] == "OK"
+    text = render_preflight_text(checklist)
+    assert "Channel alerts are disabled globally." in text
 
 
 def test_dispatcher_startup_dedup_once_per_process() -> None:
@@ -153,4 +158,3 @@ def test_dispatcher_startup_fail_open_on_provider_error() -> None:
         assert int(snap.get("notifications_failed", 0)) >= 1
     finally:
         dispatcher.close()
-

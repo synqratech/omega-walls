@@ -246,19 +246,67 @@ def build_preflight_checklist(
 
 
 def render_preflight_text(checklist: Mapping[str, Any]) -> str:
+    items = list(checklist.get("items", []) or [])
     head = (
         f"[Omega Startup] Preflight checklist "
         f"(surface={checklist.get('surface', 'n/a')}, profile={checklist.get('profile', 'n/a')}) "
         f"overall={checklist.get('overall_status', 'n/a')}"
     )
     lines: List[str] = [head]
-    for item in list(checklist.get("items", []) or []):
+    for item in items:
         status = str(item.get("status", "DISABLED")).upper()
         name = str(item.get("name", "item"))
         details = item.get("details", {})
         brief = json.dumps(details, ensure_ascii=False, sort_keys=True)
         lines.append(f"- [{status}] {name}: {brief}")
+    hints = _build_preflight_hints(items)
+    if hints:
+        lines.append("Hints:")
+        for hint in hints:
+            lines.append(f"- {hint}")
     return "\n".join(lines)
+
+
+def _build_preflight_hints(items: List[Mapping[str, Any]]) -> List[str]:
+    by_name = {str(item.get("name", "")): item for item in items}
+    hints: List[str] = []
+
+    def _append(text: str) -> None:
+        msg = str(text).strip()
+        if msg and msg not in hints:
+            hints.append(msg)
+
+    notif_item = by_name.get("notifications_enabled")
+    if notif_item and str(notif_item.get("status", "")).upper() == "DISABLED":
+        _append("Channel alerts are disabled globally. Set notifications.enabled=true to send Slack/Telegram alerts.")
+
+    slack_item = by_name.get("slack_channel")
+    if slack_item and str(slack_item.get("status", "")).upper() == "MISSING":
+        details = slack_item.get("details", {}) if isinstance(slack_item.get("details", {}), Mapping) else {}
+        token_env = str(details.get("token_env", "SLACK_BOT_TOKEN")).strip() or "SLACK_BOT_TOKEN"
+        channel_env = str(details.get("channel_env", "SLACK_ALERT_CHANNEL")).strip() or "SLACK_ALERT_CHANNEL"
+        _append(
+            f"Slack alerts are not fully configured. Set {token_env} and {channel_env}, or disable notifications.slack.enabled."
+        )
+
+    tg_item = by_name.get("telegram_channel")
+    if tg_item and str(tg_item.get("status", "")).upper() == "MISSING":
+        details = tg_item.get("details", {}) if isinstance(tg_item.get("details", {}), Mapping) else {}
+        token_env = str(details.get("bot_token_env", "TG_BOT_TOKEN")).strip() or "TG_BOT_TOKEN"
+        chat_env = str(details.get("chat_id_env", "TG_ADMIN_CHAT_ID")).strip() or "TG_ADMIN_CHAT_ID"
+        _append(
+            f"Telegram alerts are not fully configured. Set {token_env} and {chat_env}, or disable notifications.telegram.enabled."
+        )
+
+    semantic_item = by_name.get("semantic_readiness")
+    if semantic_item and str(semantic_item.get("status", "")).upper() == "WARN":
+        details = semantic_item.get("details", {}) if isinstance(semantic_item.get("details", {}), Mapping) else {}
+        if bool(details.get("attempted", False)) and not bool(details.get("active", True)):
+            _append(
+                "Semantic fallback appears active. Install transformers+torch to enable semantic encoder, or intentionally disable semantic mode."
+            )
+
+    return hints
 
 
 def build_preflight_event(
