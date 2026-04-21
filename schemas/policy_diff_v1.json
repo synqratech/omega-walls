@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "policy_diff_v1.json",
+  "title": "omega_policy_diff_v1",
+  "type": "object",
+  "required": [
+    "event",
+    "schema_version",
+    "timestamp",
+    "mode",
+    "replay_id",
+    "replay_input",
+    "policy_a",
+    "policy_b",
+    "execution",
+    "determinism",
+    "policy_diff",
+    "result_a",
+    "result_b"
+  ],
+  "properties": {
+    "event": {"const": "omega_policy_diff_v1"},
+    "schema_version": {"type": "string"},
+    "timestamp": {"type": "string"},
+    "mode": {"type": "string"},
+    "replay_id": {"type": "string"},
+    "replay_input": {"type": "string"},
+    "policy_a": {
+      "type": "object",
+      "required": ["policy_ref", "policy_version", "resolved_config_sha256"],
+      "properties": {
+        "policy_ref": {"type": "string"},
+        "policy_version": {"type": "string"},
+        "resolved_config_sha256": {"type": "string"}
+      }
+    },
+    "policy_b": {
+      "type": "object",
+      "required": ["policy_ref", "policy_version", "resolved_config_sha256"],
+      "properties": {
+        "policy_ref": {"type": "string"},
+        "policy_version": {"type": "string"},
+        "resolved_config_sha256": {"type": "string"}
+      }
+    },
+    "execution": {
+      "type": "object",
+      "required": ["state_bootstrap", "deterministic_runs"],
+      "properties": {
+        "state_bootstrap": {"type": "string"},
+        "deterministic_runs": {"type": "integer", "minimum": 2}
+      }
+    },
+    "determinism": {"type": "object"},
+    "determinism_runs": {"type": "object"},
+    "policy_diff": {
+      "type": "object",
+      "required": ["no_decision_delta", "turn_deltas"],
+      "properties": {
+        "no_decision_delta": {"type": "boolean"},
+        "turn_deltas": {"type": "array", "items": {"type": "object"}}
+      }
+    },
+    "result_a": {"type": "object"},
+    "result_b": {"type": "object"}
+  }
+}

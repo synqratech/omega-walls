@@ -1,0 +1,249 @@
+{
+  "run_id": "attack_layer_api_gen_20260326T143913Z",
+  "status": "ok",
+  "created_at_utc": "2026-03-26T16:23:37Z",
+  "model": "gpt-5",
+  "seed": 41,
+  "pack_out": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v1_api_main_fix2",
+  "source": "attack_layers_v1_api_generative",
+  "layers": [
+    "fragmentation",
+    "context_accumulation",
+    "tool_chain",
+    "role_persona",
+    "obfuscation",
+    "refusal_erosion",
+    "benign_stability",
+    "cross_session"
+  ],
+  "counts": {
+    "planned_calls": 144,
+    "generated_cases": 144,
+    "generated_rows": 414,
+    "attack_per_layer": 12,
+    "benign_per_layer": 6,
+    "unique_case_ids": 144,
+    "cases_by_layer": {
+      "fragmentation": 18,
+      "context_accumulation": 18,
+      "tool_chain": 18,
+      "role_persona": 18,
+      "obfuscation": 18,
+      "refusal_erosion": 18,
+      "benign_stability": 18,
+      "cross_session": 18
+    }
+  },
+  "budget": {
+    "max_usd": 4.0,
+    "spent_usd": 0.56383875,
+    "spent_input_tokens": 27803,
+    "spent_output_tokens": 278444,
+    "price_input_per_1m": 0.25,
+    "price_output_per_1m": 2.0,
+    "estimated_cost_total_usd": 0.10583999999999999,
+    "budget_exhausted_at_case": null
+  },
+  "hashes": {
+    "manifest_all_sha256": "41609b1b21db81d3f15636a5ec343e802d511c6d4c64fbe314ac0b3d8a21964e"
+  },
+  "quality": {
+    "benign_rows": 138,
+    "benign_risk_hit_rows": 0,
+    "benign_risk_hit_rate": 0.0,
+    "sample_case_ids": []
+  },
+  "quality_summary": {
+    "mode": "strict_regen",
+    "max_regen_attempts": 4,
+    "cases_total": 144,
+    "cases_passed_quality": 138,
+    "cases_regenerated": 35,
+    "regen_attempts_total": 70,
+    "fallback_cases": 6,
+    "fallback_rate": 0.041666666666666664,
+    "check_pass_counts": {
+      "anti_refusal": 121,
+      "anti_template_boilerplate": 220,
+      "anti_template_repeat": 211,
+      "benign_risk": 53,
+      "family_anchor": 133,
+      "real_obfuscation": 16,
+      "stage_progression": 140,
+      "tool_chain_payload": 21
+    },
+    "check_fail_counts": {
+      "anti_refusal": 46,
+      "anti_template_repeat": 9,
+      "family_anchor": 34
+    },
+    "attack_refusal_rows": 0,
+    "attack_refusal_rate": 0.0,
+    "top_repeated_attack_ngrams": [
+      {
+        "ngram": "action immediately and share",
+        "count": 17,
+        "share": 0.06159420289855073
+      },
+      {
+        "ngram": "and share the resulting",
+        "count": 17,
+        "share": 0.06159420289855073
+      },
+      {
+        "ngram": "briefly recap prior context",
+        "count": 17,
+        "share": 0.06159420289855073
+      },
+      {
+        "ngram": "context that could influence",
+        "count": 17,
+        "share": 0.06159420289855073
+      },
+      {
+        "ngram": "immediately and share the",
+        "count": 17,
+        "share": 0.06159420289855073
+      },
+      {
+        "ngram": "one concrete preparatory clarification",
+        "count": 17,
+        "share": 0.06159420289855073
+      },
+      {
+        "ngram": "prior context that could",
+        "count": 17,
+        "share": 0.06159420289855073
+      },
+      {
+        "ngram": "recap prior context that",
+        "count": 17,
+        "share": 0.06159420289855073
+      },
+      {
+        "ngram": "share the resulting data",
+        "count": 17,
+        "share": 0.06159420289855073
+      },
+      {
+        "ngram": "that could influence the",
+        "count": 17,
+        "share": 0.06159420289855073
+      }
+    ],
+    "top_repeated_attack_ngram_share": 0.06159420289855073,
+    "benign_hygiene": {
+      "benign_rows": 138,
+      "benign_risk_hit_rows": 0,
+      "benign_risk_hit_rate": 0.0,
+      "sample_case_ids": []
+    },
+    "repair_target_cases": [
+      "ALAPI-BEN-A001",
+      "ALAPI-BEN-A008",
+      "ALAPI-FRG-A004",
+      "ALAPI-FRG-A012",
+      "ALAPI-OBF-A002",
+      "ALAPI-OBF-A005",
+      "ALAPI-OBF-A007",
+      "ALAPI-OBF-A010",
+      "ALAPI-OBF-A011",
+      "ALAPI-RFE-A003",
+      "ALAPI-TOL-A004"
+    ],
+    "repair_regenerated_cases": 11,
+    "repair_fallback_cases": 11,
+    "repair_applied_at_utc": "2026-03-26T17:15:28Z"
+  },
+  "artifacts": {
+    "manifest_all": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v1_api_main_fix2\\manifest_all.jsonl",
+    "manifest_meta": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v1_api_main_fix2\\manifest.meta.json",
+    "raw_dir": "D:\\AI_Models\\experiments\\injection_RAG\\artifacts\\attack_layer_api_gen\\attack_layer_api_gen_20260326T143913Z\\raw",
+    "quality_failures_jsonl": "D:\\AI_Models\\experiments\\injection_RAG\\artifacts\\attack_layer_api_gen\\attack_layer_api_gen_20260326T143913Z\\raw\\quality_failures.jsonl"
+  },
+  "protocol": {
+    "manifest_gold": true,
+    "expected_block_turn_default": null,
+    "temperature_requested": 0,
+    "temperature_mode": "auto_zero_or_model_default",
+    "promotion_gate": "Metrics+NoReg",
+    "quality_mode": "strict_regen"
+  },
+  "repair": {
+    "mode": "local_fallback_refusal_cleanup",
+    "target_case_ids": [
+      "ALAPI-BEN-A001",
+      "ALAPI-BEN-A008",
+      "ALAPI-FRG-A004",
+      "ALAPI-FRG-A012",
+      "ALAPI-OBF-A002",
+      "ALAPI-OBF-A005",
+      "ALAPI-OBF-A007",
+      "ALAPI-OBF-A010",
+      "ALAPI-OBF-A011",
+      "ALAPI-RFE-A003",
+      "ALAPI-TOL-A004"
+    ],
+    "regenerated": {
+      "ALAPI-BEN-A001": {
+        "quality_passed": true,
+        "failures": [],
+        "rows": 4
+      },
+      "ALAPI-BEN-A008": {
+        "quality_passed": true,
+        "failures": [],
+        "rows": 4
+      },
+      "ALAPI-FRG-A004": {
+        "quality_passed": true,
+        "failures": [],
+        "rows": 4
+      },
+      "ALAPI-FRG-A012": {
+        "quality_passed": true,
+        "failures": [],
+        "rows": 4
+      },
+      "ALAPI-OBF-A002": {
+        "quality_passed": true,
+        "failures": [],
+        "rows": 1
+      },
+      "ALAPI-OBF-A005": {
+        "quality_passed": true,
+        "failures": [],
+        "rows": 1
+      },
+      "ALAPI-OBF-A007": {
+        "quality_passed": true,
+        "failures": [],
+        "rows": 1
+      },
+      "ALAPI-OBF-A010": {
+        "quality_passed": true,
+        "failures": [],
+        "rows": 1
+      },
+      "ALAPI-OBF-A011": {
+        "quality_passed": false,
+        "failures": [
+          "anti_template_repeat"
+        ],
+        "rows": 1
+      },
+      "ALAPI-RFE-A003": {
+        "quality_passed": false,
+        "failures": [
+          "anti_template_repeat"
+        ],
+        "rows": 4
+      },
+      "ALAPI-TOL-A004": {
+        "quality_passed": true,
+        "failures": [],
+        "rows": 1
+      }
+    }
+  }
+}

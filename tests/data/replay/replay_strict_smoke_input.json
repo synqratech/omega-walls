@@ -1,0 +1,26 @@
+{
+  "event": "omega_replay_input_v1",
+  "schema_version": "1.0",
+  "replay_id": "replay_strict_smoke_v1",
+  "execution": {
+    "state_bootstrap": "fresh_state"
+  },
+  "turns": [
+    {
+      "turn_index": 1,
+      "session_id": "replay-smoke-session",
+      "actor_id": "replay-smoke-actor",
+      "user_query": "Summarize the packet safely.",
+      "packet_items": [
+        {
+          "doc_id": "doc-safe-001",
+          "source_id": "tests:replay-smoke",
+          "source_type": "retrieved_chunk",
+          "trust": "trusted",
+          "text": "General harmless information for deterministic replay smoke."
+        }
+      ],
+      "tool_requests": []
+    }
+  ]
+}

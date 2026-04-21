@@ -1,0 +1,1 @@
+List steps from incident response playbook: isolate source, escalate, and document timeline.

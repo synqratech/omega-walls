@@ -42,9 +42,8 @@ def _run_smoke(name: str, argv: list[str], out_dir: Path) -> dict[str, Any]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run framework integration smokes (LangChain + LlamaIndex)")
+    parser = argparse.ArgumentParser(description="Run framework guard smokes (LangChain/LangGraph/LlamaIndex/Haystack/AutoGen/CrewAI)")
     parser.add_argument("--profile", default="dev")
-    parser.add_argument("--top-k", type=int, default=4)
     parser.add_argument("--strict", action="store_true")
     parser.add_argument("--output-dir", default=None)
     args = parser.parse_args()
@@ -55,44 +54,38 @@ def main() -> int:
     run_dir.mkdir(parents=True, exist_ok=True)
 
     py = sys.executable
-    langchain_report_path = run_dir / "langchain_report.json"
-    llamaindex_report_path = run_dir / "llamaindex_report.json"
-
-    command_runs = [
-        _run_smoke(
-            "smoke_langchain",
-            [
-                py,
-                "scripts/smoke_langchain.py",
-                "--profile",
-                args.profile,
-                "--top-k",
-                str(args.top_k),
-                "--output",
-                str(langchain_report_path),
-                *(["--strict"] if args.strict else []),
-            ],
-            run_dir,
-        ),
-        _run_smoke(
-            "smoke_llamaindex",
-            [
-                py,
-                "scripts/smoke_llamaindex.py",
-                "--profile",
-                args.profile,
-                "--top-k",
-                str(args.top_k),
-                "--output",
-                str(llamaindex_report_path),
-                *(["--strict"] if args.strict else []),
-            ],
-            run_dir,
-        ),
+    smoke_specs = [
+        ("langchain_guard", "scripts/smoke_langchain_guard.py"),
+        ("langgraph_guard", "scripts/smoke_langgraph_guard.py"),
+        ("llamaindex_guard", "scripts/smoke_llamaindex_guard.py"),
+        ("haystack_guard", "scripts/smoke_haystack_guard.py"),
+        ("autogen_guard", "scripts/smoke_autogen_guard.py"),
+        ("crewai_guard", "scripts/smoke_crewai_guard.py"),
     ]
 
+    command_runs = []
+    report_paths: dict[str, Path] = {}
+    for key, script_path in smoke_specs:
+        report_path = run_dir / f"{key}_report.json"
+        report_paths[key] = report_path
+        command_runs.append(
+            _run_smoke(
+                f"smoke_{key}",
+                [
+                    py,
+                    script_path,
+                    "--profile",
+                    args.profile,
+                    "--output",
+                    str(report_path),
+                    *(["--strict"] if args.strict else []),
+                ],
+                run_dir,
+            )
+        )
+
     reports: dict[str, Any] = {}
-    for path, key in ((langchain_report_path, "langchain"), (llamaindex_report_path, "llamaindex")):
+    for key, path in report_paths.items():
         if path.exists():
             reports[key] = _load_json(path)
         else:
@@ -125,6 +118,7 @@ def main() -> int:
         "profile": args.profile,
         "strict": bool(args.strict),
         "run_dir": str(run_dir),
+        "framework_count": len(smoke_specs),
         "frameworks": frameworks_summary,
         "metrics": {
             "total_failures": total_failures,

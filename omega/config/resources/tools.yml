@@ -4,6 +4,35 @@ tools:
   unknown_tool_policy: DENY
   freeze:
     read_only_exception: true
+  arg_validation:
+    enabled: true
+    fail_mode: deny
+    network_post:
+      max_payload_bytes: 8192
+      max_headers: 16
+      max_header_key_chars: 64
+      max_header_value_chars: 256
+    write_file:
+      max_filename_chars: 120
+      max_content_bytes: 8192
+    shell_like_name_patterns:
+      - shell
+      - bash
+      - cmd
+      - exec
+      - execute
+      - powershell
+      - terminal
+      - sh
+    shell_like:
+      max_command_chars: 2048
+      destructive_patterns:
+        - "\\brm\\s+-rf\\b"
+        - "\\bdel\\s+/f\\s+/q\\b"
+        - "\\bformat\\s+[a-z]:"
+        - "\\bmkfs(\\.| )"
+        - "\\bdd\\s+if="
+        - "\\bshutdown\\s+(-s|/s)\\b"
   capabilities:
     retrieval_readonly:
       mode: read_only

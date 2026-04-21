@@ -427,6 +427,95 @@ def test_decision_mapping_allow_block_quarantine():
     assert quarantine_out["verdict"] == "quarantine"
 
 
+def test_hallucination_guard_lite_warns_on_low_confidence_untrusted_allow_path():
+    cfg = _base_config()
+    cfg["api"].setdefault("policy_mapper", {})["hallucination_guard_lite"] = {
+        "enabled": True,
+        "apply_when_source_trust": ["untrusted", "mixed"],
+        "low_confidence_lte": 0.35,
+        "only_if_intended_allow": True,
+    }
+    runtime = _runtime(step_result=_step_result(off=False, p=[0.0, 0.0, 0.0, 0.0], m_next=[0.0, 0.0, 0.0, 0.0]), config=cfg)
+    out = api_server._scan_request(
+        runtime,
+        {"tenant_id": "tenant-hg", "request_id": "req-hg", "use_extracted_text": True, "extracted_text": "safe text"},
+    )
+    assert out["verdict"] == "allow"
+    assert out["control_outcome"] == "WARN"
+    assert "hallucination_guard_lite_low_confidence_untrusted" in out["reasons"]
+    constraints = out.get("response_constraints", {})
+    assert constraints.get("enabled") is True
+    assert constraints.get("disclaimer_required") is True
+    assert constraints.get("citation_required") is True
+    assert constraints.get("reason_code") == "hallucination_guard_lite_low_confidence_untrusted"
+    assert isinstance(constraints.get("citation_candidates"), list) and len(constraints["citation_candidates"]) >= 1
+    assert constraints.get("suggested_mode") == "answer_with_uncertainty_and_citations"
+    assert out["policy_trace"]["hallucination_guard_lite"]["triggered"] is True
+    assert out["monitor"]["hallucination_guard_lite"]["triggered"] is True
+
+
+def test_hallucination_guard_lite_does_not_trigger_for_trusted_sources():
+    cfg = _base_config()
+    cfg["source_policy"] = {
+        "default_trust": "untrusted",
+        "source_type_to_trust": {"other": "trusted"},
+        "source_prefix_to_trust": {},
+    }
+    cfg["api"].setdefault("policy_mapper", {})["hallucination_guard_lite"] = {
+        "enabled": True,
+        "apply_when_source_trust": ["untrusted", "mixed"],
+        "low_confidence_lte": 0.35,
+        "only_if_intended_allow": True,
+    }
+    runtime = _runtime(step_result=_step_result(off=False, p=[0.0, 0.0, 0.0, 0.0], m_next=[0.0, 0.0, 0.0, 0.0]), config=cfg)
+    out = api_server._scan_request(
+        runtime,
+        {"tenant_id": "tenant-trusted", "request_id": "req-trusted", "use_extracted_text": True, "extracted_text": "safe text"},
+    )
+    assert out["control_outcome"] == "ALLOW"
+    assert "hallucination_guard_lite_low_confidence_untrusted" not in out["reasons"]
+    assert out["response_constraints"]["enabled"] is False
+    assert out["policy_trace"]["hallucination_guard_lite"]["triggered"] is False
+    assert out["policy_trace"]["hallucination_guard_lite"]["source_risk_band"] == "trusted"
+
+
+def test_hallucination_guard_lite_does_not_trigger_when_confidence_high(monkeypatch: pytest.MonkeyPatch):
+    cfg = _base_config()
+    cfg["api"].setdefault("policy_mapper", {})["hallucination_guard_lite"] = {
+        "enabled": True,
+        "apply_when_source_trust": ["untrusted", "mixed"],
+        "low_confidence_lte": 0.35,
+        "only_if_intended_allow": True,
+    }
+    runtime = _runtime(step_result=_step_result(off=False, p=[0.0, 0.0, 0.0, 0.0], m_next=[0.0, 0.0, 0.0, 0.0]), config=cfg)
+
+    def _score_chunks_high_conf(*, projector: Any, items: list[Any], walls: list[str], cfg: Dict[str, Any] | None = None):
+        _ = (projector, walls, cfg)
+        return SimpleNamespace(
+            chunk_scores=[],
+            projections=[],
+            wall_max={str(w): 0.0 for w in runtime.config["omega"]["walls"]},
+            worst_chunk_score=0.05,
+            pattern_synergy=0.05,
+            confidence=0.90,
+            doc_score=0.10,
+            pair_hits=[],
+            top_chunks=[{"doc_id": str(items[0].doc_id), "score_max": 0.1, "active_walls": [], "pattern_signals": [], "rule_ids": []}],
+            rule_ids=[],
+            triggered_chunk_ids=[],
+            reasons=[],
+        )
+
+    monkeypatch.setattr(api_server, "score_chunks", _score_chunks_high_conf)
+    out = api_server._scan_request(
+        runtime,
+        {"tenant_id": "tenant-high", "request_id": "req-high", "use_extracted_text": True, "extracted_text": "safe text"},
+    )
+    assert out["control_outcome"] == "ALLOW"
+    assert out["response_constraints"]["enabled"] is False
+    assert out["policy_trace"]["hallucination_guard_lite"]["triggered"] is False
+
+
 def test_scan_like_text_empty_force_quarantine_and_floor(monkeypatch: pytest.MonkeyPatch):
     runtime = _runtime(step_result=_step_result(off=False, p=[0.0, 0.0, 0.0, 0.0], m_next=[0.0, 0.0, 0.0, 0.0]), severity="L1")
     parsed = {
@@ -475,7 +564,21 @@ def test_risk_and_evidence_are_deterministic():
     uuid.UUID(a["evidence_id"])
     uuid.UUID(b["evidence_id"])
     assert a["evidence_id"] != b["evidence_id"]
+    assert a["control_outcome"] in {
+        "ALLOW",
+        "WARN",
+        "SOFT_BLOCK",
+        "SOURCE_QUARANTINE",
+        "TOOL_FREEZE",
+        "HUMAN_ESCALATE",
+        "REQUIRE_APPROVAL",
+    }
+    assert isinstance(a.get("trace_id"), str) and a["trace_id"].startswith("trc_")
+    assert isinstance(a.get("decision_id"), str) and a["decision_id"].startswith("dec_")
     assert set(a["policy_trace"].keys()) >= {
+        "trace_id",
+        "decision_id",
+        "control_outcome",
         "off",
         "severity",
         "walls_triggered",
@@ -487,7 +590,18 @@ def test_risk_and_evidence_are_deterministic():
     }
     assert "chunk_pipeline" in a["policy_trace"]
     assert "evidence" in a
-    assert set(a["evidence"].keys()) == {"walls_triggered", "rule_ids", "chunk_ids", "top_chunk_ids", "text_included"}
+    assert set(a["evidence"].keys()) >= {
+        "walls_triggered",
+        "rule_ids",
+        "chunk_ids",
+        "top_chunk_ids",
+        "text_included",
+        "control_outcome",
+        "trace_id",
+        "decision_id",
+    }
+    assert a["policy_trace"]["trace_id"] == a["trace_id"] == a["evidence"]["trace_id"]
+    assert a["policy_trace"]["decision_id"] == a["decision_id"] == a["evidence"]["decision_id"]
     assert a["evidence"]["text_included"] is False
     blob = json.dumps(a, ensure_ascii=False)
     assert "ignore previous" not in blob

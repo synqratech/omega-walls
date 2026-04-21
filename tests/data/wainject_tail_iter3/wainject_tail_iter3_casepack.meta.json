@@ -1,0 +1,39 @@
+{
+  "status": "ok",
+  "root": "D:\\AI_Models\\experiments\\injection_RAG\\data\\WAInjectBench\\text",
+  "inputs": {
+    "malicious": [
+      "D:\\AI_Models\\experiments\\injection_RAG\\data\\WAInjectBench\\text\\malicious\\EIA_wo_EI.jsonl",
+      "D:\\AI_Models\\experiments\\injection_RAG\\data\\WAInjectBench\\text\\malicious\\VWA_adv_wo_EI.jsonl"
+    ],
+    "benign": [
+      "D:\\AI_Models\\experiments\\injection_RAG\\data\\WAInjectBench\\text\\benign\\comment_issue.jsonl",
+      "D:\\AI_Models\\experiments\\injection_RAG\\data\\WAInjectBench\\text\\benign\\email_msg.jsonl",
+      "D:\\AI_Models\\experiments\\injection_RAG\\data\\WAInjectBench\\text\\benign\\web_text.jsonl"
+    ]
+  },
+  "counts": {
+    "eia_positive_written": 96,
+    "vwa_positive_written": 31,
+    "blocking_pos_written": 127,
+    "blocking_neg_written": 118
+  },
+  "artifacts": {
+    "blocking_pos_jsonl": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\wainject_tail_iter3\\wainject_tail_iter3_blocking_pos.jsonl",
+    "blocking_neg_jsonl": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\wainject_tail_iter3\\wainject_tail_iter3_blocking_neg.jsonl",
+    "meta_json": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\wainject_tail_iter3\\wainject_tail_iter3_casepack.meta.json"
+  },
+  "protocol": {
+    "deterministic": true,
+    "sampling": "none",
+    "scope": [
+      "EIA_wo_EI",
+      "VWA_adv_wo_EI"
+    ],
+    "neg_overlap_sources": [
+      "comment_issue",
+      "email_msg",
+      "web_text"
+    ]
+  }
+}

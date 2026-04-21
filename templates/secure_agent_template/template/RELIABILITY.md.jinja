@@ -1,0 +1,34 @@
+# Reliability Notes
+
+This scaffold is monitor-first by default:
+
+- full detection runs
+- enforcement is observable via `intended_action`
+- runtime continuity is preserved with `actual_action=ALLOW` in monitor mode
+
+## Guard Contract
+
+Generated integration profile: `{{ framework }}`
+
+Expected contract:
+
+1. session/actor resolution
+2. model/input check
+3. tool preflight check (fail-closed typed exceptions)
+
+## Transition Checklist (Monitor -> Enforce)
+
+1. Run `python scripts/smoke.py` and confirm `status=ok`.
+2. Review monitor events via:
+   - `omega-walls report --session template-smoke --events-path <events_path>`
+   - `omega-walls explain --session template-smoke --events-path <events_path>`
+3. Update `config/local_dev.yml`:
+   - `runtime.guard_mode: enforce`
+4. Re-run smoke and verify expected block/escalation behavior.
+
+## Security Hygiene
+
+- Never commit real secrets.
+- Keep `.env` local and use vault/secret manager in production.
+- Keep monitor/export artifacts out of long-lived public storage unless redaction rules are verified.
+

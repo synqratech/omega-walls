@@ -80,10 +80,6 @@ def test_smoke_llamaindex_strict():
 
 
 def test_run_framework_smokes_strict():
-    pytest.importorskip("langchain_core")
-    pytest.importorskip("langchain_community")
-    pytest.importorskip("llama_index.core")
-
     root = Path(__file__).resolve().parent.parent
     output_dir = _mk_tmp("framework-smokes-bundle")
     proc = subprocess.run(
@@ -103,5 +99,14 @@ def test_run_framework_smokes_strict():
     assert proc.returncode == 0, proc.stdout + proc.stderr
     payload = _extract_json_blob(proc.stdout)
     assert payload["status"] == "ok"
+    assert int(payload["framework_count"]) == 6
+    assert set(payload["frameworks"].keys()) == {
+        "langchain_guard",
+        "langgraph_guard",
+        "llamaindex_guard",
+        "haystack_guard",
+        "autogen_guard",
+        "crewai_guard",
+    }
     assert float(payload["metrics"]["min_gateway_coverage"]) >= 1.0
     assert int(payload["metrics"]["total_orphans"]) == 0

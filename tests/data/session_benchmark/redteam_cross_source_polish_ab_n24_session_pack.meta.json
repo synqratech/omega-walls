@@ -1,0 +1,17 @@
+{
+  "status": "ok",
+  "run_id": "redteam_cross_source_pack_20260404T191923Z",
+  "inputs": [
+    "D:\\AI_Models\\experiments\\injection_RAG\\redteam\\cross_source_cocktail_v2_polish_llm_runA_n12.json",
+    "D:\\AI_Models\\experiments\\injection_RAG\\redteam\\cross_source_cocktail_v2_polish_llm_runB_n12.json"
+  ],
+  "output_jsonl": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\session_benchmark\\redteam_cross_source_polish_ab_n24_session_pack.jsonl",
+  "counts": {
+    "files_total": 2,
+    "pairs_total": 24,
+    "sessions_total": 96,
+    "rows_total": 246,
+    "attack_sessions": 48,
+    "benign_sessions": 48
+  }
+}

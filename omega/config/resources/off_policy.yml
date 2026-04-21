@@ -85,3 +85,8 @@ logging:
   capture_text: NEVER
   max_text_chars: 800
   allowlisted_sources: ['synthetic:', 'tests:']
+  structured:
+    enabled: false
+    level: INFO
+    json_output: true
+    validate: true

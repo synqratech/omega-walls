@@ -1,0 +1,18 @@
+runtime:
+  guard_mode: {{ guard_mode }}
+
+projector:
+  mode: {{ projector_mode }}
+
+monitoring:
+  enabled: true
+  export:
+    path: artifacts/monitor/monitor_events.jsonl
+    format: jsonl
+    rotation: none
+
+# Legacy compatibility path for monitor-equivalent behavior.
+off_policy:
+  enforcement_mode: LOG_ONLY
+tools:
+  execution_mode: DRY_RUN

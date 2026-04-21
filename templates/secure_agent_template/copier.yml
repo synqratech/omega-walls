@@ -1,0 +1,59 @@
+_min_copier_version: "9.0.0"
+_subdirectory: template
+_templates_suffix: .jinja
+_exclude:
+  - "copier.yml"
+  - "__pycache__"
+  - "*.pyc"
+  - ".DS_Store"
+
+project_name:
+  type: str
+  help: "Project display name."
+  default: "omega-secure-agent"
+
+package_name:
+  type: str
+  help: "Python package name used inside the generated project."
+  default: "{{ project_name|lower|replace(' ', '_')|replace('-', '_') }}"
+
+python_version:
+  type: str
+  help: "Target Python version for the generated environment."
+  default: "3.13"
+
+framework:
+  type: str
+  help: "Framework integration profile."
+  default: "none"
+  choices:
+    - none
+    - langchain
+    - langgraph
+    - llamaindex
+    - haystack
+    - autogen
+    - crewai
+
+projector_mode:
+  type: str
+  help: "Projector mode used in generated examples."
+  default: "pi0"
+  choices:
+    - pi0
+    - hybrid
+    - hybrid_api
+    - pitheta
+
+guard_mode:
+  type: str
+  help: "Guard mode in generated local config."
+  default: "monitor"
+  choices:
+    - monitor
+    - enforce
+
+include_ci:
+  type: bool
+  help: "Include example GitHub Actions smoke workflow."
+  default: true

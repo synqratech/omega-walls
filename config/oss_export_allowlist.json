@@ -1,0 +1,43 @@
+{
+  "include": [
+    "README.md",
+    "LICENSE",
+    "pyproject.toml",
+    "requirements-dev.txt",
+    "Makefile",
+    "Taskfile.yml",
+    "omega",
+    "scripts",
+    "config",
+    "schemas",
+    "tests",
+    "docs",
+    "cloud",
+    "notebooks"
+  ],
+  "exclude_globs": [
+    "artifacts/**",
+    "enterprise/**",
+    "internal_data/**",
+    "data/**",
+    ".venv/**",
+    ".venv-linux/**",
+    ".vendor/**",
+    ".cache/**",
+    ".history/**",
+    ".pytest_cache/**",
+    ".pytest_tmp/**",
+    "tests/_tmp/**",
+    "tests/tmp_run/**",
+    "e5-small-v2/**",
+    "multilingual-e5-small/**",
+    "deberta-v3-base/**",
+    "model.safetensors",
+    "tokenizer.json",
+    "tokenizer_config.json",
+    "vocab.json",
+    "merges.txt",
+    "config.json",
+    "generation_config.json"
+  ]
+}

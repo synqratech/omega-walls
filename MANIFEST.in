@@ -1,5 +1,6 @@
 include LICENSE
 include README.md
+include README_PYPI.md
 include pyproject.toml
 
 recursive-include omega *.py *.yml
@@ -8,10 +9,7 @@ prune .venv
 prune .venv-linux
 prune .vendor
 prune .vendor_pytest
-prune .pytest_cache
 prune artifacts
-prune build
-prune dist
 prune data
 prune cloud
 prune docs
@@ -20,18 +18,12 @@ prune internal_data
 prune notebooks
 prune redteam
 prune schemas
-prune scripts
 prune tests
 prune e5-small-v2
 prune multilingual-e5-small
 prune deberta-v3-base
-prune omega_walls.egg-info
-prune tmp_codex_pytest
 
 exclude API_OpenAI.txt
-exclude pypi.txt
-exclude test_pypi.txt
-exclude dataset.json
 exclude partner_policy_pack_latest.zip
 exclude partner_policy_pack_v1_20260323.zip
 exclude model.safetensors

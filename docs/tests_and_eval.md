@@ -6,6 +6,10 @@ This document defines:
 - CI gates (what fails the build),
 - and the evaluation workflow to keep tuning reproducible.
 
+For adapter/plugin reliability validation across frameworks, use:
+- [Framework Matrix Stand](framework_matrix_stand.md)
+- `python scripts/run_framework_matrix_stand.py --layer all --profile dev --strict`
+
 ---
 
 ## 1) Ground-truth datasets (JSONL)
@@ -14,13 +18,14 @@ This document defines:
 
 ```
 tests/
-  data/session_benchmark/agentdojo_cocktail_mini_smoke_v1.jsonl
-scripts/
-  quick_demo.py
-  eval_agentdojo_stateful_mini.py
+  redteam_pos_20.jsonl       # 20 positives (should trigger)
+  hard_negatives_50.jsonl    # 50 hard negatives (must NOT trigger)
+  redteam_obf_20.jsonl       # 20 obfuscation/paraphrase positives (should trigger)
+redteam/
+  generator.py               # red-team generator (obf + paraphrase + cocktails + distributed)
 ```
 
-**Truth rule (Lean OSS):** the mini session pack above is the canonical quickstart smoke fixture.
+**Truth rule:** these three JSONL files are the reference truth for v1.
 
 ### 1.2 JSONL schema (v1)
 Each line:
@@ -131,11 +136,10 @@ Create a minimal harness that:
 
 ---
 
-## 4) Session-pack evaluation (Lean OSS)
+## 4) Red-team generator evaluation
 
-### 4.1 Pack source
-The Lean OSS quickstart uses `tests/data/session_benchmark/agentdojo_cocktail_mini_smoke_v1.jsonl`.
-Advanced users can build a mini pack from local AgentDojo runs using `scripts/build_agentdojo_cocktail_mini_pack.py`.
+### 4.1 Generator output
+`redteam/generator.py` produces JSONL-like samples with:
 - `label="malicious"`
 - `targets` walls
 - `family` (obfuscation/paraphrase/cocktail/distributed)
@@ -287,3 +291,123 @@ When tuning parameters:
 ---
 
 End of document.
+
+---
+
+## 9) Canonical benchmark runner (FW-009)
+
+Use one canonical orchestration entrypoint for reproducible/public comparisons:
+
+```bash
+python scripts/run_benchmark.py --dataset-profile core_oss_v1 --mode pi0 --allow-skip-baseline-d
+```
+
+Default profile: `core_oss_v1`.
+
+### Artifacts (standardized)
+
+- `artifacts/benchmark/<run_id>/report.json`
+- `artifacts/benchmark/<run_id>/scorecard.csv`
+- `artifacts/benchmark/<run_id>/dataset_manifest.json`
+
+### Headline comparison policy
+
+- Public scorecard headline is `stateful_target` vs `baseline_d_bare_llm_detector`.
+- A/B/C baselines remain in raw report payload for technical controls.
+- If baseline D is skipped explicitly (`--allow-skip-baseline-d` with no key), run status is `partial_ok`.
+
+### Reproducibility contract
+
+- Dataset provenance is strict and mandatory per run (`dataset_manifest.json`).
+- Each dataset row includes path, source type, source URL, sha256, and deterministic stats.
+- Missing or incomplete manifest data invalidates the run (`failed_reproducibility`).
+
+---
+
+## 10) Docker quickstart for API eval surface (FW-008)
+
+For pilot/devrel onboarding, use the official API-only container path.
+
+Run container:
+
+```bash
+docker run --rm -p 8080:8080 ghcr.io/<owner>/<repo>/omega-walls-api:latest
+```
+
+Verify health:
+
+```bash
+curl -fsS http://127.0.0.1:8080/healthz
+```
+
+Run scan smoke:
+
+```bash
+curl -fsS \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: quickstart-api-key" \
+  -d '{"tenant_id":"eval-smoke","request_id":"req-1","extracted_text":"Normal support text."}' \
+  http://127.0.0.1:8080/v1/scan/attachment
+```
+
+Notes:
+- quickstart profile is the frictionless demo path (`X-API-Key: quickstart-api-key`, no HMAC).
+- strict eval/pilot path should run `--profile dev|pilot` with `OMEGA_API_HMAC_SECRET` and signed headers.
+
+---
+
+## 10) FW-001 release gate (coverage + perf)
+
+FW-001 is a mandatory PR-blocking gate:
+
+- workflow: `.github/workflows/fw001-release-gate.yml`
+- runner: `ubuntu-latest`, `Python 3.13`
+- coverage gate: `pytest ... --cov=omega --cov-branch --cov-fail-under=85`
+- perf gate: `python scripts/check_fw001_perf_gate.py --strict --perf-overhead-max 0.15`
+
+Frozen perf baseline file:
+
+- `config/perf_baselines/fw001_pi0_py313_ubuntu.json`
+
+### How perf pass/fail is computed
+
+For each size bucket `short|medium|large`:
+
+```text
+overhead_ratio = (candidate_p95_ms - baseline_p95_ms) / baseline_p95_ms
+```
+
+Gate passes only if every bucket satisfies:
+
+```text
+overhead_ratio <= 0.15
+```
+
+### Baseline update policy
+
+- Baseline is not auto-updated in regular PRs.
+- Baseline changes must be made in a dedicated, explicit PR with rationale and before/after artifacts.
+
+---
+
+## 11) Real-workflow validation stand (LangChain + OpenClaw)
+
+Run:
+
+```bash
+python scripts/run_real_agent_stand.py --profile dev --strict
+```
+
+Artifacts:
+
+- `artifacts/real_agent_stand/<run_id>/report.json`
+- `artifacts/real_agent_stand/<run_id>/phase1_langchain.json`
+- `artifacts/real_agent_stand/<run_id>/api.log`
+
+Gate focus:
+
+- blocked input/tool visibility in real workflow hooks
+- require-approval signal observed
+- webfetch guard path observed
+- fail-closed outage behavior
+- `orphan_executions == 0` and `gateway_coverage >= 1.0`

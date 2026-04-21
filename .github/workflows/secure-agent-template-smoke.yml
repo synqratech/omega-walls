@@ -1,0 +1,60 @@
+name: secure-agent-template-smoke
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "templates/secure_agent_template/**"
+      - "scripts/init_secure_agent_template.py"
+      - "docs/secure_agent_template.md"
+      - "tests/test_secure_agent_template_*"
+      - ".github/workflows/secure-agent-template-smoke.yml"
+  push:
+    paths:
+      - "templates/secure_agent_template/**"
+      - "scripts/init_secure_agent_template.py"
+      - "docs/secure_agent_template.md"
+      - "tests/test_secure_agent_template_*"
+      - ".github/workflows/secure-agent-template-smoke.yml"
+
+jobs:
+  template-smoke:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        framework: ["none", "langchain"]
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          python -m pip install copier
+
+      - name: Generate template project
+        run: |
+          python scripts/init_secure_agent_template.py --framework "${{ matrix.framework }}" --out "./_tmp/fw007-${{ matrix.framework }}" --project-name "FW007 ${{ matrix.framework }}"
+
+      - name: Run generated smoke
+        run: |
+          python "./_tmp/fw007-${{ matrix.framework }}/scripts/smoke.py" > "./_tmp/fw007-${{ matrix.framework }}-smoke.json"
+
+      - name: Validate smoke JSON status
+        run: |
+          python -c "import json,sys; p=json.load(open('./_tmp/fw007-${{ matrix.framework }}-smoke.json','r',encoding='utf-8')); assert p.get('status')=='ok', p; print('ok')"
+
+      - name: Framework wiring check
+        if: ${{ matrix.framework != 'none' }}
+        run: |
+          python "./_tmp/fw007-${{ matrix.framework }}/app.py" --framework-check > "./_tmp/fw007-${{ matrix.framework }}-framework.json"
+          python -c "import json; p=json.load(open('./_tmp/fw007-${{ matrix.framework }}-framework.json','r',encoding='utf-8')); assert p.get('status')=='ok', p; print('ok')"

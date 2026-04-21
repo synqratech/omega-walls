@@ -1,24 +1,9 @@
 __pycache__/
 .pytest_cache/
 *.pyc
-*.pyo
-*.pyd
-
-# Build/release artifacts
-build/
-dist/
-*.egg-info/
-artifacts/
-tmp_*/
-tmp_codex_pytest/
-
-# Local environments
-.venv/
-.venv-linux/
-.vendor/
-
-# Local secrets and private notes
-API_OpenAI.txt
-pypi.txt
-test_pypi.txt
-dataset.json
+node_modules/
+plugins/**/dist/
+plugins/**/.tsbuildinfo
+internal_data/*
+!internal_data/.gitkeep
+!internal_data/README.md

@@ -1,0 +1,40 @@
+{
+  "status": "ok",
+  "created_at_utc": "2026-03-31T01:53:14Z",
+  "input": {
+    "runs_root": "D:\\AI_Models\\experiments\\injection_RAG\\data\\agentdojo_assets\\agentdojo-inspect\\runs",
+    "pipeline": "gpt-4o-2024-05-13",
+    "attack_type": "swearwords_dos",
+    "suites": [
+      "banking",
+      "slack",
+      "travel",
+      "workspace"
+    ],
+    "seed": 41,
+    "max_attack_sessions": 20,
+    "max_cross_pairs": 10,
+    "max_turn_chars": 1500
+  },
+  "counts": {
+    "rows_total": 210,
+    "sessions_total": 80,
+    "attack_sessions_total": 40,
+    "benign_sessions_total": 40,
+    "core_attack_sessions": 20,
+    "core_benign_sessions": 20,
+    "cross_attack_sessions": 20,
+    "cross_benign_sessions": 20,
+    "selected_attack_cases": 20
+  },
+  "by_suite": {
+    "banking": 1,
+    "slack": 4,
+    "travel": 4,
+    "workspace": 11
+  },
+  "artifacts": {
+    "pack_jsonl": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\session_benchmark\\agentdojo_prepilot_blind_20260330_193616\\packs\\pack_swearwords_dos.jsonl",
+    "meta_json": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\session_benchmark\\agentdojo_prepilot_blind_20260330_193616\\packs\\pack_swearwords_dos.meta.json"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "schema_version": "fw001_perf_baseline_v1",
+  "name": "fw001_pi0_py313_ubuntu",
+  "runner": "github-actions-ubuntu-latest",
+  "python": "3.13",
+  "profile": "dev",
+  "metric": "omega_rule_only_pi0.p95_ms",
+  "created_at_utc": "2026-04-17T00:00:00Z",
+  "benchmark_args": {
+    "short_chars": 280,
+    "medium_chars": 4200,
+    "large_chars": 12000,
+    "repeats": 4,
+    "artifacts_root": "artifacts/fw001_perf"
+  },
+  "p95_ms": {
+    "short": 566.95,
+    "medium": 361.18,
+    "large": 406.24
+  }
+}

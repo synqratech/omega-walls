@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "replay_result_v1.json",
+  "title": "omega_replay_result_v1",
+  "type": "object",
+  "required": [
+    "event",
+    "schema_version",
+    "timestamp",
+    "mode",
+    "replay_id",
+    "replay_input",
+    "policy",
+    "execution",
+    "replay_result",
+    "determinism"
+  ],
+  "properties": {
+    "event": {"const": "omega_replay_result_v1"},
+    "schema_version": {"type": "string"},
+    "timestamp": {"type": "string"},
+    "mode": {"type": "string"},
+    "replay_id": {"type": "string"},
+    "replay_input": {"type": "string"},
+    "policy": {
+      "type": "object",
+      "required": ["policy_ref", "policy_version", "resolved_config_sha256"],
+      "properties": {
+        "policy_ref": {"type": "string"},
+        "policy_version": {"type": "string"},
+        "resolved_config_sha256": {"type": "string"}
+      }
+    },
+    "execution": {
+      "type": "object",
+      "required": ["state_bootstrap", "deterministic_runs"],
+      "properties": {
+        "state_bootstrap": {"type": "string"},
+        "deterministic_runs": {"type": "integer", "minimum": 2}
+      }
+    },
+    "replay_result": {
+      "type": "object",
+      "required": ["policy_ref", "policy_version", "resolved_config_sha256", "turns", "signature"],
+      "properties": {
+        "policy_ref": {"type": "string"},
+        "policy_version": {"type": "string"},
+        "resolved_config_sha256": {"type": "string"},
+        "state_bootstrap": {"type": "string"},
+        "turns": {"type": "array", "items": {"type": "object"}},
+        "signature": {"type": "string"}
+      }
+    },
+    "determinism": {"type": "object"},
+    "determinism_runs": {"type": "object"}
+  }
+}

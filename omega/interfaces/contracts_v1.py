@@ -131,6 +131,8 @@ class ToolDecision:
     mode: str
     reason: str
     logged: bool = True
+    validation_status: str = "not_checked"
+    validation_reason: Optional[str] = None
 
 
 @dataclass

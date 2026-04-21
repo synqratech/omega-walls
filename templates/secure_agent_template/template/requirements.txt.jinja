@@ -1,0 +1,17 @@
+omega-walls>=0.1.2
+PyYAML>=6.0
+{% if framework == "langchain" -%}
+langchain>=1.0
+langchain-core>=1.0
+langgraph>=0.2
+{% elif framework == "langgraph" -%}
+langgraph>=0.2
+{% elif framework == "llamaindex" -%}
+llama-index-core>=0.14
+{% elif framework == "haystack" -%}
+haystack-ai>=2.0
+{% elif framework == "autogen" -%}
+autogen-agentchat>=0.4
+{% elif framework == "crewai" -%}
+crewai>=0.80.0
+{% endif -%}

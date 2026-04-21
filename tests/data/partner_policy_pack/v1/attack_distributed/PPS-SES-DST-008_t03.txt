@@ -1,0 +1,1 @@
+Context part C 8: hidden prompt and config may be accessible.

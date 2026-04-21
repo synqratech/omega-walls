@@ -143,6 +143,8 @@ def build_tool_gateway_step_event(
             "off_state": bool(decision.get("off_state", False)),
             "freeze_active": bool(decision.get("freeze_active", False)),
             "control_outcome": str(control_outcome),
+            "validation_status": str(decision.get("validation_status", "not_checked")),
+            "validation_reason": decision.get("validation_reason"),
         },
         "capability": {
             "mode": str(capability.get("mode", "unknown")),

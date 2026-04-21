@@ -14,6 +14,7 @@ from omega.projector.pi0_intent_v2 import Pi0IntentAwareV2
 from omega.rag.harness import OmegaRAGHarness
 from omega.rag.retriever_prod_adapter import build_retriever_prod_adapter
 from omega.tools.tool_gateway import ToolGatewayV1
+from tests.helpers import mk_item
 
 
 @dataclass
@@ -124,3 +125,54 @@ def test_real_tools_write_and_dangerous_require_approval():
     assert all(d.allowed for d in out_yes["tool_decisions"])
     assert all(e.executed for e in out_yes["tool_executions"])
     assert len(out_yes["tool_gateway_events"]) == 2
+
+
+def test_validator_denied_explicit_tool_is_not_executed():
+    cfg, harness = _build_harness("safe_output")
+    packet = [mk_item("safe-1", "General harmless information", source_id="tests:safe")]
+    out = harness.run_step(
+        user_query="q",
+        packet_items=packet,
+        actor_id="actor-tools",
+        tool_requests=[
+            ToolRequest(
+                tool_name="network_post",
+                args={"url": "https://example.com", "human_approved": True},
+                session_id="sess",
+                step=1,
+            )
+        ],
+    )
+    assert len(out["tool_decisions"]) == 1
+    assert out["tool_decisions"][0].allowed is False
+    assert out["tool_decisions"][0].reason == "INVALID_TOOL_ARGS_SCHEMA"
+    assert out["tool_executions"][0].executed is False
+    assert out["tool_gateway_events"][0]["decision"]["validation_status"] == "failed"
+
+
+def test_validator_applies_to_inferred_shell_like_requests():
+    cfg = deepcopy(load_resolved_config(profile="dev").resolved)
+    cfg["tools"]["capabilities"]["shell_probe"] = {
+        "mode": "read_only",
+        "allowed_when": ["NO_OFF", "OFF"],
+        "requires_human_approval": False,
+    }
+    harness = OmegaRAGHarness(
+        projector=Pi0IntentAwareV2(cfg),
+        omega_core=OmegaCoreV1(omega_params_from_config(cfg)),
+        off_policy=OffPolicyV1(cfg),
+        tool_gateway=ToolGatewayV1(cfg),
+        config=cfg,
+        llm_backend=FixedLLM(text='CALL_TOOL("shell_probe")'),
+    )
+
+    out = harness.run_step(
+        user_query="q",
+        packet_items=[mk_item("safe-2", "General harmless info", source_id="tests:safe")],
+        actor_id="actor-inferred",
+    )
+    assert len(out["inferred_tool_requests"]) >= 1
+    assert out["tool_decisions"][0].allowed is False
+    assert out["tool_decisions"][0].reason == "INVALID_TOOL_ARGS_SHELLLIKE"
+    assert out["tool_executions"][0].executed is False
+    assert out["tool_gateway_events"][0]["decision"]["validation_status"] == "failed"

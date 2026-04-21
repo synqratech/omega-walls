@@ -1,0 +1,20 @@
+{
+  "run_id": "attack_layer_api_gen_20260328T152746Z",
+  "planned_calls": 6,
+  "completed_cases": 6,
+  "completed_case_ids": [
+    "ALAPI-FRG-A001",
+    "ALAPI-FRG-A002",
+    "ALAPI-FRG-B001",
+    "ALAPI-TOL-A001",
+    "ALAPI-TOL-A002",
+    "ALAPI-TOL-B001"
+  ],
+  "rows_written": 15,
+  "spent_usd": 0.000924,
+  "spent_input_tokens": 1024,
+  "spent_output_tokens": 334,
+  "last_case_id": "ALAPI-TOL-B001",
+  "case_errors": 0,
+  "updated_at_utc": "2026-03-28T15:28:06Z"
+}

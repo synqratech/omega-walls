@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Set
 
 from omega.interfaces.contracts_v1 import OffAction, ToolDecision, ToolRequest
+from omega.tools.arg_validation import ToolArgValidationConfig, validate_tool_args
 
 
 _DEFAULT_CAPABILITIES = {
@@ -51,6 +52,7 @@ class ToolGatewayV1:
         if self.unknown_tool_policy != "DENY":
             raise ValueError("tools.unknown_tool_policy must be DENY in v1")
         self.freeze_read_only_exception = bool(tools_cfg.get("freeze", {}).get("read_only_exception", True))
+        self.arg_validation = ToolArgValidationConfig.from_tools_config(tools_cfg.get("arg_validation", {}))
 
         raw_caps = tools_cfg.get("capabilities", {}) or _DEFAULT_CAPABILITIES
         self.capabilities: Dict[str, ToolCapability] = {}
@@ -104,7 +106,14 @@ class ToolGatewayV1:
         capability = self.capabilities.get(request.tool_name)
 
         if capability is None and self.unknown_tool_policy == "DENY":
-            return ToolDecision(allowed=False, mode="TOOLS_DISABLED", reason="UNKNOWN_TOOL", logged=True)
+            return ToolDecision(
+                allowed=False,
+                mode="TOOLS_DISABLED",
+                reason="UNKNOWN_TOOL",
+                logged=True,
+                validation_status="skipped",
+                validation_reason=None,
+            )
 
         mode = freeze_action.tool_mode if freeze_action is not None else "TOOLS_DISABLED"
         cap_mode = capability.mode if capability is not None else "dangerous"
@@ -113,29 +122,103 @@ class ToolGatewayV1:
             mode = freeze_action.tool_mode or "TOOLS_DISABLED"
             if mode == "TOOLS_DISABLED":
                 if self.freeze_read_only_exception and cap_mode != "read_only":
-                    return ToolDecision(allowed=False, mode=mode, reason="TOOL_FREEZE_ACTIVE", logged=True)
+                    return ToolDecision(
+                        allowed=False,
+                        mode=mode,
+                        reason="TOOL_FREEZE_ACTIVE",
+                        logged=True,
+                        validation_status="skipped",
+                        validation_reason=None,
+                    )
                 if not (self.freeze_read_only_exception and cap_mode == "read_only"):
-                    return ToolDecision(allowed=False, mode=mode, reason="TOOL_FREEZE_ACTIVE", logged=True)
+                    return ToolDecision(
+                        allowed=False,
+                        mode=mode,
+                        reason="TOOL_FREEZE_ACTIVE",
+                        logged=True,
+                        validation_status="skipped",
+                        validation_reason=None,
+                    )
             elif mode == "TOOLS_ALLOWLIST":
                 allowlist = freeze_action.allowlist or []
                 if request.tool_name not in allowlist:
-                    return ToolDecision(allowed=False, mode=mode, reason="NOT_IN_ALLOWLIST", logged=True)
+                    return ToolDecision(
+                        allowed=False,
+                        mode=mode,
+                        reason="NOT_IN_ALLOWLIST",
+                        logged=True,
+                        validation_status="skipped",
+                        validation_reason=None,
+                    )
                 if self.freeze_read_only_exception and cap_mode != "read_only":
-                    return ToolDecision(allowed=False, mode=mode, reason="TOOL_FREEZE_ACTIVE", logged=True)
+                    return ToolDecision(
+                        allowed=False,
+                        mode=mode,
+                        reason="TOOL_FREEZE_ACTIVE",
+                        logged=True,
+                        validation_status="skipped",
+                        validation_reason=None,
+                    )
             else:
-                return ToolDecision(allowed=False, mode=mode, reason="POLICY_BLOCK", logged=True)
+                return ToolDecision(
+                    allowed=False,
+                    mode=mode,
+                    reason="POLICY_BLOCK",
+                    logged=True,
+                    validation_status="skipped",
+                    validation_reason=None,
+                )
 
         # REQUIRE_APPROVAL is weaker than TOOL_FREEZE and applied in chokepoint before execution.
         if require_approval_action is not None:
             allowlist = [str(x) for x in (require_approval_action.allowlist or []) if str(x).strip()]
             applies = True if not allowlist else (request.tool_name in allowlist)
             if applies and not bool(request.args.get("human_approved", False)):
-                return ToolDecision(allowed=False, mode=mode, reason="REQUIRE_APPROVAL_PENDING", logged=True)
+                return ToolDecision(
+                    allowed=False,
+                    mode=mode,
+                    reason="REQUIRE_APPROVAL_PENDING",
+                    logged=True,
+                    validation_status="skipped",
+                    validation_reason=None,
+                )
 
         if capability is not None:
             if off_state and "OFF" not in capability.allowed_when:
-                return ToolDecision(allowed=False, mode=mode, reason="OFF_STATE_BLOCK", logged=True)
+                return ToolDecision(
+                    allowed=False,
+                    mode=mode,
+                    reason="OFF_STATE_BLOCK",
+                    logged=True,
+                    validation_status="skipped",
+                    validation_reason=None,
+                )
             if capability.requires_human_approval and not bool(request.args.get("human_approved", False)):
-                return ToolDecision(allowed=False, mode=mode, reason="HUMAN_APPROVAL_REQUIRED", logged=True)
+                return ToolDecision(
+                    allowed=False,
+                    mode=mode,
+                    reason="HUMAN_APPROVAL_REQUIRED",
+                    logged=True,
+                    validation_status="skipped",
+                    validation_reason=None,
+                )
 
-        return ToolDecision(allowed=True, mode=mode, reason="OK", logged=True)
+        validation = validate_tool_args(request.tool_name, request.args, self.arg_validation)
+        if validation.checked and not validation.allowed:
+            return ToolDecision(
+                allowed=False,
+                mode=mode,
+                reason=str(validation.reason_code or "INVALID_TOOL_ARGS_SCHEMA"),
+                logged=True,
+                validation_status="failed",
+                validation_reason=validation.reason,
+            )
+        status = "passed" if validation.checked else "not_checked"
+        return ToolDecision(
+            allowed=True,
+            mode=mode,
+            reason="OK",
+            logged=True,
+            validation_status=status,
+            validation_reason=None,
+        )

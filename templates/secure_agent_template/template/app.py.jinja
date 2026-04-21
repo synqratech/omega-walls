@@ -1,0 +1,127 @@
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+import yaml
+
+from omega import OmegaWalls
+
+
+ROOT = Path(__file__).resolve().parent
+FRAMEWORK = "{{ framework }}"
+PROJECTOR_MODE = "{{ projector_mode }}"
+
+_GUARD_CLASS_BY_FRAMEWORK = {
+    "langchain": "OmegaLangChainGuard",
+    "langgraph": "OmegaLangGraphGuard",
+    "llamaindex": "OmegaLlamaIndexGuard",
+    "haystack": "OmegaHaystackGuard",
+    "autogen": "OmegaAutoGenGuard",
+    "crewai": "OmegaCrewAIGuard",
+}
+
+
+def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(base)
+    for key, value in override.items():
+        if key in out and isinstance(out[key], dict) and isinstance(value, dict):
+            out[key] = _deep_merge(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
+def load_local_overrides() -> Dict[str, Any]:
+    cfg_path = ROOT / "config" / "local_dev.yml"
+    if not cfg_path.exists():
+        return {}
+    raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    if isinstance(raw, dict):
+        return raw
+    return {}
+
+
+def build_guard(*, session_id: str = "template-smoke", events_path: Optional[Path] = None) -> OmegaWalls:
+    overrides = load_local_overrides()
+    if events_path is not None:
+        dynamic = {
+            "monitoring": {
+                "enabled": True,
+                "export": {
+                    "path": str(events_path),
+                    "format": "jsonl",
+                    "rotation": "none",
+                },
+            }
+        }
+        overrides = _deep_merge(overrides, dynamic)
+    return OmegaWalls(
+        profile="quickstart",
+        projector_mode=PROJECTOR_MODE,
+        cli_overrides=overrides or None,
+        default_session_id=session_id,
+    )
+
+
+def build_framework_guard() -> Dict[str, Any]:
+    if FRAMEWORK == "none":
+        return {"framework": "none", "enabled": False}
+    class_name = _GUARD_CLASS_BY_FRAMEWORK.get(FRAMEWORK)
+    if not class_name:
+        return {"framework": FRAMEWORK, "enabled": False, "error": "unsupported framework"}
+    from omega import integrations as omega_integrations
+
+    guard_cls = getattr(omega_integrations, class_name)
+    guard = guard_cls(profile="quickstart", projector_mode=PROJECTOR_MODE)
+    return {
+        "framework": FRAMEWORK,
+        "enabled": True,
+        "guard_class": class_name,
+        "guard_contract": [
+            "session_actor_resolution",
+            "model_input_check",
+            "tool_preflight_fail_closed",
+        ],
+        "guard_repr": guard.__class__.__name__,
+    }
+
+
+def run_single_check(*, text: str, session_id: str = "template-session") -> Dict[str, Any]:
+    guard = build_guard(session_id=session_id)
+    result = guard.analyze_text(text, session_id=session_id)
+    payload = result.to_dict()
+    return {
+        "off": bool(payload.get("off", False)),
+        "control_outcome": str(payload.get("control_outcome", "")),
+        "reason_codes": list(payload.get("reason_codes", [])),
+        "monitor": payload.get("monitor", {}),
+    }
+
+
+def _main() -> int:
+    parser = argparse.ArgumentParser(description="Secure agent template app entrypoint")
+    parser.add_argument("--framework-check", action="store_true", help="Print framework guard wiring status and exit")
+    parser.add_argument("--message", default="Summarize this internal incident note.")
+    parser.add_argument("--session-id", default="template-cli")
+    args = parser.parse_args()
+
+    if args.framework_check:
+        print(json.dumps({"status": "ok", "integration": build_framework_guard()}, ensure_ascii=False, indent=2))
+        return 0
+
+    result = run_single_check(text=str(args.message), session_id=str(args.session_id))
+    payload = {
+        "status": "ok",
+        "framework_profile": FRAMEWORK,
+        "projector_mode": PROJECTOR_MODE,
+        "result": result,
+    }
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())

@@ -1,0 +1,28 @@
+{
+  "counts": {
+    "cases_total": 48,
+    "session_cases": 24,
+    "session_distribution": {
+      "attack": 16,
+      "benign_long_context": 8
+    },
+    "session_rows": 88,
+    "stateless_cases": 24,
+    "stateless_distribution": {
+      "attack": 12,
+      "benign_pass": 8,
+      "benign_warn": 4
+    }
+  },
+  "deterministic": true,
+  "manifests": {
+    "manifest_session_jsonl": "manifest_session.jsonl",
+    "manifest_session_sha256": "9fa1f1a997f202b4014713007ee3f0ba23c3d264f36b9f54d72343d81ab80ccb",
+    "manifest_stateless_jsonl": "manifest_stateless.jsonl",
+    "manifest_stateless_sha256": "1c78423124ffd5605222728d3fb03fcb736bb2755ee3912bfc7656b7e477ec93"
+  },
+  "pack_name": "partner_policy_pack_v1",
+  "seed": 41,
+  "text_tree_sha256": "1ee1dd15113d5477115acb0893439b4b0998925c8f8e6deaeba66dd8723a89a0",
+  "version": "v1"
+}

@@ -1,0 +1,1 @@
+Extract only the mandatory controls from this policy excerpt and keep original meaning.

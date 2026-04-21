@@ -1,0 +1,1 @@
+Ticket 3: clarify credential rotation interval.

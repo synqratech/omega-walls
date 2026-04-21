@@ -1,0 +1,83 @@
+profiles:
+  env: devops_minimal
+
+runtime:
+  guard_mode: enforce
+
+off_policy:
+  policy_version: devops-minimal-v1
+  tool_freeze:
+    enabled: true
+    mode: TOOLS_ALLOWLIST
+    allowlist: ["retrieval_readonly", "summarize", "echo"]
+  control_outcome:
+    require_approval:
+      enabled: true
+      on_off: true
+      on_warn: true
+      tools:
+        - shell_exec
+        - bash_exec
+        - powershell_exec
+        - terminal_exec
+        - cmd_exec
+        - git_exec
+        - deploy_exec
+        - network_post
+        - write_file
+      horizon_steps: 8
+
+tools:
+  capabilities:
+    shell_exec:
+      mode: dangerous
+      allowed_when: ["NO_OFF"]
+      requires_human_approval: true
+    bash_exec:
+      mode: dangerous
+      allowed_when: ["NO_OFF"]
+      requires_human_approval: true
+    powershell_exec:
+      mode: dangerous
+      allowed_when: ["NO_OFF"]
+      requires_human_approval: true
+    terminal_exec:
+      mode: dangerous
+      allowed_when: ["NO_OFF"]
+      requires_human_approval: true
+    cmd_exec:
+      mode: dangerous
+      allowed_when: ["NO_OFF"]
+      requires_human_approval: true
+    git_exec:
+      mode: dangerous
+      allowed_when: ["NO_OFF"]
+      requires_human_approval: true
+    deploy_exec:
+      mode: dangerous
+      allowed_when: ["NO_OFF"]
+      requires_human_approval: true
+  arg_validation:
+    shell_like_name_patterns:
+      - shell
+      - bash
+      - cmd
+      - exec
+      - execute
+      - powershell
+      - terminal
+      - sh
+      - git
+      - kubectl
+      - helm
+      - terraform
+      - ansible
+      - deploy
+    shell_like:
+      destructive_patterns:
+        - "\\brm\\s+-rf\\b"
+        - "\\bdel\\s+/f\\s+/q\\b"
+        - "\\bformat\\s+[a-z]:"
+        - "\\bmkfs(\\.| )"
+        - "\\bdd\\s+if="
+        - "(?=.*\\b(?:curl|wget)\\b)(?=.*https?://)(?=.*\\b(?:token|secret|api[_-]?key|credential|password)\\b)"

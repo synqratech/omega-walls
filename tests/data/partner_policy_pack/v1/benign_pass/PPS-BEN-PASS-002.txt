@@ -1,0 +1,1 @@
+Customer asks about OAuth token rotation timing. Provide a neutral support response.

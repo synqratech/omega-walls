@@ -151,6 +151,13 @@ def main() -> int:
     parser.add_argument("--pint-dataset", default="data/pint-benchmark/benchmark/data/benchmark_dataset.yaml")
     parser.add_argument("--wainject-root", default="data/WAInjectBench/text")
     parser.add_argument("--wainject-max-samples", type=int, default=0)
+    parser.add_argument("--include-promptshield", action="store_true")
+    parser.add_argument("--promptshield-root", default="data/PromptShield")
+    parser.add_argument("--promptshield-split", choices=["train", "validation", "test"], default="validation")
+    parser.add_argument("--promptshield-max-samples", type=int, default=0)
+    parser.add_argument("--promptshield-max-text-chars", type=int, default=0)
+    parser.add_argument("--promptshield-max-seconds", type=float, default=0.0)
+    parser.add_argument("--promptshield-baseline-report", default=None)
     parser.add_argument("--strict-baseline-report", default=None)
     parser.add_argument("--attachment-baseline-report", default=None)
     parser.add_argument("--session-baseline-report", default=None)
@@ -430,7 +437,48 @@ def main() -> int:
     steps["eval_wainjectbench_text"] = _step_record("eval_wainjectbench_text", wa_run, wa_payload)
     reports["wainject"] = wa_payload
 
-    # 8) Unified comparative report
+    # 8) External anchor: PromptShield (optional, diagnostic/non-comparable)
+    promptshield_payload: Optional[Dict[str, Any]] = None
+    if bool(args.include_promptshield):
+        ps_cmd = [
+            python_exec,
+            "scripts/eval_promptshield_text.py",
+            "--profile",
+            str(args.profile),
+            "--seed",
+            str(int(args.seed)),
+            "--root",
+            str(args.promptshield_root),
+            "--split",
+            str(args.promptshield_split),
+        ]
+        if int(args.promptshield_max_samples) > 0:
+            ps_cmd.extend(["--max-samples", str(int(args.promptshield_max_samples))])
+        if int(args.promptshield_max_text_chars) > 0:
+            ps_cmd.extend(["--max-text-chars", str(int(args.promptshield_max_text_chars))])
+        if float(args.promptshield_max_seconds) > 0.0:
+            ps_cmd.extend(["--max-seconds", str(float(args.promptshield_max_seconds))])
+        if bool(args.weekly_regression):
+            ps_cmd.append("--weekly-regression")
+        if args.promptshield_baseline_report:
+            ps_cmd.extend(["--baseline-report", str(args.promptshield_baseline_report)])
+        ps_run = _run_and_capture("eval_promptshield_text", ps_cmd, run_dir)
+        commands.append(ps_run)
+        try:
+            promptshield_payload = _extract_json_payload((run_dir / ps_run.stdout_file).read_text(encoding="utf-8", errors="replace"))
+        except Exception as exc:
+            promptshield_payload = {"parse_error": str(exc)}
+        steps["eval_promptshield_text"] = _step_record("eval_promptshield_text", ps_run, promptshield_payload)
+    else:
+        steps["eval_promptshield_text"] = {
+            "name": "eval_promptshield_text",
+            "status": "skipped",
+            "reason": "disabled_by_flag",
+            "payload": {"include_promptshield": False},
+        }
+    reports["promptshield"] = promptshield_payload
+
+    # 9) Unified comparative report
     comp_cmd = [
         python_exec,
         "scripts/build_comparative_report.py",
@@ -443,6 +491,8 @@ def main() -> int:
         comp_cmd.extend(["--pint-report", str(pint_payload["artifacts"].get("report_json", ""))])
     if isinstance(wa_payload, dict) and isinstance(wa_payload.get("artifacts"), dict):
         comp_cmd.extend(["--wainject-report", str(wa_payload["artifacts"].get("report_json", ""))])
+    if isinstance(promptshield_payload, dict) and isinstance(promptshield_payload.get("artifacts"), dict):
+        comp_cmd.extend(["--promptshield-report", str(promptshield_payload["artifacts"].get("report_json", ""))])
     comp_run = _run_and_capture("build_comparative_report", comp_cmd, run_dir)
     commands.append(comp_run)
     comp_payload: Optional[Dict[str, Any]] = None

@@ -1,0 +1,40 @@
+{
+  "status": "ok",
+  "created_at_utc": "2026-03-30T21:39:32Z",
+  "input": {
+    "runs_root": "D:\\AI_Models\\experiments\\injection_RAG\\data\\agentdojo_assets\\agentdojo-inspect\\runs",
+    "pipeline": "gpt-4o-2024-05-13",
+    "attack_type": "important_instructions_no_user_name",
+    "suites": [
+      "banking",
+      "slack",
+      "travel",
+      "workspace"
+    ],
+    "seed": 41,
+    "max_attack_sessions": 50,
+    "max_cross_pairs": 25,
+    "max_turn_chars": 1500
+  },
+  "counts": {
+    "rows_total": 524,
+    "sessions_total": 200,
+    "attack_sessions_total": 100,
+    "benign_sessions_total": 100,
+    "core_attack_sessions": 50,
+    "core_benign_sessions": 50,
+    "cross_attack_sessions": 50,
+    "cross_benign_sessions": 50,
+    "selected_attack_cases": 50
+  },
+  "by_suite": {
+    "banking": 5,
+    "slack": 5,
+    "travel": 18,
+    "workspace": 22
+  },
+  "artifacts": {
+    "pack_jsonl": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\session_benchmark\\agentdojo_prepilot_blind_20260330_193616\\packs\\pack_important_instructions_no_user_name.jsonl",
+    "meta_json": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\session_benchmark\\agentdojo_prepilot_blind_20260330_193616\\packs\\pack_important_instructions_no_user_name.meta.json"
+  }
+}

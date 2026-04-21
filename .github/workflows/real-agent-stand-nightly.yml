@@ -1,0 +1,45 @@
+name: real-agent-stand-nightly
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 2 * * *"
+
+jobs:
+  real-agent-stand:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[api,integrations]"
+
+      - name: Install OpenClaw plugin deps
+        working-directory: plugins/openclaw-omega-guard
+        run: npm ci --no-audit --no-fund
+
+      - name: Run real-agent stand (strict)
+        run: |
+          python scripts/run_real_agent_stand.py --profile dev --strict --artifacts-root artifacts/real_agent_stand_ci
+
+      - name: Upload stand artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-agent-stand-artifacts
+          path: artifacts/real_agent_stand_ci
+          if-no-files-found: warn

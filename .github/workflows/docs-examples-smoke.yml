@@ -1,0 +1,42 @@
+name: docs-examples-smoke
+
+on:
+  pull_request:
+    paths:
+      - "docs/**"
+      - "examples/**"
+      - "tests/test_docs_*"
+      - ".github/workflows/docs-examples-smoke.yml"
+  push:
+    paths:
+      - "docs/**"
+      - "examples/**"
+      - "tests/test_docs_*"
+      - ".github/workflows/docs-examples-smoke.yml"
+  workflow_dispatch:
+
+jobs:
+  docs-smoke:
+    name: Docs executable examples (py${{ matrix.python-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.13"]
+    env:
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package
+        run: python -m pip install --upgrade pip && python -m pip install -e .
+
+      - name: Run docs reliability tests
+        run: python -m pytest tests/test_docs_examples.py tests/test_docs_reliability_contract.py -q

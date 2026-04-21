@@ -1,0 +1,69 @@
+notifications:
+  enabled: false
+  startup:
+    preflight:
+      enabled: true
+      terminal: true
+      channels: true
+      once_per_process: true
+    outreach:
+      enabled: true
+      terminal: true
+      channels: true
+      once_per_process: true
+      github_url: https://github.com/omega-walls/omega-walls
+      docs_url: https://github.com/omega-walls/omega-walls/tree/main/docs
+      linkedin_url: https://www.linkedin.com/company/omega-walls
+      commercial_cta_enabled: true
+  approvals:
+    backend: sqlite
+    sqlite_path: artifacts/state/notification_approvals.db
+    timeout_sec: 900
+    internal_auth:
+      require_hmac: true
+      hmac_secret_env: OMEGA_NOTIFICATION_HMAC_SECRET
+      headers:
+        signature: X-Internal-Signature
+        timestamp: X-Internal-Timestamp
+        nonce: X-Internal-Nonce
+      max_clock_skew_sec: 300
+
+  slack:
+    enabled: true
+    base_url: https://slack.com/api
+    bot_token_env: SLACK_BOT_TOKEN
+    channel_env: SLACK_ALERT_CHANNEL
+    channel: ""
+    signing_secret_env: SLACK_SIGNING_SECRET
+    triggers:
+      - BLOCK
+      - SOFT_BLOCK
+      - SOURCE_QUARANTINE
+      - TOOL_FREEZE
+      - HUMAN_ESCALATE
+      - REQUIRE_APPROVAL
+      - FALLBACK
+    throttle_windows_sec:
+      WARN: 300
+      BLOCK: 60
+    min_risk_score: 0.0
+
+  telegram:
+    enabled: true
+    base_url: https://api.telegram.org
+    bot_token_env: TG_BOT_TOKEN
+    chat_id_env: TG_ADMIN_CHAT_ID
+    chat_id: ""
+    secret_token_env: TG_BOT_SECRET_TOKEN
+    triggers:
+      - BLOCK
+      - SOFT_BLOCK
+      - SOURCE_QUARANTINE
+      - TOOL_FREEZE
+      - HUMAN_ESCALATE
+      - REQUIRE_APPROVAL
+      - FALLBACK
+    throttle_windows_sec:
+      WARN: 300
+      BLOCK: 60
+    min_risk_score: 0.7

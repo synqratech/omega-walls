@@ -25,6 +25,8 @@ _CONFIG_LAYER_FILES: Dict[str, str] = {
     "tools": "tools.yml",
     "retriever": "retriever.yml",
     "api": "api.yml",
+    "monitoring": "monitoring.yml",
+    "notifications": "notifications.yml",
     "bipia": "bipia.yml",
     "deepset": "deepset.yml",
     "pitheta_dataset_registry": "pitheta_dataset_registry.yml",
@@ -41,6 +43,8 @@ _CONFIG_LAYER_ORDER: Tuple[str, ...] = (
     "tools",
     "retriever",
     "api",
+    "monitoring",
+    "notifications",
     "bipia",
     "deepset",
     "pitheta_dataset_registry",
@@ -189,6 +193,95 @@ def validate_resolved_config(config: Dict[str, Any]) -> None:
     execution_mode = str(tools_cfg.get("execution_mode", "ENFORCE")).upper()
     if execution_mode not in {"ENFORCE", "DRY_RUN"}:
         raise ValueError("tools.execution_mode must be ENFORCE or DRY_RUN")
+    arg_validation_cfg = tools_cfg.get("arg_validation", {}) or {}
+    if arg_validation_cfg and not isinstance(arg_validation_cfg, dict):
+        raise ValueError("tools.arg_validation must be a mapping")
+    if isinstance(arg_validation_cfg, dict) and arg_validation_cfg:
+        _ = bool(arg_validation_cfg.get("enabled", True))
+        fail_mode = str(arg_validation_cfg.get("fail_mode", "deny")).strip().lower()
+        if fail_mode != "deny":
+            raise ValueError("tools.arg_validation.fail_mode must be deny")
+        shell_patterns = arg_validation_cfg.get("shell_like_name_patterns", [])
+        if shell_patterns is not None and not isinstance(shell_patterns, list):
+            raise ValueError("tools.arg_validation.shell_like_name_patterns must be a list")
+        net_cfg = arg_validation_cfg.get("network_post", {}) or {}
+        wr_cfg = arg_validation_cfg.get("write_file", {}) or {}
+        sh_cfg = arg_validation_cfg.get("shell_like", {}) or {}
+        for key in ("max_payload_bytes", "max_headers", "max_header_key_chars", "max_header_value_chars"):
+            if int(net_cfg.get(key, 1)) <= 0:
+                raise ValueError(f"tools.arg_validation.network_post.{key} must be > 0")
+        for key in ("max_filename_chars", "max_content_bytes"):
+            if int(wr_cfg.get(key, 1)) <= 0:
+                raise ValueError(f"tools.arg_validation.write_file.{key} must be > 0")
+        if int(sh_cfg.get("max_command_chars", 1)) <= 0:
+            raise ValueError("tools.arg_validation.shell_like.max_command_chars must be > 0")
+        destructive_patterns = sh_cfg.get("destructive_patterns", [])
+        if destructive_patterns is not None and not isinstance(destructive_patterns, list):
+            raise ValueError("tools.arg_validation.shell_like.destructive_patterns must be a list")
+
+    runtime_cfg = config.get("runtime", {}) or {}
+    if runtime_cfg and not isinstance(runtime_cfg, dict):
+        raise ValueError("runtime must be a mapping")
+    guard_mode = str(runtime_cfg.get("guard_mode", "enforce")).strip().lower()
+    if guard_mode not in {"enforce", "monitor"}:
+        raise ValueError("runtime.guard_mode must be enforce|monitor")
+
+    monitoring_cfg = config.get("monitoring", {}) or {}
+    if monitoring_cfg and not isinstance(monitoring_cfg, dict):
+        raise ValueError("monitoring must be a mapping")
+    if isinstance(monitoring_cfg, dict) and monitoring_cfg:
+        _ = bool(monitoring_cfg.get("enabled", False))
+        agg_window = str(monitoring_cfg.get("aggregation_window", "1h")).strip().lower()
+        if not agg_window:
+            raise ValueError("monitoring.aggregation_window must be non-empty")
+        export_cfg = monitoring_cfg.get("export", {}) or {}
+        if export_cfg and not isinstance(export_cfg, dict):
+            raise ValueError("monitoring.export must be a mapping")
+        if isinstance(export_cfg, dict) and export_cfg:
+            if not str(export_cfg.get("path", "artifacts/monitor/monitor_events.jsonl")).strip():
+                raise ValueError("monitoring.export.path must be non-empty")
+            rotation = str(export_cfg.get("rotation", "none")).strip().lower()
+            if rotation not in {"none", "daily", "size"}:
+                raise ValueError("monitoring.export.rotation must be none|daily|size")
+            if int(export_cfg.get("rotation_size_mb", 100)) <= 0:
+                raise ValueError("monitoring.export.rotation_size_mb must be > 0")
+            out_format = str(export_cfg.get("format", "jsonl")).strip().lower()
+            if out_format not in {"jsonl", "csv"}:
+                raise ValueError("monitoring.export.format must be jsonl|csv")
+        hints_cfg = monitoring_cfg.get("false_positive_hints", {}) or {}
+        if hints_cfg and not isinstance(hints_cfg, dict):
+            raise ValueError("monitoring.false_positive_hints must be a mapping")
+        if isinstance(hints_cfg, dict) and hints_cfg:
+            for hint_name in ("low_confidence_near_threshold", "trusted_source_mismatch", "transient_spike"):
+                sub_cfg = hints_cfg.get(hint_name, {}) or {}
+                if sub_cfg and not isinstance(sub_cfg, dict):
+                    raise ValueError(f"monitoring.false_positive_hints.{hint_name} must be a mapping")
+
+    logging_cfg = config.get("logging", {}) or {}
+    if logging_cfg and not isinstance(logging_cfg, dict):
+        raise ValueError("logging must be a mapping")
+    if isinstance(logging_cfg, dict) and logging_cfg:
+        log_mode = str(logging_cfg.get("mode", "OFF_ONLY")).strip().upper()
+        if log_mode not in {"OFF_ONLY", "PER_STEP"}:
+            raise ValueError("logging.mode must be OFF_ONLY|PER_STEP")
+        capture_text = str(logging_cfg.get("capture_text", "NEVER")).strip().upper()
+        if capture_text not in {"NEVER", "REDACTED", "ALLOWLISTED"}:
+            raise ValueError("logging.capture_text must be NEVER|REDACTED|ALLOWLISTED")
+        if int(logging_cfg.get("max_text_chars", 800)) <= 0:
+            raise ValueError("logging.max_text_chars must be > 0")
+        allowlisted = logging_cfg.get("allowlisted_sources", [])
+        if allowlisted is not None and not isinstance(allowlisted, list):
+            raise ValueError("logging.allowlisted_sources must be a list")
+        structured_cfg = logging_cfg.get("structured", {}) or {}
+        if structured_cfg and not isinstance(structured_cfg, dict):
+            raise ValueError("logging.structured must be a mapping")
+        if isinstance(structured_cfg, dict) and structured_cfg:
+            _ = bool(structured_cfg.get("enabled", False))
+            level = str(structured_cfg.get("level", "INFO")).strip().upper()
+            if level not in {"DEBUG", "INFO", "WARN", "ERROR", "CRITICAL"}:
+                raise ValueError("logging.structured.level must be DEBUG|INFO|WARN|ERROR|CRITICAL")
+            _ = bool(structured_cfg.get("json_output", True))
+            _ = bool(structured_cfg.get("validate", True))
 
     cross_session_cfg = config.get("off_policy", {}).get("cross_session", {})
     if cross_session_cfg:
@@ -344,6 +437,48 @@ def validate_resolved_config(config: Dict[str, Any]) -> None:
                 value = float(policy_mapper_cfg.get(key, 0.0))
                 if value < 0.0 or value > 1.0:
                     raise ValueError(f"api.policy_mapper.{key} must be in [0,1]")
+            hgl_cfg = policy_mapper_cfg.get("hallucination_guard_lite", {}) or {}
+            if hgl_cfg and not isinstance(hgl_cfg, dict):
+                raise ValueError("api.policy_mapper.hallucination_guard_lite must be a mapping")
+            if isinstance(hgl_cfg, dict) and hgl_cfg:
+                _ = bool(hgl_cfg.get("enabled", False))
+                bands = hgl_cfg.get("apply_when_source_trust", ["untrusted", "mixed"])
+                if bands is not None and not isinstance(bands, list):
+                    raise ValueError("api.policy_mapper.hallucination_guard_lite.apply_when_source_trust must be a list")
+                valid_bands = {"trusted", "untrusted", "mixed"}
+                for idx, band in enumerate(list(bands or [])):
+                    norm = str(band).strip().lower()
+                    if norm == "semi":
+                        norm = "trusted"
+                    if norm == "semi_trusted":
+                        norm = "trusted"
+                    if norm not in valid_bands:
+                        raise ValueError(
+                            "api.policy_mapper.hallucination_guard_lite.apply_when_source_trust"
+                            f"[{idx}] must be trusted|untrusted|mixed"
+                        )
+                low_conf = float(hgl_cfg.get("low_confidence_lte", 0.35))
+                if low_conf < 0.0 or low_conf > 1.0:
+                    raise ValueError("api.policy_mapper.hallucination_guard_lite.low_confidence_lte must be in [0,1]")
+                _ = bool(hgl_cfg.get("only_if_intended_allow", True))
+                soft_q_cfg = hgl_cfg.get("soft_quarantine", {}) or {}
+                if soft_q_cfg and not isinstance(soft_q_cfg, dict):
+                    raise ValueError("api.policy_mapper.hallucination_guard_lite.soft_quarantine must be a mapping")
+                if isinstance(soft_q_cfg, dict) and soft_q_cfg:
+                    _ = bool(soft_q_cfg.get("enabled", False))
+                    _ = bool(soft_q_cfg.get("mixed_only", True))
+                    very_low = float(soft_q_cfg.get("very_low_confidence_lte", 0.20))
+                    if very_low < 0.0 or very_low > 1.0:
+                        raise ValueError(
+                            "api.policy_mapper.hallucination_guard_lite.soft_quarantine.very_low_confidence_lte "
+                            "must be in [0,1]"
+                        )
+                    pattern_synergy = float(soft_q_cfg.get("pattern_synergy_gte", 0.30))
+                    if pattern_synergy < 0.0 or pattern_synergy > 1.0:
+                        raise ValueError(
+                            "api.policy_mapper.hallucination_guard_lite.soft_quarantine.pattern_synergy_gte "
+                            "must be in [0,1]"
+                        )
         att_cfg = api_cfg.get("attestation", {}) or {}
         if att_cfg and not isinstance(att_cfg, dict):
             raise ValueError("api.attestation must be a mapping")
@@ -360,6 +495,110 @@ def validate_resolved_config(config: Dict[str, Any]) -> None:
                 raise ValueError("api.attestation.private_key_pem_env must be non-empty")
             if int(att_cfg.get("exp_sec", 300)) <= 0:
                 raise ValueError("api.attestation.exp_sec must be > 0")
+
+    notifications_cfg = config.get("notifications", {}) or {}
+    if notifications_cfg:
+        if not isinstance(notifications_cfg, dict):
+            raise ValueError("notifications must be a mapping")
+        _ = bool(notifications_cfg.get("enabled", False))
+        startup_cfg = notifications_cfg.get("startup", {}) or {}
+        if startup_cfg and not isinstance(startup_cfg, dict):
+            raise ValueError("notifications.startup must be a mapping")
+        if isinstance(startup_cfg, dict) and startup_cfg:
+            for startup_name in ("preflight", "outreach"):
+                section = startup_cfg.get(startup_name, {}) or {}
+                if section and not isinstance(section, dict):
+                    raise ValueError(f"notifications.startup.{startup_name} must be a mapping")
+                if not isinstance(section, dict):
+                    continue
+                _ = bool(section.get("enabled", True))
+                _ = bool(section.get("terminal", True))
+                _ = bool(section.get("channels", True))
+                _ = bool(section.get("once_per_process", True))
+            outreach_cfg = startup_cfg.get("outreach", {}) or {}
+            if isinstance(outreach_cfg, dict):
+                if bool(outreach_cfg.get("enabled", True)):
+                    for key, default in (
+                        ("github_url", "https://github.com/omega-walls/omega-walls"),
+                        ("docs_url", "https://github.com/omega-walls/omega-walls/tree/main/docs"),
+                        ("linkedin_url", "https://www.linkedin.com/company/omega-walls"),
+                    ):
+                        if not str(outreach_cfg.get(key, default)).strip():
+                            raise ValueError(f"notifications.startup.outreach.{key} must be non-empty")
+                _ = bool(outreach_cfg.get("commercial_cta_enabled", True))
+        approvals_cfg = notifications_cfg.get("approvals", {}) or {}
+        if approvals_cfg and not isinstance(approvals_cfg, dict):
+            raise ValueError("notifications.approvals must be a mapping")
+        if isinstance(approvals_cfg, dict) and approvals_cfg:
+            backend = str(approvals_cfg.get("backend", "memory")).strip().lower()
+            if backend not in {"memory", "sqlite"}:
+                raise ValueError("notifications.approvals.backend must be memory|sqlite")
+            if backend == "sqlite" and not str(
+                approvals_cfg.get("sqlite_path", "artifacts/state/notification_approvals.db")
+            ).strip():
+                raise ValueError("notifications.approvals.sqlite_path must be non-empty for sqlite backend")
+            if int(approvals_cfg.get("timeout_sec", 900)) <= 0:
+                raise ValueError("notifications.approvals.timeout_sec must be > 0")
+            internal_auth = approvals_cfg.get("internal_auth", {}) or {}
+            if internal_auth and not isinstance(internal_auth, dict):
+                raise ValueError("notifications.approvals.internal_auth must be a mapping")
+            if isinstance(internal_auth, dict) and internal_auth:
+                _ = bool(internal_auth.get("require_hmac", True))
+                if not str(internal_auth.get("hmac_secret_env", "OMEGA_NOTIFICATION_HMAC_SECRET")).strip():
+                    raise ValueError("notifications.approvals.internal_auth.hmac_secret_env must be non-empty")
+                headers = internal_auth.get("headers", {}) or {}
+                if headers and not isinstance(headers, dict):
+                    raise ValueError("notifications.approvals.internal_auth.headers must be a mapping")
+                for key, default_header in (
+                    ("signature", "X-Internal-Signature"),
+                    ("timestamp", "X-Internal-Timestamp"),
+                    ("nonce", "X-Internal-Nonce"),
+                ):
+                    if not str(headers.get(key, default_header)).strip():
+                        raise ValueError(
+                            f"notifications.approvals.internal_auth.headers.{key} must be non-empty"
+                        )
+                if int(internal_auth.get("max_clock_skew_sec", 300)) <= 0:
+                    raise ValueError(
+                        "notifications.approvals.internal_auth.max_clock_skew_sec must be > 0"
+                    )
+
+        for provider_name in ("slack", "telegram"):
+            provider_cfg = notifications_cfg.get(provider_name, {}) or {}
+            if provider_cfg and not isinstance(provider_cfg, dict):
+                raise ValueError(f"notifications.{provider_name} must be a mapping")
+            if not isinstance(provider_cfg, dict):
+                continue
+            _ = bool(provider_cfg.get("enabled", False))
+            triggers = provider_cfg.get("triggers", [])
+            if triggers is not None and not isinstance(triggers, list):
+                raise ValueError(f"notifications.{provider_name}.triggers must be a list")
+            min_risk = provider_cfg.get("min_risk_score", None)
+            if min_risk is not None:
+                mr = float(min_risk)
+                if mr < 0.0 or mr > 1.0:
+                    raise ValueError(f"notifications.{provider_name}.min_risk_score must be in [0,1]")
+            throttle_cfg = provider_cfg.get("throttle_windows_sec", {}) or {}
+            if throttle_cfg and not isinstance(throttle_cfg, dict):
+                raise ValueError(f"notifications.{provider_name}.throttle_windows_sec must be a mapping")
+            if isinstance(throttle_cfg, dict) and throttle_cfg:
+                for key in ("WARN", "BLOCK"):
+                    if int(throttle_cfg.get(key, 0)) < 0:
+                        raise ValueError(f"notifications.{provider_name}.throttle_windows_sec.{key} must be >= 0")
+            if provider_name == "slack":
+                if not str(provider_cfg.get("bot_token_env", "SLACK_BOT_TOKEN")).strip():
+                    raise ValueError("notifications.slack.bot_token_env must be non-empty")
+                if not str(provider_cfg.get("channel_env", "SLACK_ALERT_CHANNEL")).strip():
+                    raise ValueError("notifications.slack.channel_env must be non-empty")
+                if not str(provider_cfg.get("signing_secret_env", "SLACK_SIGNING_SECRET")).strip():
+                    raise ValueError("notifications.slack.signing_secret_env must be non-empty")
+            if provider_name == "telegram":
+                if not str(provider_cfg.get("bot_token_env", "TG_BOT_TOKEN")).strip():
+                    raise ValueError("notifications.telegram.bot_token_env must be non-empty")
+                if not str(provider_cfg.get("chat_id_env", "TG_ADMIN_CHAT_ID")).strip():
+                    raise ValueError("notifications.telegram.chat_id_env must be non-empty")
+                if not str(provider_cfg.get("secret_token_env", "TG_BOT_SECRET_TOKEN")).strip():
+                    raise ValueError("notifications.telegram.secret_token_env must be non-empty")
 
     bipia_cfg = config.get("bipia", {})
     if bipia_cfg:

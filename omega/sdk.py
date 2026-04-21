@@ -19,8 +19,15 @@ from omega.errors import (
     OmegaSDKError,
 )
 from omega.interfaces.contracts_v1 import ContentItem, OffAction, OmegaState
+from omega.log_contract import make_log_event
+from omega.monitoring.collector import build_monitor_collector_from_config
+from omega.monitoring.enrichment import build_downstream_summary, build_redacted_fragments
+from omega.monitoring.hints import infer_false_positive_hint
+from omega.monitoring.mode import GuardMode, resolve_guard_mode
+from omega.monitoring.models import MonitorEvent, utc_now_iso
 from omega.policy.off_policy_v1 import OffPolicyV1
 from omega.projector.factory import build_projector
+from omega.structured_logging import build_structured_emitter_from_config, engine_version
 from omega.sdk_types import DetectionResult, GuardAction, GuardDecision, OmegaDetectionResult
 
 
@@ -138,6 +145,12 @@ class OmegaWalls:
             self._core = OmegaCoreV1(params)
             self._off_policy = OffPolicyV1(cfg)
             self._states: Dict[str, OmegaState] = {}
+            self._guard_mode = resolve_guard_mode(cfg)
+            self._monitor_collector = build_monitor_collector_from_config(
+                config=cfg,
+                force_enable=(self._guard_mode == GuardMode.MONITOR),
+            )
+            self._structured_emitter = build_structured_emitter_from_config(config=cfg, logger_name="omega.sdk")
         except Exception as exc:  # noqa: BLE001
             raise _map_exception(exc=exc, phase="init") from exc
 
@@ -190,9 +203,33 @@ class OmegaWalls:
         try:
             projection = self._projector.project(item)
             step_result = self._core.step(state=state, items=[item], projections=[projection])
-            decision = self._off_policy.select_actions(step_result=step_result, items=[item])
+            intended_decision = self._off_policy.select_actions(step_result=step_result, items=[item])
         except Exception as exc:  # noqa: BLE001
             raise _map_exception(exc=exc, phase="runtime") from exc
+
+        monitor_enabled = bool(self._guard_mode == GuardMode.MONITOR)
+        if monitor_enabled:
+            decision = GuardDecision(
+                off=bool(step_result.off),
+                severity=str(intended_decision.severity),
+                control_outcome="ALLOW",
+                reason_codes=_reason_codes(step_result.reasons),
+                top_docs=[str(x) for x in list(step_result.top_docs)],
+                actions=[],
+            )
+            intended_action = str(intended_decision.control_outcome)
+            actual_action = "ALLOW"
+        else:
+            decision = GuardDecision(
+                off=bool(step_result.off),
+                severity=str(intended_decision.severity),
+                control_outcome=str(intended_decision.control_outcome),
+                reason_codes=_reason_codes(step_result.reasons),
+                top_docs=[str(x) for x in list(step_result.top_docs)],
+                actions=[self._action_to_guard_action(action) for action in list(intended_decision.actions)],
+            )
+            intended_action = str(intended_decision.control_outcome)
+            actual_action = str(intended_decision.control_outcome)
 
         wall_scores = {
             wall: float(step_result.p[idx])
@@ -207,15 +244,128 @@ class OmegaWalls:
             for idx, wall in enumerate(self.walls)
             if float(step_result.p[idx]) > 0.0 or float(step_result.m_next[idx]) > 0.0
         )
-        actions = [self._action_to_guard_action(action) for action in list(decision.actions)]
-        guard_decision = GuardDecision(
-            off=bool(step_result.off),
-            severity=str(decision.severity),
-            control_outcome=str(decision.control_outcome),
+        max_p = float(np.max(step_result.p)) if len(step_result.p) else 0.0
+        sum_m = float(np.sum(step_result.m_next)) if len(step_result.m_next) else 0.0
+        sum_ratio = min(1.0, sum_m / max(float(self._core.params.off_Sigma), 1e-6))
+        severity_score = {"L1": 0.0, "L2": 0.5, "L3": 1.0}.get(str(intended_decision.severity), 0.0)
+        risk_score = float(max(0.0, min(1.0, 0.60 * max_p + 0.30 * sum_ratio + 0.10 * severity_score)))
+        fp_hint = infer_false_positive_hint(
+            risk_score=float(risk_score),
+            intended_action=str(intended_action),
             reason_codes=_reason_codes(step_result.reasons),
-            top_docs=[str(x) for x in list(step_result.top_docs)],
-            actions=actions,
+            triggered_rules=list(walls_triggered),
+            attribution=[
+                {
+                    "doc_id": str(item.doc_id),
+                    "source_id": str(item.source_id),
+                    "trust": str(item.trust),
+                    "contribution": 1.0,
+                }
+            ],
+            config=self._config,
         )
+        monitor_attribution = [
+            {
+                "doc_id": str(item.doc_id),
+                "source_id": str(item.source_id),
+                "trust": str(item.trust),
+                "contribution": 1.0,
+            }
+        ]
+        monitor_fragments = build_redacted_fragments(
+            attribution_rows=monitor_attribution,
+            item_text_by_doc={str(item.doc_id): str(item.text)},
+            max_fragments=1,
+            max_chars=240,
+        )
+        intended_action_types = sorted({str(a.type) for a in list(intended_decision.actions)})
+        intended_blocked_doc_ids = sorted(
+            {
+                str(doc_id)
+                for action in list(intended_decision.actions)
+                if str(action.type) == "SOFT_BLOCK"
+                for doc_id in list(action.doc_ids or [])
+            }
+        )
+        intended_quarantined_sources = sorted(
+            {
+                str(source)
+                for action in list(intended_decision.actions)
+                if str(action.type) == "SOURCE_QUARANTINE"
+                for source in list(action.source_ids or [])
+            }
+        )
+        intended_prevented_tools = ["*"] if "TOOL_FREEZE" in set(intended_action_types) else []
+        monitor_downstream = build_downstream_summary(
+            intended_action=str(intended_action),
+            action_types=list(intended_action_types),
+            blocked_doc_ids=intended_blocked_doc_ids,
+            quarantined_source_ids=intended_quarantined_sources,
+            prevented_tools=intended_prevented_tools,
+        )
+        monitor_rules = {
+            "triggered_rules": list(walls_triggered),
+            "reason_codes": _reason_codes(step_result.reasons),
+        }
+        monitor_payload = {
+            "enabled": bool(monitor_enabled),
+            "guard_mode": str(self._guard_mode.value).lower(),
+            "intended_action": str(intended_action),
+            "actual_action": str(actual_action),
+            "triggered_rules": list(walls_triggered),
+            "rules": monitor_rules,
+            "fragments": monitor_fragments,
+            "downstream": monitor_downstream,
+            "false_positive_hint": fp_hint,
+        }
+        self._structured_emitter.emit(
+            make_log_event(
+                event="risk_assessed",
+                session_id=str(sid),
+                mode=str(self._guard_mode.value).lower(),
+                engine_version=engine_version(),
+                risk_score=float(risk_score),
+                intended_action_native=str(intended_action),
+                actual_action_native=str(actual_action),
+                action_types=list(intended_action_types),
+                triggered_rules=list(walls_triggered),
+                attribution_rows=list(monitor_attribution),
+                fragments=list(monitor_fragments),
+                fp_hint=(str(fp_hint) if fp_hint else None),
+                ts=utc_now_iso(),
+                trace_id=f"sdk:{sid}:{int(step_result.step)}",
+                decision_id=f"sdk_dec:{sid}:{int(step_result.step)}:{str(actual_action)}",
+                surface="sdk",
+                input_type="prompt",
+                input_length=len(str(text or "")),
+                source_type=str(item.source_type),
+            )
+        )
+        trace_id = f"sdk:{sid}:{int(step_result.step)}"
+        decision_id = f"sdk_dec:{sid}:{int(step_result.step)}:{str(actual_action)}"
+        if bool(self._monitor_collector.enabled):
+            self._monitor_collector.emit(
+                MonitorEvent(
+                    ts=utc_now_iso(),
+                    surface="sdk",
+                    session_id=str(sid),
+                    actor_id=str(sid),
+                    mode=str(self._guard_mode.value).lower(),
+                    risk_score=float(risk_score),
+                    intended_action=str(intended_action),
+                    actual_action=str(actual_action),
+                    triggered_rules=list(walls_triggered),
+                    attribution=monitor_attribution,
+                    reason_codes=_reason_codes(step_result.reasons),
+                    rules=monitor_rules,
+                    fragments=monitor_fragments,
+                    downstream=monitor_downstream,
+                    trace_id=str(trace_id),
+                    decision_id=str(decision_id),
+                    false_positive_hint=(str(fp_hint) if fp_hint else None),
+                    metadata={"source_id": str(item.source_id), "source_type": str(item.source_type)},
+                )
+            )
 
         return DetectionResult(
             session_id=str(step_result.session_id),
@@ -223,7 +373,8 @@ class OmegaWalls:
             walls_triggered=walls_triggered,
             wall_scores=wall_scores,
             memory_scores=memory_scores,
-            decision=guard_decision,
+            decision=decision,
+            monitor=monitor_payload,
         )
 
     def _action_to_guard_action(self, action: OffAction) -> GuardAction:

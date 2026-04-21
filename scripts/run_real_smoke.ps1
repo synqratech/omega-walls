@@ -1,8 +1,8 @@
 $ErrorActionPreference = 'Stop'
 
-$python = 'python'
-if (Test-Path '.venv\Scripts\python.exe') {
-  $python = '.venv\Scripts\python.exe'
+$python = '.venv\Scripts\python.exe'
+if (-not (Test-Path $python)) {
+  throw "Expected existing project venv interpreter at '$python'. Do not fallback to a random system python."
 }
 
 Write-Host "Using Python: $python"

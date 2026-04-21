@@ -31,7 +31,7 @@ def test_gateway_requires_human_approval_for_dangerous_tools(gateway):
     req_no_approval = ToolRequest(tool_name="network_post", args={}, session_id="s", step=1)
     req_with_approval = ToolRequest(
         tool_name="network_post",
-        args={"human_approved": True},
+        args={"url": "https://example.com", "payload": "probe", "human_approved": True},
         session_id="s",
         step=1,
     )
@@ -71,3 +71,89 @@ def test_gateway_requires_human_approval_for_write_dangerous_capabilities(resolv
         assert "must require human approval" in str(exc)
     else:
         raise AssertionError("Expected ValueError for write capability without approval")
+
+
+def test_gateway_require_approval_action_blocks_without_human_approval(gateway):
+    req = ToolRequest(tool_name="summarize", args={}, session_id="s", step=1)
+    action = OffAction(
+        type="REQUIRE_APPROVAL",
+        target="TOOLS",
+        allowlist=["summarize"],
+        horizon_steps=8,
+    )
+    dec = gateway.enforce(req, [action])
+    assert dec.allowed is False
+    assert dec.reason == "REQUIRE_APPROVAL_PENDING"
+
+
+def test_gateway_freeze_has_precedence_over_require_approval(gateway):
+    req = ToolRequest(
+        tool_name="network_post",
+        args={"url": "https://example.com", "payload": "probe", "human_approved": True},
+        session_id="s",
+        step=1,
+    )
+    freeze = OffAction(type="TOOL_FREEZE", target="TOOLS", tool_mode="TOOLS_DISABLED", horizon_steps=4)
+    require_approval = OffAction(type="REQUIRE_APPROVAL", target="TOOLS", allowlist=["network_post"], horizon_steps=8)
+    dec = gateway.enforce(req, [require_approval, freeze])
+    assert dec.allowed is False
+    assert dec.reason == "TOOL_FREEZE_ACTIVE"
+
+
+def test_gateway_denies_network_post_missing_payload_after_approval(gateway):
+    req = ToolRequest(
+        tool_name="network_post",
+        args={"url": "https://example.com", "human_approved": True},
+        session_id="s",
+        step=1,
+    )
+    dec = gateway.enforce(req, [])
+    assert dec.allowed is False
+    assert dec.reason == "INVALID_TOOL_ARGS_SCHEMA"
+    assert dec.validation_status == "failed"
+
+
+def test_gateway_denies_network_post_with_invalid_scheme(gateway):
+    req = ToolRequest(
+        tool_name="network_post",
+        args={"url": "ftp://example.com", "payload": "x", "human_approved": True},
+        session_id="s",
+        step=1,
+    )
+    dec = gateway.enforce(req, [])
+    assert dec.allowed is False
+    assert dec.reason == "INVALID_TOOL_ARGS_SECURITY"
+    assert dec.validation_status == "failed"
+
+
+def test_gateway_denies_write_file_traversal(gateway):
+    req = ToolRequest(
+        tool_name="write_file",
+        args={"filename": "../secrets.txt", "content": "x", "human_approved": True},
+        session_id="s",
+        step=1,
+    )
+    dec = gateway.enforce(req, [])
+    assert dec.allowed is False
+    assert dec.reason == "INVALID_TOOL_ARGS_SECURITY"
+    assert dec.validation_status == "failed"
+
+
+def test_gateway_denies_shell_like_destructive_command(resolved_config):
+    cfg = deepcopy(resolved_config)
+    cfg["tools"]["capabilities"]["powershell_exec"] = {
+        "mode": "dangerous",
+        "allowed_when": ["NO_OFF"],
+        "requires_human_approval": True,
+    }
+    gateway = ToolGatewayV1(cfg)
+    req = ToolRequest(
+        tool_name="powershell_exec",
+        args={"command": "rm -rf /", "human_approved": True},
+        session_id="s",
+        step=1,
+    )
+    dec = gateway.enforce(req, [])
+    assert dec.allowed is False
+    assert dec.reason == "INVALID_TOOL_ARGS_SHELLLIKE"
+    assert dec.validation_status == "failed"

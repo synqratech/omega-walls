@@ -1,0 +1,1 @@
+Ticket 7: clarify credential rotation interval.

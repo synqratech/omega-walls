@@ -58,6 +58,16 @@ api:
     quarantine_synergy_threshold: 0.20
     exfil_block_wall_threshold: 0.60
     confidence_block_threshold: 0.55
+    hallucination_guard_lite:
+      enabled: false
+      apply_when_source_trust: [untrusted, mixed]
+      low_confidence_lte: 0.35
+      only_if_intended_allow: true
+      soft_quarantine:
+        enabled: false
+        mixed_only: true
+        very_low_confidence_lte: 0.20
+        pattern_synergy_gte: 0.30
   attestation:
     enabled: false
     format: jws

@@ -1,0 +1,83 @@
+{
+  "run_id": "attack_layer_api_gen_20260326T142945Z",
+  "status": "ok",
+  "created_at_utc": "2026-03-26T14:29:45Z",
+  "model": "gpt-5",
+  "seed": 41,
+  "pack_out": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v1_api_benign_label_smoke",
+  "source": "attack_layers_v1_api_generative",
+  "layers": [
+    "context_accumulation"
+  ],
+  "counts": {
+    "planned_calls": 2,
+    "generated_cases": 2,
+    "generated_rows": 8,
+    "attack_per_layer": 0,
+    "benign_per_layer": 2,
+    "unique_case_ids": 2,
+    "cases_by_layer": {
+      "context_accumulation": 2
+    }
+  },
+  "budget": {
+    "max_usd": 1.0,
+    "spent_usd": 0.0021395,
+    "spent_input_tokens": 262,
+    "spent_output_tokens": 1037,
+    "price_input_per_1m": 0.25,
+    "price_output_per_1m": 2.0,
+    "estimated_cost_total_usd": 0.00147,
+    "budget_exhausted_at_case": null
+  },
+  "hashes": {
+    "manifest_all_sha256": "2ae49a1f006d977aad09af144c4842069ae1e09388b0b98181494a63a447be04"
+  },
+  "quality": {
+    "benign_rows": 8,
+    "benign_risk_hit_rows": 0,
+    "benign_risk_hit_rate": 0.0,
+    "sample_case_ids": []
+  },
+  "quality_summary": {
+    "mode": "strict_regen",
+    "max_regen_attempts": 1,
+    "cases_total": 2,
+    "cases_passed_quality": 2,
+    "cases_regenerated": 0,
+    "regen_attempts_total": 0,
+    "fallback_cases": 0,
+    "fallback_rate": 0.0,
+    "check_pass_counts": {
+      "anti_template_boilerplate": 2,
+      "anti_template_repeat": 2,
+      "benign_risk": 2,
+      "stage_progression": 2
+    },
+    "check_fail_counts": {},
+    "attack_refusal_rows": 0,
+    "attack_refusal_rate": 0.0,
+    "top_repeated_attack_ngrams": [],
+    "top_repeated_attack_ngram_share": 0.0,
+    "benign_hygiene": {
+      "benign_rows": 8,
+      "benign_risk_hit_rows": 0,
+      "benign_risk_hit_rate": 0.0,
+      "sample_case_ids": []
+    }
+  },
+  "artifacts": {
+    "manifest_all": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v1_api_benign_label_smoke\\manifest_all.jsonl",
+    "manifest_meta": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v1_api_benign_label_smoke\\manifest.meta.json",
+    "raw_dir": "D:\\AI_Models\\experiments\\injection_RAG\\artifacts\\attack_layer_api_gen\\attack_layer_api_gen_20260326T142945Z\\raw",
+    "quality_failures_jsonl": "D:\\AI_Models\\experiments\\injection_RAG\\artifacts\\attack_layer_api_gen\\attack_layer_api_gen_20260326T142945Z\\raw\\quality_failures.jsonl"
+  },
+  "protocol": {
+    "manifest_gold": true,
+    "expected_block_turn_default": null,
+    "temperature_requested": 0,
+    "temperature_mode": "auto_zero_or_model_default",
+    "promotion_gate": "Metrics+NoReg",
+    "quality_mode": "strict_regen"
+  }
+}

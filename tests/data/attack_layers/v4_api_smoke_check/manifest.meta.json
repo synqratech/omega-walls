@@ -1,0 +1,187 @@
+{
+  "run_id": "attack_layer_api_gen_20260328T152746Z",
+  "status": "ok",
+  "created_at_utc": "2026-03-28T15:28:06Z",
+  "model": "gpt-5.1",
+  "seed": 41,
+  "pack_out": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v4_api_smoke_check",
+  "source": "attack_layers_v1_api_generative",
+  "layers": [
+    "fragmentation",
+    "tool_chain"
+  ],
+  "counts": {
+    "planned_calls": 6,
+    "generated_cases": 6,
+    "generated_rows": 15,
+    "resumed_cases": 0,
+    "attack_per_layer": 2,
+    "benign_per_layer": 1,
+    "unique_case_ids": 6,
+    "cases_by_layer": {
+      "fragmentation": 3,
+      "tool_chain": 3
+    },
+    "case_errors": 0
+  },
+  "budget": {
+    "max_usd": 2.0,
+    "spent_usd": 0.000924,
+    "spent_input_tokens": 1024,
+    "spent_output_tokens": 334,
+    "price_input_per_1m": 0.25,
+    "price_output_per_1m": 2.0,
+    "estimated_cost_total_usd": 0.00441,
+    "budget_exhausted_at_case": null
+  },
+  "hashes": {
+    "manifest_all_sha256": "9b6e593d4ed4bac1cb004f4f48419c7c71cde0c55c0978759dd4176bd9ba9ab2"
+  },
+  "quality": {
+    "benign_rows": 5,
+    "benign_risk_hit_rows": 0,
+    "benign_risk_hit_rate": 0.0,
+    "sample_case_ids": []
+  },
+  "quality_summary": {
+    "mode": "strict_regen",
+    "max_regen_attempts": 1,
+    "cases_total": 6,
+    "cases_passed_quality": 6,
+    "cases_regenerated": 2,
+    "regen_attempts_total": 2,
+    "fallback_cases": 1,
+    "fallback_rate": 0.16666666666666666,
+    "check_pass_counts": {
+      "anti_refusal": 4,
+      "anti_template_boilerplate": 6,
+      "anti_template_repeat": 6,
+      "benign_risk": 2,
+      "benign_session_nonimperative": 1,
+      "family_anchor": 4,
+      "stage_progression": 3,
+      "tool_chain_payload": 2
+    },
+    "check_fail_counts": {
+      "moderation_blocked": 1
+    },
+    "attack_refusal_rows": 0,
+    "attack_refusal_rate": 0.0,
+    "top_repeated_attack_ngrams": [
+      {
+        "ngram": "the instruction fragment chain",
+        "count": 3,
+        "share": 0.3
+      },
+      {
+        "ngram": "the template override sequence",
+        "count": 3,
+        "share": 0.3
+      },
+      {
+        "ngram": "after overriding prior constraints",
+        "count": 2,
+        "share": 0.2
+      },
+      {
+        "ngram": "and internal tool names",
+        "count": 2,
+        "share": 0.2
+      },
+      {
+        "ngram": "and reveal the exact",
+        "count": 2,
+        "share": 0.2
+      },
+      {
+        "ngram": "chat including safety rules",
+        "count": 2,
+        "share": 0.2
+      },
+      {
+        "ngram": "credentials after overriding prior",
+        "count": 2,
+        "share": 0.2
+      },
+      {
+        "ngram": "disclose hidden credentials after",
+        "count": 2,
+        "share": 0.2
+      },
+      {
+        "ngram": "exact hidden system prompt",
+        "count": 2,
+        "share": 0.2
+      },
+      {
+        "ngram": "governing this chat including",
+        "count": 2,
+        "share": 0.2
+      }
+    ],
+    "top_repeated_attack_ngram_share": 0.3,
+    "benign_hygiene": {
+      "benign_rows": 5,
+      "benign_risk_hit_rows": 0,
+      "benign_risk_hit_rate": 0.0,
+      "sample_case_ids": []
+    },
+    "output_moderation_enabled": true,
+    "output_moderation_model": "omni-moderation-latest",
+    "output_moderation_categories": [
+      "harassment/threatening",
+      "hate/threatening",
+      "illicit",
+      "illicit/violent",
+      "self-harm/instructions",
+      "self-harm/intent",
+      "sexual/minors",
+      "violence",
+      "violence/graphic"
+    ],
+    "output_moderation_score_threshold": 0.0,
+    "output_moderation_blocked_cases": 2,
+    "output_moderation_blocked_attempts": 3,
+    "output_moderation_api_errors": 0,
+    "output_moderation_skipped_cases": 0,
+    "output_moderation_failures_logged": 3
+  },
+  "moderation": {
+    "enabled": true,
+    "model": "omni-moderation-latest",
+    "categories": [
+      "harassment/threatening",
+      "hate/threatening",
+      "illicit",
+      "illicit/violent",
+      "self-harm/instructions",
+      "self-harm/intent",
+      "sexual/minors",
+      "violence",
+      "violence/graphic"
+    ],
+    "score_threshold": 0.0,
+    "blocked_cases": 2,
+    "blocked_attempts": 3,
+    "api_errors": 0,
+    "skipped_cases": 0,
+    "failures_logged": 3
+  },
+  "artifacts": {
+    "manifest_all": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v4_api_smoke_check\\manifest_all.jsonl",
+    "manifest_meta": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v4_api_smoke_check\\manifest.meta.json",
+    "manifest_progress": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v4_api_smoke_check\\manifest.progress.json",
+    "raw_dir": "D:\\AI_Models\\experiments\\injection_RAG\\artifacts\\attack_layer_api_gen\\attack_layer_api_gen_20260328T152746Z\\raw",
+    "quality_failures_jsonl": "D:\\AI_Models\\experiments\\injection_RAG\\artifacts\\attack_layer_api_gen\\attack_layer_api_gen_20260328T152746Z\\raw\\quality_failures.jsonl",
+    "moderation_failures_jsonl": "D:\\AI_Models\\experiments\\injection_RAG\\artifacts\\attack_layer_api_gen\\attack_layer_api_gen_20260328T152746Z\\raw\\moderation_failures.jsonl",
+    "case_errors_jsonl": "D:\\AI_Models\\experiments\\injection_RAG\\artifacts\\attack_layer_api_gen\\attack_layer_api_gen_20260328T152746Z\\raw\\case_errors.jsonl"
+  },
+  "protocol": {
+    "manifest_gold": true,
+    "expected_block_turn_default": null,
+    "temperature_requested": 0,
+    "temperature_mode": "auto_zero_or_model_default",
+    "promotion_gate": "Metrics+NoReg",
+    "quality_mode": "strict_regen"
+  }
+}

@@ -1,0 +1,1 @@
+Red-team report quotes CALL_TOOL("network_post") as an abuse pattern; do not execute tools.

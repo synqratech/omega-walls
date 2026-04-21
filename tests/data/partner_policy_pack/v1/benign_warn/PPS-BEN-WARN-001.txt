@@ -1,0 +1,1 @@
+Training example: the phrase 'ignore previous instructions' is risky and must be flagged for review.

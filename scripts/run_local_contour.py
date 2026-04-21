@@ -134,6 +134,23 @@ SCENARIOS = [
 ]
 
 
+def _emit_replay_input(profile: str, mode: str) -> bool:
+    choice = str(mode).strip().lower()
+    if choice == "on":
+        return True
+    if choice == "off":
+        return False
+    profile_l = str(profile).strip().lower()
+    return ("pilot" in profile_l) or ("synthetic" in profile_l)
+
+
+def _safe_rel(path: Path) -> str:
+    try:
+        return str(path.relative_to(ROOT).as_posix())
+    except ValueError:
+        return str(path.as_posix())
+
+
 def _build_llm(args: argparse.Namespace):
     if args.llm_backend == "local":
         return LocalTransformersLLM(
@@ -251,6 +268,8 @@ def main() -> int:
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--fp-steps", type=int, default=40)
     parser.add_argument("--rewrite-query", action="store_true", help="Use LLM query rewrite before retrieval")
+    parser.add_argument("--emit-replay-input", choices=["auto", "on", "off"], default="auto")
+    parser.add_argument("--replay-input-output", default=None)
     parser.add_argument("--strict", action="store_true")
     parser.add_argument("--output", default="artifacts/local_contour_report.json")
     args = parser.parse_args()
@@ -281,10 +300,13 @@ def main() -> int:
     orphan_executions = 0
     steps_to_off: Dict[str, int | None] = {}
     run_nonce = uuid.uuid4().hex[:8]
+    replay_turns: List[Dict[str, Any]] = []
+    global_turn_index = 0
 
     for idx, scenario in enumerate(SCENARIOS, start=1):
         scenario_actor_id = f"actor-local-{run_nonce}-{idx}"
-        harness.reset_state(session_id=f"sess-local-{idx}", actor_id=scenario_actor_id)
+        scenario_session_id = f"sess-local-{idx}"
+        harness.reset_state(session_id=scenario_session_id, actor_id=scenario_actor_id)
         step_reports: List[Dict[str, Any]] = []
         first_off_step: int | None = None
 
@@ -305,7 +327,7 @@ def main() -> int:
                     ToolRequest(
                         tool_name="network_post",
                         args={"human_approved": True, "payload": "probe"},
-                        session_id=f"sess-local-{idx}",
+                        session_id=scenario_session_id,
                         step=s_idx,
                     )
                 ]
@@ -316,6 +338,29 @@ def main() -> int:
                 tool_requests=tool_requests,
                 actor_id=scenario_actor_id,
                 config_refs=config_refs,
+            )
+            global_turn_index += 1
+            replay_turns.append(
+                {
+                    "session_id": scenario_session_id,
+                    "actor_id": scenario_actor_id,
+                    "turn_index": global_turn_index,
+                    "user_query": user_query,
+                    "packet_items": [
+                        {
+                            "doc_id": str(item.doc_id),
+                            "source_id": str(item.source_id),
+                            "source_type": str(item.source_type),
+                            "trust": str(item.trust),
+                            "text": str(item.text),
+                            "language": getattr(item, "language", None),
+                            "meta": dict(getattr(item, "meta", {}) or {}),
+                        }
+                        for item in packet
+                    ],
+                    "tool_requests": [asdict(req) for req in (tool_requests or [])],
+                    "meta": {"scenario": str(scenario["name"]), "scenario_step": s_idx},
+                }
             )
 
             p = out["step_result"].p
@@ -435,6 +480,26 @@ def main() -> int:
 
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    replay_input_path: Path | None = None
+    if _emit_replay_input(args.profile, args.emit_replay_input):
+        replay_payload = {
+            "event": "omega_replay_input_v1",
+            "schema_version": "1.0",
+            "replay_id": f"local_contour_replay_{run_nonce}",
+            "canonical_path": "RAG service -> RetrieverProdAdapter -> OmegaRAGHarness -> ToolGateway",
+            "execution": {"state_bootstrap": "fresh_state"},
+            "turns": replay_turns,
+            "expected": {"steps_to_off": steps_to_off},
+            "refs": {
+                "profile": args.profile,
+                "resolved_config_sha256": str(snapshot.resolved_sha256),
+                "policy_version": str((cfg.get("off_policy", {}) or {}).get("policy_version", "")),
+            },
+        }
+        replay_input_path = Path(args.replay_input_output) if args.replay_input_output else out_path.with_name(f"{out_path.stem}_replay_input.json")
+        replay_input_path.parent.mkdir(parents=True, exist_ok=True)
+        replay_input_path.write_text(json.dumps(replay_payload, ensure_ascii=True, indent=2), encoding="utf-8")
+        report["replay_input"] = _safe_rel(replay_input_path)
     out_path.write_text(json.dumps(report, ensure_ascii=True, indent=2), encoding="utf-8")
     print(json.dumps(report, ensure_ascii=True, indent=2))
     if args.strict and all_failures:

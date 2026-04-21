@@ -1,0 +1,46 @@
+{
+  "schema_version": "v1",
+  "snapshot_date_utc": "2026-04-21",
+  "policy": {
+    "mode": "frozen_run_ids_only",
+    "update_rule": "README metrics must reference explicit run IDs and be updated only via dedicated docs/results PR."
+  },
+  "runs": [
+    {
+      "name": "frozen_run_a_core_benchmark",
+      "run_id": "benchmark_20260417T094612Z_a2865dc41147",
+      "artifacts_root": "artifacts/benchmark_smoke/benchmark_20260417T094612Z_a2865dc41147",
+      "metrics": {
+        "attack_layer.stateful_target.attack_off_rate": 0.785714,
+        "attack_layer.stateful_target.benign_off_rate": 0.0,
+        "support_compare.stateful_target.attack_off_rate": 0.966555,
+        "support_compare.stateful_target.benign_off_rate": 0.0,
+        "support_compare.stateful_target.steps_to_off_median": 1.0
+      },
+      "notes": [
+        "Canonical public benchmark smoke profile.",
+        "Use scorecard.csv for comparable_scope markers."
+      ]
+    },
+    {
+      "name": "frozen_run_b_stateful_vs_baseline_d",
+      "run_id": "support_family_eval_compare_20260408T210609Z",
+      "artifacts_root": "artifacts/support_family_eval_compare/support_family_eval_compare_20260408T210609Z",
+      "baseline_d_model": "gpt-5.4-mini",
+      "metrics": {
+        "overall.stateful_target.session_attack_off_rate": 0.7083333333333334,
+        "overall.stateful_target.session_benign_off_rate": 0.08333333333333333,
+        "overall.baseline_d_bare_llm_detector.session_attack_off_rate": 0.7666666666666667,
+        "overall.baseline_d_bare_llm_detector.session_benign_off_rate": 0.1
+      },
+      "notes": [
+        "Comparative baseline D statement is scoped to gpt-5.4-mini only.",
+        "Do not generalize these numbers to other model families."
+      ]
+    }
+  ],
+  "caveats": [
+    "Results are point-in-time snapshots; they are not auto-updated.",
+    "Comparisons must account for comparable_scope from scorecard/report metadata."
+  ]
+}

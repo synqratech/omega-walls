@@ -1,0 +1,159 @@
+{
+  "run_id": "attack_layer_api_gen_20260327T131535Z",
+  "status": "ok",
+  "created_at_utc": "2026-03-27T13:20:39Z",
+  "model": "gpt-5.1",
+  "seed": 41,
+  "pack_out": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v1_api_main_fix3",
+  "source": "attack_layers_v1_api_generative",
+  "layers": [
+    "fragmentation",
+    "context_accumulation",
+    "tool_chain",
+    "role_persona",
+    "obfuscation",
+    "refusal_erosion",
+    "benign_stability",
+    "cross_session"
+  ],
+  "counts": {
+    "planned_calls": 144,
+    "generated_cases": 144,
+    "generated_rows": 414,
+    "attack_per_layer": 12,
+    "benign_per_layer": 6,
+    "unique_case_ids": 144,
+    "cases_by_layer": {
+      "fragmentation": 18,
+      "context_accumulation": 18,
+      "tool_chain": 18,
+      "role_persona": 18,
+      "obfuscation": 18,
+      "refusal_erosion": 18,
+      "benign_stability": 18,
+      "cross_session": 18
+    }
+  },
+  "budget": {
+    "max_usd": 6.0,
+    "spent_usd": 0.020093750000000014,
+    "spent_input_tokens": 22735,
+    "spent_output_tokens": 7205,
+    "price_input_per_1m": 0.25,
+    "price_output_per_1m": 2.0,
+    "estimated_cost_total_usd": 0.10583999999999999,
+    "budget_exhausted_at_case": null
+  },
+  "hashes": {
+    "manifest_all_sha256": "d75cd367a92ee6c479a72d74b8a4dd0352accad32063cb8e25a4dcf52d9261dd"
+  },
+  "quality": {
+    "benign_rows": 138,
+    "benign_risk_hit_rows": 0,
+    "benign_risk_hit_rate": 0.0,
+    "sample_case_ids": []
+  },
+  "quality_summary": {
+    "mode": "strict_regen",
+    "max_regen_attempts": 4,
+    "cases_total": 144,
+    "cases_passed_quality": 140,
+    "cases_regenerated": 14,
+    "regen_attempts_total": 32,
+    "fallback_cases": 5,
+    "fallback_rate": 0.034722222222222224,
+    "check_pass_counts": {
+      "anti_refusal": 126,
+      "anti_template_boilerplate": 181,
+      "anti_template_repeat": 171,
+      "benign_risk": 53,
+      "benign_session_nonimperative": 30,
+      "family_anchor": 117,
+      "family_intent_bundle": 45,
+      "real_obfuscation": 8,
+      "stage_progression": 122,
+      "tool_chain_payload": 12
+    },
+    "check_fail_counts": {
+      "anti_refusal": 2,
+      "anti_template_repeat": 10,
+      "family_anchor": 11,
+      "family_intent_bundle": 25
+    },
+    "attack_refusal_rows": 0,
+    "attack_refusal_rate": 0.0,
+    "top_repeated_attack_ngrams": [
+      {
+        "ngram": "a step by step",
+        "count": 19,
+        "share": 0.06884057971014493
+      },
+      {
+        "ngram": "align assumptions before execution",
+        "count": 17,
+        "share": 0.06159420289855073
+      },
+      {
+        "ngram": "and align assumptions before",
+        "count": 17,
+        "share": 0.06159420289855073
+      },
+      {
+        "ngram": "and boundaries relevant to",
+        "count": 17,
+        "share": 0.06159420289855073
+      },
+      {
+        "ngram": "and report concise outcome",
+        "count": 17,
+        "share": 0.06159420289855073
+      },
+      {
+        "ngram": "boundaries relevant to the",
+        "count": 17,
+        "share": 0.06159420289855073
+      },
+      {
+        "ngram": "consistent and align assumptions",
+        "count": 17,
+        "share": 0.06159420289855073
+      },
+      {
+        "ngram": "objective and boundaries relevant",
+        "count": 17,
+        "share": 0.06159420289855073
+      },
+      {
+        "ngram": "proceed with the final",
+        "count": 17,
+        "share": 0.06159420289855073
+      },
+      {
+        "ngram": "report concise outcome evidence",
+        "count": 17,
+        "share": 0.06159420289855073
+      }
+    ],
+    "top_repeated_attack_ngram_share": 0.06884057971014493,
+    "benign_hygiene": {
+      "benign_rows": 138,
+      "benign_risk_hit_rows": 0,
+      "benign_risk_hit_rate": 0.0,
+      "sample_case_ids": []
+    }
+  },
+  "artifacts": {
+    "manifest_all": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v1_api_main_fix3\\manifest_all.jsonl",
+    "manifest_meta": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v1_api_main_fix3\\manifest.meta.json",
+    "raw_dir": "D:\\AI_Models\\experiments\\injection_RAG\\artifacts\\attack_layer_api_gen\\attack_layer_api_gen_20260327T131535Z\\raw",
+    "quality_failures_jsonl": "D:\\AI_Models\\experiments\\injection_RAG\\artifacts\\attack_layer_api_gen\\attack_layer_api_gen_20260327T131535Z\\raw\\quality_failures.jsonl"
+  },
+  "protocol": {
+    "manifest_gold": true,
+    "expected_block_turn_default": null,
+    "temperature_requested": 0,
+    "temperature_mode": "auto_zero_or_model_default",
+    "promotion_gate": "Metrics+NoReg",
+    "quality_mode": "strict_regen"
+  }
+}

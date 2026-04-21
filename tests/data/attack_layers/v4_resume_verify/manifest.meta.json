@@ -1,0 +1,103 @@
+{
+  "run_id": "attack_layer_api_gen_20260328T152307Z",
+  "status": "ok",
+  "created_at_utc": "2026-03-28T15:23:14Z",
+  "model": "gpt-5.1",
+  "seed": 41,
+  "pack_out": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v4_resume_verify",
+  "source": "attack_layers_v1_api_generative",
+  "layers": [
+    "fragmentation"
+  ],
+  "counts": {
+    "planned_calls": 2,
+    "generated_cases": 0,
+    "generated_rows": 1,
+    "resumed_cases": 1,
+    "attack_per_layer": 1,
+    "benign_per_layer": 1,
+    "unique_case_ids": 1,
+    "cases_by_layer": {
+      "fragmentation": 1
+    },
+    "case_errors": 1
+  },
+  "budget": {
+    "max_usd": 1.0,
+    "spent_usd": 0.0,
+    "spent_input_tokens": 0,
+    "spent_output_tokens": 0,
+    "price_input_per_1m": 0.25,
+    "price_output_per_1m": 2.0,
+    "estimated_cost_total_usd": 0.00147,
+    "budget_exhausted_at_case": null
+  },
+  "hashes": {
+    "manifest_all_sha256": "330b45ab947699f946486ecaedb0769176cd8d895611f41e4d1e7c9446345400"
+  },
+  "quality": {
+    "benign_rows": 0,
+    "benign_risk_hit_rows": 0,
+    "benign_risk_hit_rate": 0.0,
+    "sample_case_ids": []
+  },
+  "quality_summary": {
+    "mode": "strict_regen",
+    "max_regen_attempts": 1,
+    "cases_total": 1,
+    "cases_passed_quality": 0,
+    "cases_regenerated": 0,
+    "regen_attempts_total": 0,
+    "fallback_cases": 0,
+    "fallback_rate": 0.0,
+    "check_pass_counts": {},
+    "check_fail_counts": {},
+    "attack_refusal_rows": 0,
+    "attack_refusal_rate": 0.0,
+    "top_repeated_attack_ngrams": [],
+    "top_repeated_attack_ngram_share": 0.0,
+    "benign_hygiene": {
+      "benign_rows": 0,
+      "benign_risk_hit_rows": 0,
+      "benign_risk_hit_rate": 0.0,
+      "sample_case_ids": []
+    },
+    "output_moderation_enabled": false,
+    "output_moderation_model": null,
+    "output_moderation_categories": [],
+    "output_moderation_score_threshold": 0.0,
+    "output_moderation_blocked_cases": 0,
+    "output_moderation_blocked_attempts": 0,
+    "output_moderation_api_errors": 0,
+    "output_moderation_skipped_cases": 0,
+    "output_moderation_failures_logged": 0
+  },
+  "moderation": {
+    "enabled": false,
+    "model": null,
+    "categories": [],
+    "score_threshold": 0.0,
+    "blocked_cases": 0,
+    "blocked_attempts": 0,
+    "api_errors": 0,
+    "skipped_cases": 0,
+    "failures_logged": 0
+  },
+  "artifacts": {
+    "manifest_all": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v4_resume_verify\\manifest_all.jsonl",
+    "manifest_meta": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v4_resume_verify\\manifest.meta.json",
+    "manifest_progress": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v4_resume_verify\\manifest.progress.json",
+    "raw_dir": "D:\\AI_Models\\experiments\\injection_RAG\\artifacts\\attack_layer_api_gen\\attack_layer_api_gen_20260328T152307Z\\raw",
+    "quality_failures_jsonl": "D:\\AI_Models\\experiments\\injection_RAG\\artifacts\\attack_layer_api_gen\\attack_layer_api_gen_20260328T152307Z\\raw\\quality_failures.jsonl",
+    "moderation_failures_jsonl": "D:\\AI_Models\\experiments\\injection_RAG\\artifacts\\attack_layer_api_gen\\attack_layer_api_gen_20260328T152307Z\\raw\\moderation_failures.jsonl",
+    "case_errors_jsonl": "D:\\AI_Models\\experiments\\injection_RAG\\artifacts\\attack_layer_api_gen\\attack_layer_api_gen_20260328T152307Z\\raw\\case_errors.jsonl"
+  },
+  "protocol": {
+    "manifest_gold": true,
+    "expected_block_turn_default": null,
+    "temperature_requested": 0,
+    "temperature_mode": "auto_zero_or_model_default",
+    "promotion_gate": "Metrics+NoReg",
+    "quality_mode": "strict_regen"
+  }
+}

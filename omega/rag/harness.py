@@ -11,6 +11,15 @@ import uuid
 import numpy as np
 
 from omega.interfaces.contracts_v1 import ContentItem, OffAction, OffDecision, OmegaOffReasons, OmegaState, ToolRequest
+from omega.log_contract import make_log_event
+from omega.monitoring.collector import build_monitor_collector_from_config
+from omega.monitoring.enrichment import build_downstream_summary, build_redacted_fragments
+from omega.monitoring.hints import infer_false_positive_hint
+from omega.monitoring.mode import GuardMode, resolve_guard_mode
+from omega.monitoring.models import MonitorEvent
+from omega.notifications.dispatcher import build_dispatcher_from_config, infer_major_triggers
+from omega.notifications.models import RiskEvent, new_event_id, utc_now_iso
+from omega.notifications.startup_flow import run_startup_notifications
 from omega.policy.control_outcome import control_outcome_from_actions
 from omega.policy.cross_session_state import CrossSessionStateManager
 from omega.policy.enforcement_state import EnforcementStateManager
@@ -25,6 +34,7 @@ from omega.telemetry.events import (
 )
 from omega.telemetry.ids import build_decision_id, build_trace_id_runtime
 from omega.telemetry.incident_artifact import build_incident_artifact, should_emit_incident_artifact
+from omega.structured_logging import build_structured_emitter_from_config, engine_version
 from omega.tools.adapters import ToolExecution, build_default_tool_registry
 
 LOGGER = logging.getLogger(__name__)
@@ -73,6 +83,25 @@ class OmegaRAGHarness:
         self._support_combo_streak = 0
         self._support_continuity_hits = 0
         self._support_sq_streak = 0
+        self.guard_mode = resolve_guard_mode(self.config)
+        self.monitor_collector = build_monitor_collector_from_config(
+            config=self.config,
+            force_enable=(self.guard_mode == GuardMode.MONITOR),
+        )
+        self.notification_dispatcher = build_dispatcher_from_config(config=self.config)
+        self.structured_emitter = build_structured_emitter_from_config(config=self.config, logger_name="omega.runtime")
+        profile_name = str(((self.config.get("profiles", {}) or {}).get("env", "") or (self.config.get("runtime", {}) or {}).get("mode", "custom")))
+        self.startup_summary = run_startup_notifications(
+            config=self.config,
+            profile=profile_name,
+            surface="runtime",
+            projector=self.projector,
+            dispatcher=self.notification_dispatcher,
+        )
+
+    def close(self) -> None:
+        if self.notification_dispatcher is not None:
+            self.notification_dispatcher.close()
 
     def reset_state(self, session_id: Optional[str] = None, actor_id: Optional[str] = None) -> None:
         self.state.m = np.zeros_like(self.state.m)
@@ -132,6 +161,82 @@ class OmegaRAGHarness:
     @staticmethod
     def _marker_hits(text_norm: str, markers: List[str]) -> List[str]:
         return sorted({str(m).strip().lower() for m in markers if str(m).strip() and str(m).strip().lower() in text_norm})
+
+    def _build_risk_event(
+        self,
+        *,
+        control_outcome: str,
+        action_types: List[str],
+        trace_id: str,
+        decision_id: str,
+        step: int,
+        session_id: str,
+        actor_id: str,
+        severity: str,
+        incident_artifact_id: Optional[str],
+        reason_flags: List[str],
+        risk_score: float,
+    ) -> RiskEvent:
+        semantic_active = bool(getattr(self.projector, "semantic_active", True))
+        fallback_active = not semantic_active
+        triggers = infer_major_triggers(
+            control_outcome=str(control_outcome),
+            action_types=action_types,
+            fallback_active=fallback_active,
+        )
+        return RiskEvent(
+            event_id=new_event_id(),
+            timestamp=utc_now_iso(),
+            surface="runtime",
+            control_outcome=str(control_outcome),
+            triggers=triggers,
+            reasons=list(reason_flags),
+            action_types=list(action_types),
+            trace_id=str(trace_id),
+            decision_id=str(decision_id),
+            incident_artifact_id=str(incident_artifact_id or ""),
+            tenant_id="",
+            session_id=str(session_id),
+            actor_id=str(actor_id),
+            step=int(step),
+            severity=str(severity),
+            risk_score=float(max(0.0, min(1.0, risk_score))),
+            payload_redacted={
+                "control_outcome": str(control_outcome),
+                "action_types": list(action_types),
+                "reasons": list(reason_flags),
+                "trace_id": str(trace_id),
+                "decision_id": str(decision_id),
+                "incident_artifact_id": str(incident_artifact_id or ""),
+                "session_id": str(session_id),
+                "actor_id": str(actor_id),
+            },
+        )
+
+    def _monitor_attribution(
+        self,
+        *,
+        step_result: Any,
+        items: List[ContentItem],
+    ) -> List[Dict[str, Any]]:
+        item_by_id = {str(item.doc_id): item for item in items}
+        top_docs = {str(x) for x in list(step_result.top_docs)}
+        rows: List[Dict[str, Any]] = []
+        for contrib in list(step_result.contribs):
+            doc_id = str(getattr(contrib, "doc_id", ""))
+            if top_docs and doc_id not in top_docs:
+                continue
+            item = item_by_id.get(doc_id)
+            rows.append(
+                {
+                    "doc_id": doc_id,
+                    "source_id": str(getattr(contrib, "source_id", "")),
+                    "trust": str(getattr(item, "trust", "untrusted")) if item is not None else "untrusted",
+                    "contribution": float(getattr(contrib, "c", 0.0)),
+                }
+            )
+        rows.sort(key=lambda x: (-float(x.get("contribution", 0.0)), str(x.get("doc_id", ""))))
+        return rows[:8]
 
     def _apply_cross_session_carryover_signal(
         self,
@@ -315,6 +420,8 @@ class OmegaRAGHarness:
     ) -> Dict[str, Any]:
         enforcement_mode = str(self.config.get("off_policy", {}).get("enforcement_mode", "ENFORCE")).upper()
         tools_execution_mode = str(self.config.get("tools", {}).get("execution_mode", "ENFORCE")).upper()
+        guard_mode = self.guard_mode
+        monitor_enabled = bool(guard_mode == GuardMode.MONITOR)
         resolved_actor_id = self._resolve_actor_id(actor_id)
 
         cross_hydrated = self.cross_session.hydrate_actor_state(
@@ -357,8 +464,24 @@ class OmegaRAGHarness:
             cross_block["carryover_signal_action_hits"] = list(carryover_signal.get("action_hits", []))
             cross_block["stateful_support_tuning"] = dict(support_tuning)
 
-        if enforcement_mode == "ENFORCE":
-            effective_actions = self._compose_effective_actions(policy_decision.actions, cross_active_actions)
+        effective_actions = self._compose_effective_actions(policy_decision.actions, cross_active_actions)
+        intended_decision = OffDecision(
+            off=policy_decision.off,
+            severity=policy_decision.severity,
+            actions=effective_actions,
+            control_outcome=control_outcome_from_actions(effective_actions),
+        )
+
+        if monitor_enabled:
+            decision = OffDecision(
+                off=policy_decision.off,
+                severity=policy_decision.severity,
+                actions=[],
+                control_outcome="ALLOW",
+            )
+            enforcement_actions = []
+            tools_execution_mode = "DRY_RUN"
+        elif enforcement_mode == "ENFORCE":
             decision = OffDecision(
                 off=policy_decision.off,
                 severity=policy_decision.severity,
@@ -380,11 +503,14 @@ class OmegaRAGHarness:
             step=int(step_result.step),
             doc_ids=sorted({str(item.doc_id) for item in packet_items}),
         )
+        intended_action_types = sorted({str(a.type) for a in list(intended_decision.actions)})
         action_types = sorted({str(a.type) for a in list(decision.actions)})
+        intended_action = str(intended_decision.control_outcome)
+        actual_action = str(decision.control_outcome)
         decision_id = build_decision_id(
             trace_id=trace_id,
-            control_outcome=str(decision.control_outcome),
-            action_types=action_types,
+            control_outcome=str(intended_action if monitor_enabled else decision.control_outcome),
+            action_types=intended_action_types if monitor_enabled else action_types,
             severity=str(decision.severity),
             off=bool(step_result.off),
         )
@@ -397,6 +523,20 @@ class OmegaRAGHarness:
             if action.type != "SOURCE_QUARANTINE" or not action.source_ids:
                 continue
             blocked.update(item.doc_id for item in packet_items if item.source_id in set(action.source_ids))
+        intended_blocked = set()
+        intended_quarantined_source_ids = sorted(
+            {
+                source_id
+                for action in list(intended_decision.actions)
+                if str(action.type) == "SOURCE_QUARANTINE"
+                for source_id in list(action.source_ids or [])
+            }
+        )
+        for action in list(intended_decision.actions):
+            if str(action.type) == "SOFT_BLOCK" and action.doc_ids:
+                intended_blocked.update(action.doc_ids)
+            if str(action.type) == "SOURCE_QUARANTINE" and action.source_ids:
+                intended_blocked.update(item.doc_id for item in packet_items if item.source_id in set(action.source_ids))
 
         allowed_items = [item for item in packet_items if item.doc_id not in blocked]
         context = self.context_builder.build_context(
@@ -416,12 +556,22 @@ class OmegaRAGHarness:
             session_id=self.state.session_id,
             step=step_result.step,
         )
+        latest_approval = self.notification_dispatcher.latest_approval_for_session(
+            tenant_id="runtime",
+            session_id=str(self.state.session_id),
+        )
+        latest_approval_status = str(latest_approval.status) if latest_approval is not None else "none"
+        auto_human_approved = latest_approval_status == "approved"
         merged_requests: List[tuple[ToolRequest, str]] = []
         for request in list(tool_requests or []):
             if "request_origin" not in request.args:
                 request.args["request_origin"] = "explicit"
+            if auto_human_approved and "human_approved" not in request.args:
+                request.args["human_approved"] = True
             merged_requests.append((request, "explicit"))
         for request in inferred_requests:
+            if auto_human_approved and "human_approved" not in request.args:
+                request.args["human_approved"] = True
             merged_requests.append((request, "inferred"))
 
         tool_decisions = []
@@ -466,6 +616,8 @@ class OmegaRAGHarness:
                             "mode": decision_out.mode,
                             "off_state": off_state,
                             "freeze_active": freeze_active,
+                            "validation_status": decision_out.validation_status,
+                            "validation_reason": decision_out.validation_reason,
                         },
                         capability=capability,
                         human_approved=human_approved,
@@ -504,6 +656,8 @@ class OmegaRAGHarness:
                             "mode": decision_out.mode,
                             "off_state": off_state,
                             "freeze_active": freeze_active,
+                            "validation_status": decision_out.validation_status,
+                            "validation_reason": decision_out.validation_reason,
                         },
                         capability=capability,
                         human_approved=human_approved,
@@ -542,6 +696,8 @@ class OmegaRAGHarness:
                             "mode": decision_out.mode,
                             "off_state": off_state,
                             "freeze_active": freeze_active,
+                            "validation_status": decision_out.validation_status,
+                            "validation_reason": decision_out.validation_reason,
                         },
                         capability=capability,
                         human_approved=human_approved,
@@ -600,6 +756,8 @@ class OmegaRAGHarness:
                         "mode": decision_out.mode,
                         "off_state": off_state,
                         "freeze_active": freeze_active,
+                        "validation_status": decision_out.validation_status,
+                        "validation_reason": decision_out.validation_reason,
                     },
                     capability=capability,
                     human_approved=human_approved,
@@ -693,7 +851,12 @@ class OmegaRAGHarness:
             severity=str(decision.severity),
             action_types=action_types,
             actions=list(decision.actions),
-            refs=dict(config_refs or {"code_commit": "local"}),
+            refs={
+                **dict(config_refs or {"code_commit": "local"}),
+                "guard_mode": str(guard_mode.value).lower(),
+                "intended_action": str(intended_action),
+                "actual_action": str(actual_action),
+            },
         )
         evidence_debug_event = build_evidence_debug_event(
             session_id=str(step_result.session_id),
@@ -768,6 +931,140 @@ class OmegaRAGHarness:
             )
             incident_artifact_id = str(incident_artifact.get("incident_artifact_id", ""))
 
+        max_p = float(np.max(step_result.p)) if len(step_result.p) else 0.0
+        sum_m = float(np.sum(step_result.m_next)) if len(step_result.m_next) else 0.0
+        sum_ratio = min(1.0, sum_m / max(float(self.omega_core.params.off_Sigma), 1e-6))
+        severity_score = {"L1": 0.0, "L2": 0.5, "L3": 1.0}.get(str(decision.severity), 0.0)
+        risk_score = float(max(0.0, min(1.0, 0.60 * max_p + 0.30 * sum_ratio + 0.10 * severity_score)))
+        monitor_attribution = self._monitor_attribution(step_result=step_result, items=packet_items)
+        fp_hint = infer_false_positive_hint(
+            risk_score=float(risk_score),
+            intended_action=str(intended_action),
+            reason_codes=list(reason_flags),
+            triggered_rules=list(walls_triggered),
+            attribution=monitor_attribution,
+            config=self.config,
+        )
+        monitor_fragments = build_redacted_fragments(
+            attribution_rows=monitor_attribution,
+            item_text_by_doc={str(item.doc_id): str(item.text) for item in packet_items},
+            max_fragments=4,
+            max_chars=240,
+        )
+        prevented_tools = sorted(
+            {
+                str(name)
+                for name in (
+                    [request.tool_name for request, _ in merged_requests] if "TOOL_FREEZE" in intended_action_types else []
+                )
+                if str(name).strip()
+            }
+        )
+        monitor_downstream = build_downstream_summary(
+            intended_action=str(intended_action),
+            action_types=list(intended_action_types),
+            blocked_doc_ids=sorted(str(x) for x in intended_blocked),
+            quarantined_source_ids=list(intended_quarantined_source_ids),
+            prevented_tools=prevented_tools,
+        )
+        monitor_rules = {
+            "triggered_rules": list(walls_triggered),
+            "reason_codes": list(reason_flags),
+        }
+        monitor_payload = {
+            "enabled": bool(monitor_enabled),
+            "guard_mode": str(guard_mode.value).lower(),
+            "intended_action": str(intended_action),
+            "actual_action": str(actual_action),
+            "triggered_rules": list(walls_triggered),
+            "rules": monitor_rules,
+            "fragments": monitor_fragments,
+            "downstream": monitor_downstream,
+            "false_positive_hint": fp_hint,
+        }
+        self.structured_emitter.emit(
+            make_log_event(
+                event="risk_assessed",
+                session_id=str(step_result.session_id),
+                mode=str(guard_mode.value).lower(),
+                engine_version=engine_version(),
+                risk_score=float(risk_score),
+                intended_action_native=str(intended_action),
+                actual_action_native=str(actual_action),
+                action_types=list(intended_action_types),
+                triggered_rules=list(walls_triggered),
+                attribution_rows=list(monitor_attribution),
+                fragments=list(monitor_fragments),
+                fp_hint=(str(fp_hint) if fp_hint else None),
+                ts=utc_now_iso(),
+                trace_id=str(trace_id),
+                decision_id=str(decision_id),
+                surface="runtime",
+                input_type="context_chunk",
+                input_length=sum(len(str(item.text or "")) for item in list(packet_items)),
+                source_type=(
+                    str(packet_items[0].source_type)
+                    if len(packet_items) == 1
+                    else ("mixed" if len(packet_items) > 1 else None)
+                ),
+            )
+        )
+        if monitor_enabled:
+            self.monitor_collector.emit(
+                MonitorEvent(
+                    ts=utc_now_iso(),
+                    surface="runtime",
+                    session_id=str(step_result.session_id),
+                    actor_id=str(resolved_actor_id),
+                    mode=str(guard_mode.value).lower(),
+                    risk_score=float(risk_score),
+                    intended_action=str(intended_action),
+                    actual_action=str(actual_action),
+                    triggered_rules=list(walls_triggered),
+                    attribution=list(monitor_attribution),
+                    reason_codes=list(reason_flags),
+                    rules=monitor_rules,
+                    fragments=monitor_fragments,
+                    downstream=monitor_downstream,
+                    trace_id=str(trace_id),
+                    decision_id=str(decision_id),
+                    false_positive_hint=(str(fp_hint) if fp_hint else None),
+                    metadata={
+                        "step": int(step_result.step),
+                        "severity": str(decision.severity),
+                    },
+                )
+            )
+        risk_event = self._build_risk_event(
+            control_outcome=str(decision.control_outcome),
+            action_types=action_types,
+            trace_id=str(trace_id),
+            decision_id=str(decision_id),
+            step=int(step_result.step),
+            session_id=str(step_result.session_id),
+            actor_id=str(resolved_actor_id),
+            severity=str(decision.severity),
+            incident_artifact_id=incident_artifact_id,
+            reason_flags=list(reason_flags),
+            risk_score=risk_score,
+        )
+        self.notification_dispatcher.emit_risk_event(risk_event)
+        approval_required = ("HUMAN_ESCALATE" in action_types) or ("REQUIRE_APPROVAL" in action_types)
+        approval_id: Optional[str] = None
+        if approval_required:
+            timeout_sec = int(
+                ((self.config.get("notifications", {}) or {}).get("approvals", {}) or {}).get("timeout_sec", 900)
+            )
+            approval = self.notification_dispatcher.create_action_request(
+                risk_event=risk_event,
+                required_action="HUMAN_ESCALATE" if "HUMAN_ESCALATE" in action_types else "REQUIRE_APPROVAL",
+                timeout_sec=max(10, timeout_sec),
+            )
+            approval_id = str(approval.approval_id)
+            latest_approval_status = str(approval.status)
+        elif latest_approval is not None:
+            approval_id = str(latest_approval.approval_id)
+
         return {
             "trace_id": trace_id,
             "decision_id": decision_id,
@@ -789,4 +1086,10 @@ class OmegaRAGHarness:
             "off_event": off_event,
             "incident_artifact_id": incident_artifact_id,
             "incident_artifact": incident_artifact,
+            "approval_required": bool(approval_required),
+            "approval_id": approval_id,
+            "approval_status": str(latest_approval_status),
+            "monitor": monitor_payload,
+            "notification_metrics": self.notification_dispatcher.metrics_snapshot(),
+            "monitoring_metrics": self.monitor_collector.health_snapshot(),
         }

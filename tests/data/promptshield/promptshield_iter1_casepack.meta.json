@@ -1,0 +1,31 @@
+{
+  "status": "ok",
+  "validation_report": "D:\\AI_Models\\experiments\\injection_RAG\\artifacts\\promptshield_eval\\promptshield_eval_w202612_20260319T204039Z\\report.json",
+  "test_report": "D:\\AI_Models\\experiments\\injection_RAG\\artifacts\\promptshield_eval\\promptshield_eval_w202612_20260318T210952Z\\report.json",
+  "validation_rows": "D:\\AI_Models\\experiments\\injection_RAG\\artifacts\\promptshield_eval\\promptshield_eval_w202612_20260319T204039Z\\rows.jsonl",
+  "test_rows": "D:\\AI_Models\\experiments\\injection_RAG\\artifacts\\promptshield_eval\\promptshield_eval_w202612_20260318T210952Z\\rows.jsonl",
+  "counts": {
+    "validation_fp_total": 55,
+    "validation_fn_total": 302,
+    "test_fp_total": 167,
+    "test_fn_total": 131,
+    "blocking_fp_written": 55,
+    "blocking_fn_written": 25,
+    "observe_written": 128
+  },
+  "protocol": {
+    "tuning_split": "validation",
+    "checkpoint_split": "test_truncated",
+    "blocking_from": "mixed:latest_validation_fp + curated_stable_fn_subset",
+    "observe_from": "test_truncated_fp_fn",
+    "blocking_fn_from_validation_report": "D:\\AI_Models\\experiments\\injection_RAG\\artifacts\\promptshield_eval\\promptshield_eval_20260312T212822Z\\report.json",
+    "blocking_fp_from_validation_report": "D:\\AI_Models\\experiments\\injection_RAG\\artifacts\\promptshield_eval\\promptshield_eval_w202612_20260319T204039Z\\report.json",
+    "blocking_fn_selection": "curated_detectable_subset"
+  },
+  "artifacts": {
+    "blocking_fp_jsonl": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\promptshield\\promptshield_iter1_blocking_fp.jsonl",
+    "blocking_fn_jsonl": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\promptshield\\promptshield_iter1_blocking_fn.jsonl",
+    "observe_jsonl": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\promptshield\\promptshield_iter1_observe.jsonl",
+    "meta_json": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\promptshield\\promptshield_iter1_casepack.meta.json"
+  }
+}

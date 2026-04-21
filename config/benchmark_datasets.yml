@@ -1,0 +1,33 @@
+benchmark_datasets:
+  profiles:
+    core_oss_v1:
+      description: "Canonical OSS benchmark profile with repo-local deterministic datasets."
+      datasets:
+        - dataset_id: hard_negatives_50
+          path: tests/data/hard_negatives_50.jsonl
+          source_type: repo_internal
+          source_url: repo://tests/data/hard_negatives_50.jsonl
+        - dataset_id: redteam_pos_20
+          path: tests/data/redteam_pos_20.jsonl
+          source_type: repo_internal
+          source_url: repo://tests/data/redteam_pos_20.jsonl
+        - dataset_id: redteam_obf_20
+          path: tests/data/redteam_obf_20.jsonl
+          source_type: repo_internal
+          source_url: repo://tests/data/redteam_obf_20.jsonl
+        - dataset_id: attack_layers_manifest_all
+          path: tests/data/attack_layers/v1/manifest_all.jsonl
+          source_type: repo_internal
+          source_url: repo://tests/data/attack_layers/v1/manifest_all.jsonl
+        - dataset_id: attack_layers_manifest_meta
+          path: tests/data/attack_layers/v1/manifest.meta.json
+          source_type: repo_internal
+          source_url: repo://tests/data/attack_layers/v1/manifest.meta.json
+        - dataset_id: session_pack_seed41_v1
+          path: tests/data/session_benchmark/session_pack_seed41_v1.jsonl
+          source_type: repo_internal
+          source_url: repo://tests/data/session_benchmark/session_pack_seed41_v1.jsonl
+        - dataset_id: session_pack_stateful_focus_v1
+          path: tests/data/session_benchmark/session_pack_stateful_focus_v1.jsonl
+          source_type: repo_internal
+          source_url: repo://tests/data/session_benchmark/session_pack_stateful_focus_v1.jsonl

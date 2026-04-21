@@ -15,10 +15,12 @@ from pathlib import Path
 import threading
 import time
 import uuid
+from urllib.parse import parse_qs
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 import numpy as np
 from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
 
 from omega.api.chunk_pipeline import score_chunks
 from omega.api.session_store import ApiSessionStore
@@ -26,13 +28,29 @@ from omega.config.loader import load_resolved_config
 from omega.core.omega_core import OmegaCoreV1
 from omega.core.params import omega_params_from_config
 from omega.interfaces.contracts_v1 import ContentItem, OmegaState
+from omega.log_contract import ErrorInfo, make_log_event, normalize_api_risk_score
+from omega.monitoring.collector import MonitorEventCollector, build_monitor_collector_from_config
+from omega.monitoring.enrichment import build_downstream_summary, build_redacted_fragments
+from omega.monitoring.hints import infer_false_positive_hint
+from omega.monitoring.mode import GuardMode, resolve_guard_mode
+from omega.monitoring.models import MonitorEvent
+from omega.notifications.dispatcher import NotificationDispatcher, build_dispatcher_from_config, infer_major_triggers
+from omega.notifications.models import ApprovalDecision, RiskEvent, new_event_id, utc_now_iso
+from omega.notifications.security import (
+    verify_internal_hmac,
+    verify_slack_signature,
+    verify_telegram_secret_token,
+)
+from omega.notifications.startup_flow import run_startup_notifications
 from omega.policy.cross_session_state import CrossSessionStateManager
 from omega.policy.control_outcome import control_outcome_from_action_types
 from omega.policy.off_policy_v1 import OffPolicyV1
 from omega.projector.factory import build_projector
 from omega.rag.attachment_ingestion import AttachmentExtractResult, extract_attachment, extract_text_payload
+from omega.rag.source_policy import SourceTrustPolicy
 from omega.telemetry.ids import build_decision_id, build_trace_id_api
 from omega.telemetry.incident_artifact import build_incident_artifact, should_emit_incident_artifact
+from omega.structured_logging import StructuredLogEmitter, build_structured_emitter_from_config, engine_version
 
 LOGGER = logging.getLogger(__name__)
 
@@ -104,6 +122,46 @@ def _omega_reason_codes(step_result: Any) -> List[str]:
     if getattr(r, "reason_multi", False):
         out.append("reason_multi")
     return out
+
+
+def _monitor_attribution_rows(*, items: Sequence[ContentItem], top_chunks: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    item_by_id = {str(item.doc_id): item for item in list(items)}
+    rows: List[Dict[str, Any]] = []
+    for chunk in list(top_chunks):
+        doc_id = str((chunk or {}).get("doc_id", "")).strip()
+        if not doc_id:
+            continue
+        item = item_by_id.get(doc_id)
+        if item is None:
+            continue
+        rows.append(
+            {
+                "doc_id": str(item.doc_id),
+                "source_id": str(item.source_id),
+                "trust": str(item.trust),
+                "contribution": float((chunk or {}).get("score", 0.0) or 0.0),
+            }
+        )
+    rows.sort(key=lambda x: (-float(x.get("contribution", 0.0)), str(x.get("doc_id", ""))))
+    return rows[:8]
+
+
+def _normalize_trust_band(value: str) -> str:
+    raw = str(value or "").strip().lower()
+    if raw in {"trusted", "semi", "semi_trusted"}:
+        return "trusted"
+    if raw == "mixed":
+        return "mixed"
+    return "untrusted"
+
+
+def _source_risk_band(items: Sequence[ContentItem]) -> str:
+    bands = {_normalize_trust_band(getattr(item, "trust", "untrusted")) for item in list(items)}
+    if not bands:
+        return "untrusted"
+    if len(bands) > 1:
+        return "mixed"
+    return next(iter(bands))
 
 
 def _resolve_control_outcome(*, action_types: Sequence[str], verdict: str) -> str:
@@ -312,6 +370,9 @@ class ScanRuntime:
     runtime_cfg: Optional[ApiRuntime] = None
     session_store: Optional[ApiSessionStore] = None
     cross_session: Optional[CrossSessionStateManager] = None
+    notification_dispatcher: Optional[NotificationDispatcher] = None
+    monitor_collector: Optional[MonitorEventCollector] = None
+    structured_emitter: Optional[StructuredLogEmitter] = None
     session_locks: SessionLockPool = field(default_factory=SessionLockPool)
 
 
@@ -351,6 +412,13 @@ def _make_runtime(resolved_config: Dict[str, Any]) -> ScanRuntime:
             session_ttl_sec=runtime_cfg.session_ttl_sec,
             request_cache_ttl_sec=runtime_cfg.request_cache_ttl_sec,
         )
+    guard_mode = resolve_guard_mode(resolved_config)
+    notification_dispatcher = build_dispatcher_from_config(config=resolved_config)
+    monitor_collector = build_monitor_collector_from_config(
+        config=resolved_config,
+        force_enable=(guard_mode == GuardMode.MONITOR),
+    )
+    structured_emitter = build_structured_emitter_from_config(config=resolved_config, logger_name="omega.api")
     return ScanRuntime(
         config=resolved_config,
         projector=build_projector(resolved_config),
@@ -370,6 +438,9 @@ def _make_runtime(resolved_config: Dict[str, Any]) -> ScanRuntime:
         runtime_cfg=runtime_cfg,
         session_store=session_store,
         cross_session=CrossSessionStateManager.from_config(resolved_config),
+        notification_dispatcher=notification_dispatcher,
+        monitor_collector=monitor_collector,
+        structured_emitter=structured_emitter,
     )
 
 
@@ -378,6 +449,10 @@ def _runtime_config(runtime: ScanRuntime) -> ApiRuntime:
         return runtime.runtime_cfg
     api_cfg = runtime.config.get("api", {}) if isinstance(runtime.config.get("api", {}), dict) else {}
     return ApiRuntime.from_cfg(api_cfg.get("runtime", {}) or {})
+
+
+def _guard_mode(runtime: ScanRuntime) -> GuardMode:
+    return resolve_guard_mode(runtime.config)
 
 
 def _effective_runtime_mode(runtime: ScanRuntime, parsed: Mapping[str, Any]) -> str:
@@ -728,6 +803,50 @@ def _audit_log_api_response(
             },
         }
     LOGGER.info("%s", json.dumps(log_event, ensure_ascii=False, sort_keys=True))
+    emitter = runtime.structured_emitter
+    if emitter is not None and emitter.enabled:
+        monitor = dict(response_payload.get("monitor", {}) or {})
+        risk_norm, risk_native = normalize_api_risk_score(response_payload.get("risk_score", 0))
+        monitor_fragments = list(monitor.get("fragments", []) or [])
+        monitor_attr = list(monitor.get("attribution", []) or [])
+        if not monitor_attr and isinstance(monitor.get("fragments", []), list):
+            monitor_attr = [
+                {
+                    "source_id": str(x.get("source_id", "")),
+                    "doc_id": str(x.get("doc_id", "")),
+                    "contribution": float(x.get("contribution", 0.0) or 0.0),
+                }
+                for x in monitor_fragments
+            ]
+        emitter.emit(
+            make_log_event(
+                event="api_scan_audit",
+                session_id=(
+                    str(response_payload.get("session_id", "")).strip()
+                    or str(parsed.get("session_id", "")).strip()
+                    or str(response_payload.get("request_id", "")).strip()
+                    or "api:unknown"
+                ),
+                mode=str(monitor.get("guard_mode", "enforce")),
+                engine_version=engine_version(),
+                risk_score=float(risk_norm),
+                intended_action_native=str(monitor.get("intended_action", response_payload.get("control_outcome", "ALLOW"))),
+                actual_action_native=str(monitor.get("actual_action", response_payload.get("control_outcome", "ALLOW"))),
+                action_types=list((response_payload.get("policy_trace", {}) or {}).get("intended_action_types", []) or []),
+                triggered_rules=list(monitor.get("triggered_rules", []) or []),
+                attribution_rows=monitor_attr,
+                fragments=monitor_fragments,
+                fp_hint=(str(monitor.get("false_positive_hint", "")) or None),
+                ts=str(log_event.get("ts", _utc_now())),
+                trace_id=str(response_payload.get("trace_id", "")),
+                decision_id=str(response_payload.get("decision_id", "")),
+                surface="api",
+                input_type="context_chunk",
+                input_length=int(len(body_bytes)),
+                source_type=str(parsed.get("mime", "")) or None,
+                risk_score_native=risk_native,
+            )
+        )
 
 
 def _build_document_scan_report(
@@ -768,6 +887,70 @@ def _build_document_scan_report(
     }
 
 
+def _notifications_cfg(runtime: ScanRuntime) -> Dict[str, Any]:
+    raw = runtime.config.get("notifications", {}) if isinstance(runtime.config, dict) else {}
+    return dict(raw or {}) if isinstance(raw, dict) else {}
+
+
+def _approval_internal_auth_cfg(runtime: ScanRuntime) -> Dict[str, Any]:
+    cfg = _notifications_cfg(runtime)
+    approvals = cfg.get("approvals", {}) if isinstance(cfg.get("approvals", {}), dict) else {}
+    internal_auth = approvals.get("internal_auth", {}) if isinstance(approvals.get("internal_auth", {}), dict) else {}
+    return dict(internal_auth or {})
+
+
+def _build_api_risk_event(
+    *,
+    payload: Mapping[str, Any],
+    parsed: Mapping[str, Any],
+    fallback_active: bool,
+) -> RiskEvent:
+    action_types = [str(x) for x in list((((payload.get("policy_trace", {}) or {}).get("action_types", [])) or []))]
+    control_outcome = str(payload.get("control_outcome", "ALLOW"))
+    risk_score_raw = payload.get("risk_score", None)
+    risk_float: Optional[float] = None
+    if risk_score_raw is not None:
+        try:
+            risk_float = max(0.0, min(1.0, float(risk_score_raw) / 100.0))
+        except (TypeError, ValueError):
+            risk_float = None
+    reasons = [str(x) for x in list(payload.get("reasons", []) or [])]
+    return RiskEvent(
+        event_id=new_event_id(),
+        timestamp=utc_now_iso(),
+        surface="api",
+        control_outcome=control_outcome,
+        triggers=infer_major_triggers(
+            control_outcome=control_outcome,
+            action_types=action_types,
+            fallback_active=bool(fallback_active),
+        ),
+        reasons=reasons,
+        action_types=action_types,
+        trace_id=str(payload.get("trace_id", "")),
+        decision_id=str(payload.get("decision_id", "")),
+        incident_artifact_id=str(payload.get("incident_artifact_id", "")),
+        tenant_id=str(parsed.get("tenant_id", "")),
+        session_id=str(parsed.get("session_id") or payload.get("request_id", "")),
+        actor_id=str(parsed.get("actor_id") or parsed.get("session_id") or ""),
+        step=int((((payload.get("policy_trace", {}) or {}).get("state_step_next", 0)) or 0)),
+        severity=str((((payload.get("policy_trace", {}) or {}).get("severity", "")) or "")),
+        risk_score=risk_float,
+        payload_redacted={
+            "control_outcome": control_outcome,
+            "reasons": reasons,
+            "action_types": action_types,
+            "trace_id": str(payload.get("trace_id", "")),
+            "decision_id": str(payload.get("decision_id", "")),
+            "incident_artifact_id": str(payload.get("incident_artifact_id", "")),
+            "tenant_id": str(parsed.get("tenant_id", "")),
+            "session_id": str(parsed.get("session_id") or payload.get("request_id", "")),
+            "actor_id": str(parsed.get("actor_id") or parsed.get("session_id") or ""),
+            "risk_score": int(payload.get("risk_score", 0) or 0),
+        },
+    )
+
+
 def _scan_request(
     runtime: ScanRuntime,
     parsed: Dict[str, Any],
@@ -785,6 +968,8 @@ def _scan_request(
     tenant_id = str(parsed["tenant_id"])
     request_id = str(parsed["request_id"])
     runtime_mode = _effective_runtime_mode(runtime, parsed)
+    guard_mode = _guard_mode(runtime)
+    monitor_enabled = bool(guard_mode == GuardMode.MONITOR)
     session_id = str(parsed.get("session_id") or "").strip() if runtime_mode == "stateful" else None
     actor_id = str(parsed.get("actor_id") or "").strip() if runtime_mode == "stateful" else None
     state_step_prev = 0
@@ -847,6 +1032,8 @@ def _scan_request(
             chunks = ["[attachment_ingestion_empty]"]
 
     source_type = _source_type_for_format(fmt)
+    source_trust_policy = SourceTrustPolicy.from_config(cfg)
+    source_trust = source_trust_policy.trust_for(source_type=source_type, source_id=source_id)
     items: List[ContentItem] = []
     for idx, chunk in enumerate(chunks):
         items.append(
@@ -854,7 +1041,7 @@ def _scan_request(
                 doc_id=f"{request_id}:c{idx:03d}",
                 source_id=source_id,
                 source_type=source_type,
-                trust="untrusted",
+                trust=str(source_trust),
                 text=str(chunk),
                 meta={
                     "tenant_id": tenant_id,
@@ -926,6 +1113,7 @@ def _scan_request(
         if float(step_result.p[idx]) > 0.0 or float(step_result.m_next[idx]) > 0.0:
             walls_triggered.append(str(wall))
     action_types = sorted({str(a.type) for a in list(decision.actions) + list(cross_active_actions)})
+    intended_action_types = list(action_types)
 
     reasons = sorted(
         set(
@@ -946,6 +1134,11 @@ def _scan_request(
     quarantine_synergy_threshold = float(policy_mapper_cfg.get("quarantine_synergy_threshold", 0.20))
     exfil_block_wall_threshold = float(policy_mapper_cfg.get("exfil_block_wall_threshold", 0.60))
     confidence_block_threshold = float(policy_mapper_cfg.get("confidence_block_threshold", 0.55))
+    hgl_cfg = (
+        policy_mapper_cfg.get("hallucination_guard_lite", {})
+        if isinstance(policy_mapper_cfg.get("hallucination_guard_lite", {}), dict)
+        else {}
+    )
 
     chunk_block = (
         float(chunk_agg.doc_score) >= block_score_threshold
@@ -979,7 +1172,90 @@ def _scan_request(
         reasons.append("source_quarantine_active")
     if tool_freeze_active:
         reasons.append("tool_freeze_active")
-    control_outcome = _resolve_control_outcome(action_types=action_types, verdict=verdict)
+    intended_verdict = str(verdict)
+    intended_control_outcome = _resolve_control_outcome(action_types=action_types, verdict=verdict)
+
+    top_chunk_lookup = {str(item.doc_id): item for item in list(items)}
+    source_risk_band = _source_risk_band(items)
+    allowed_trust_bands = {
+        _normalize_trust_band(x)
+        for x in list(hgl_cfg.get("apply_when_source_trust", ["untrusted", "mixed"]))
+        if str(x).strip()
+    }
+    if not allowed_trust_bands:
+        allowed_trust_bands = {"untrusted", "mixed"}
+    low_confidence_lte = float(hgl_cfg.get("low_confidence_lte", 0.35))
+    only_if_intended_allow = bool(hgl_cfg.get("only_if_intended_allow", True))
+    hallucination_reason_code = "hallucination_guard_lite_low_confidence_untrusted"
+    hallucination_guard_triggered = False
+    response_constraints: Dict[str, Any] = {
+        "enabled": False,
+        "disclaimer_required": False,
+        "citation_required": False,
+        "reason_code": None,
+        "citation_candidates": [],
+        "suggested_mode": None,
+    }
+    hallucination_guard_summary: Dict[str, Any] = {
+        "triggered": False,
+        "source_risk_band": str(source_risk_band),
+        "confidence": float(chunk_agg.confidence),
+        "reason_code": None,
+    }
+    hallucination_guard_enabled = bool(hgl_cfg.get("enabled", False))
+    if hallucination_guard_enabled:
+        low_confidence_hit = float(chunk_agg.confidence) <= low_confidence_lte
+        trust_band_hit = str(source_risk_band) in allowed_trust_bands
+        intended_allow_hit = (str(intended_control_outcome) == "ALLOW") if only_if_intended_allow else True
+        if low_confidence_hit and trust_band_hit and intended_allow_hit:
+            hallucination_guard_triggered = True
+            reasons.append(hallucination_reason_code)
+            if "WARN" not in set(intended_action_types):
+                intended_action_types = sorted(set(list(intended_action_types) + ["WARN"]))
+            intended_control_outcome = "WARN"
+            response_constraints = {
+                "enabled": True,
+                "disclaimer_required": True,
+                "citation_required": True,
+                "reason_code": hallucination_reason_code,
+                "citation_candidates": [
+                    {
+                        "doc_id": str(doc_id),
+                        "source_id": str(top_chunk_lookup[doc_id].source_id),
+                        "trust": str(top_chunk_lookup[doc_id].trust),
+                    }
+                    for row in list(chunk_agg.top_chunks)
+                    for doc_id in [str(row.get("doc_id", "")).strip()]
+                    if doc_id and doc_id in top_chunk_lookup
+                ],
+                "suggested_mode": "answer_with_uncertainty_and_citations",
+            }
+            soft_q_cfg = (
+                hgl_cfg.get("soft_quarantine", {})
+                if isinstance(hgl_cfg.get("soft_quarantine", {}), dict)
+                else {}
+            )
+            if bool(soft_q_cfg.get("enabled", False)):
+                mixed_ok = (not bool(soft_q_cfg.get("mixed_only", True))) or (str(source_risk_band) == "mixed")
+                very_low_hit = float(chunk_agg.confidence) <= float(soft_q_cfg.get("very_low_confidence_lte", 0.20))
+                synergy_hit = float(chunk_agg.pattern_synergy) >= float(soft_q_cfg.get("pattern_synergy_gte", 0.30))
+                if mixed_ok and very_low_hit and synergy_hit and str(intended_verdict).lower() == "allow":
+                    intended_verdict = "quarantine"
+                    verdict = "quarantine"
+        hallucination_guard_summary = {
+            "triggered": bool(hallucination_guard_triggered),
+            "source_risk_band": str(source_risk_band),
+            "confidence": float(chunk_agg.confidence),
+            "reason_code": (hallucination_reason_code if hallucination_guard_triggered else None),
+        }
+
+    action_types = list(intended_action_types)
+    if monitor_enabled:
+        verdict = "allow"
+        control_outcome = "ALLOW"
+        action_types = []
+    else:
+        control_outcome = str(intended_control_outcome)
 
     max_p = float(np.max(step_result.p)) if len(step_result.p) else 0.0
     sum_m_next = float(np.sum(step_result.m_next))
@@ -999,8 +1275,8 @@ def _scan_request(
     trace_id = build_trace_id_api(tenant_id=str(tenant_id), request_id=str(request_id))
     decision_id = build_decision_id(
         trace_id=trace_id,
-        control_outcome=control_outcome,
-        action_types=action_types,
+        control_outcome=(str(intended_control_outcome) if monitor_enabled else control_outcome),
+        action_types=(intended_action_types if monitor_enabled else action_types),
         severity=severity,
         off=off,
     )
@@ -1030,10 +1306,13 @@ def _scan_request(
             "trace_id": trace_id,
             "decision_id": decision_id,
             "control_outcome": control_outcome,
+            "intended_control_outcome": str(intended_control_outcome),
+            "actual_control_outcome": str(control_outcome),
             "off": off,
             "severity": severity,
             "walls_triggered": walls_triggered,
             "action_types": action_types,
+            "intended_action_types": list(intended_action_types),
             "max_p": max_p,
             "sum_m_next": sum_m_next,
             "top_docs_count": int(len(step_result.top_docs)),
@@ -1041,6 +1320,8 @@ def _scan_request(
             "state_step_prev": int(state_step_prev),
             "state_step_next": int(step_result.step),
             "ingestion_flags": sorted(set(ingestion_flags)),
+            "hallucination_guard_lite": dict(hallucination_guard_summary),
+            "response_constraints": dict(response_constraints),
             "chunk_pipeline": {
                 "chunks_total": int(len(items)),
                 "worst_chunk_score": float(chunk_agg.worst_chunk_score),
@@ -1053,7 +1334,93 @@ def _scan_request(
             },
             "evidence": evidence_summary,
         },
+        "response_constraints": dict(response_constraints),
     }
+    monitor_attribution = _monitor_attribution_rows(items=items, top_chunks=list(chunk_agg.top_chunks))
+    monitor_fragments = build_redacted_fragments(
+        attribution_rows=monitor_attribution,
+        item_text_by_doc={str(item.doc_id): str(item.text) for item in items},
+        max_fragments=4,
+        max_chars=240,
+    )
+    intended_blocked_doc_ids: List[str] = []
+    if str(intended_verdict).lower() in {"block", "quarantine"}:
+        intended_blocked_doc_ids = [
+            str(chunk.get("doc_id", "")).strip()
+            for chunk in list(chunk_agg.top_chunks)
+            if str(chunk.get("doc_id", "")).strip()
+        ]
+    intended_quarantined_sources: List[str] = []
+    if "SOURCE_QUARANTINE" in set(intended_action_types) or bool(source_quarantine_active):
+        intended_quarantined_sources = [str(source_id)]
+    intended_prevented_tools: List[str] = ["*"] if "TOOL_FREEZE" in set(intended_action_types) else []
+    monitor_downstream = build_downstream_summary(
+        intended_action=str(intended_control_outcome),
+        action_types=list(intended_action_types),
+        blocked_doc_ids=intended_blocked_doc_ids,
+        quarantined_source_ids=intended_quarantined_sources,
+        prevented_tools=intended_prevented_tools,
+    )
+    monitor_rules = {
+        "triggered_rules": list(walls_triggered),
+        "reason_codes": list(reasons_sorted),
+    }
+    fp_hint = infer_false_positive_hint(
+        risk_score=float(risk_score) / 100.0,
+        intended_action=str(intended_control_outcome),
+        reason_codes=list(reasons_sorted),
+        triggered_rules=list(walls_triggered),
+        attribution=monitor_attribution,
+        config=runtime.config,
+    )
+    monitor_payload = {
+        "enabled": bool(monitor_enabled),
+        "guard_mode": str(guard_mode.value).lower(),
+        "intended_action": str(intended_control_outcome),
+        "actual_action": str(control_outcome),
+        "triggered_rules": list(walls_triggered),
+        "rules": monitor_rules,
+        "fragments": monitor_fragments,
+        "downstream": monitor_downstream,
+        "false_positive_hint": fp_hint,
+        "hallucination_guard_lite": dict(hallucination_guard_summary),
+        "response_constraints": dict(response_constraints),
+    }
+    payload["monitor"] = monitor_payload
+    collector = runtime.monitor_collector
+    if collector is not None and bool(collector.enabled):
+        collector.emit(
+            MonitorEvent(
+                ts=utc_now_iso(),
+                surface="api",
+                session_id=str(session_id or request_id),
+                actor_id=str(actor_id or session_id or request_id),
+                mode=str(guard_mode.value).lower(),
+                risk_score=float(risk_score) / 100.0,
+                intended_action=str(intended_control_outcome),
+                actual_action=str(control_outcome),
+                triggered_rules=list(walls_triggered),
+                attribution=list(monitor_attribution),
+                reason_codes=list(reasons_sorted),
+                rules=monitor_rules,
+                fragments=monitor_fragments,
+                downstream=monitor_downstream,
+                trace_id=str(trace_id),
+                decision_id=str(decision_id),
+                false_positive_hint=(str(fp_hint) if fp_hint else None),
+                metadata={
+                    "tenant_id": str(tenant_id),
+                    "request_id": str(request_id),
+                    "runtime_mode": str(runtime_mode),
+                    "verdict": str(verdict),
+                    "hallucination_guard_lite": dict(hallucination_guard_summary),
+                    "response_constraints": dict(response_constraints),
+                },
+            )
+        )
+    payload["monitoring_metrics"] = (
+        collector.health_snapshot() if collector is not None else {"enabled": False}
+    )
     if runtime_mode == "stateful" and session_id:
         payload["session_id"] = str(session_id)
         payload["policy_trace"]["session_id"] = str(session_id)
@@ -1141,6 +1508,39 @@ def _scan_request(
         payload["incident_artifact_id"] = str(incident_artifact.get("incident_artifact_id", ""))
         payload["incident_artifact"] = incident_artifact
 
+    dispatcher = runtime.notification_dispatcher
+    notifications_enabled = bool(_notifications_cfg(runtime).get("enabled", False))
+    if notifications_enabled and dispatcher is not None:
+        fallback_active = not bool(getattr(runtime.projector, "semantic_active", True))
+        risk_event = _build_api_risk_event(payload=payload, parsed=parsed, fallback_active=fallback_active)
+        dispatcher.emit_risk_event(risk_event)
+        action_types = [str(x) for x in list((((payload.get("policy_trace", {}) or {}).get("action_types", [])) or []))]
+        approval_required = ("HUMAN_ESCALATE" in action_types) or ("REQUIRE_APPROVAL" in action_types)
+        approval_id: Optional[str] = None
+        approval_status = "none"
+        session_ref = str(parsed.get("session_id") or payload.get("request_id", ""))
+        existing = dispatcher.latest_approval_for_session(
+            tenant_id=str(parsed.get("tenant_id", "")),
+            session_id=session_ref,
+        )
+        if existing is not None:
+            approval_id = str(existing.approval_id)
+            approval_status = str(existing.status)
+        if approval_required:
+            timeout_sec = int(((_notifications_cfg(runtime).get("approvals", {}) or {}).get("timeout_sec", 900)))
+            approval = dispatcher.create_action_request(
+                risk_event=risk_event,
+                required_action="HUMAN_ESCALATE" if "HUMAN_ESCALATE" in action_types else "REQUIRE_APPROVAL",
+                timeout_sec=max(10, timeout_sec),
+            )
+            approval_id = str(approval.approval_id)
+            approval_status = str(approval.status)
+        payload["approval_required"] = bool(approval_required)
+        if approval_id:
+            payload["approval_id"] = str(approval_id)
+            payload["approval_status"] = str(approval_status)
+        payload["notification_metrics"] = dispatcher.metrics_snapshot()
+
     att, att_reason = _attestation_block(response_wo_attestation=payload, runtime=runtime)
     if att is not None:
         payload["attestation"] = att
@@ -1176,10 +1576,275 @@ def create_app(*, resolved_config: Optional[Dict[str, Any]] = None, profile: str
     cfg = dict(resolved_config or load_resolved_config(profile=profile).resolved)
     app = FastAPI(title="Omega Attachment Scan API", version="1.0")
     app.state.scan_runtime = _make_runtime(cfg)
+    runtime: ScanRuntime = app.state.scan_runtime
+    app.state.startup_summary = run_startup_notifications(
+        config=runtime.config,
+        profile=str(profile),
+        surface="api",
+        projector=runtime.projector,
+        dispatcher=runtime.notification_dispatcher,
+    )
+
+    @app.on_event("shutdown")
+    async def shutdown_event() -> None:
+        runtime: ScanRuntime = app.state.scan_runtime
+        if runtime.notification_dispatcher is not None:
+            runtime.notification_dispatcher.close()
+
+    @app.exception_handler(HTTPException)
+    async def _http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+        runtime: ScanRuntime = app.state.scan_runtime
+        emitter = runtime.structured_emitter
+        if emitter is not None and emitter.enabled:
+            emitter.emit(
+                make_log_event(
+                    event="api_error",
+                    session_id="api:unknown",
+                    mode=str(_guard_mode(runtime).value).lower(),
+                    engine_version=engine_version(),
+                    risk_score=0.0,
+                    intended_action_native="ALLOW",
+                    actual_action_native="ALLOW",
+                    action_types=[],
+                    triggered_rules=[],
+                    attribution_rows=[],
+                    ts=_utc_now(),
+                    surface="api",
+                    input_type="api_request",
+                    input_length=None,
+                    source_type=None,
+                    error=ErrorInfo(
+                        code=f"HTTP_{int(exc.status_code)}",
+                        message=str(exc.detail),
+                        details={"path": str(request.url.path), "method": str(request.method).upper()},
+                    ),
+                )
+            )
+        return JSONResponse(status_code=int(exc.status_code), content={"detail": exc.detail})
 
     @app.get("/healthz")
     async def healthz() -> Dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/v1/monitor/health")
+    async def monitor_health() -> Dict[str, Any]:
+        runtime: ScanRuntime = app.state.scan_runtime
+        collector = runtime.monitor_collector
+        snapshot = collector.health_snapshot() if collector is not None else {"enabled": False}
+        snapshot["guard_mode"] = str(_guard_mode(runtime).value).lower()
+        return snapshot
+
+    @app.post("/v1/notifications/callback/slack")
+    async def slack_callback(request: Request) -> Dict[str, Any]:
+        runtime: ScanRuntime = app.state.scan_runtime
+        notifications_cfg = _notifications_cfg(runtime)
+        dispatcher = runtime.notification_dispatcher
+        if not bool(notifications_cfg.get("enabled", False)) or dispatcher is None:
+            raise HTTPException(status_code=503, detail="notifications_not_enabled")
+        slack_cfg = notifications_cfg.get("slack", {}) if isinstance(notifications_cfg.get("slack", {}), dict) else {}
+        if not bool(slack_cfg.get("enabled", False)):
+            raise HTTPException(status_code=503, detail="slack_not_enabled")
+
+        signing_secret_env = str(slack_cfg.get("signing_secret_env", "SLACK_SIGNING_SECRET")).strip()
+        signing_secret = str(os.environ.get(signing_secret_env, "")).strip()
+        if not signing_secret:
+            raise HTTPException(status_code=503, detail="slack_signing_secret_missing")
+        body_bytes = await request.body()
+        sig = str(request.headers.get("X-Slack-Signature", "")).strip()
+        ts = str(request.headers.get("X-Slack-Request-Timestamp", "")).strip()
+        if not verify_slack_signature(
+            body_bytes=body_bytes,
+            signature=sig,
+            timestamp=ts,
+            signing_secret=signing_secret,
+        ):
+            raise HTTPException(status_code=401, detail="invalid_slack_signature")
+
+        ctype = str(request.headers.get("content-type", "")).lower()
+        payload_obj: Dict[str, Any] = {}
+        if "application/x-www-form-urlencoded" in ctype:
+            form = parse_qs(body_bytes.decode("utf-8", errors="replace"), keep_blank_values=True)
+            payload_raw = str((form.get("payload") or [""])[0])
+            if payload_raw.strip():
+                try:
+                    parsed = json.loads(payload_raw)
+                except json.JSONDecodeError as exc:
+                    raise HTTPException(status_code=400, detail="invalid_callback_payload") from exc
+                if isinstance(parsed, dict):
+                    payload_obj = parsed
+        else:
+            try:
+                parsed = json.loads(body_bytes.decode("utf-8", errors="replace"))
+            except json.JSONDecodeError as exc:
+                raise HTTPException(status_code=400, detail="invalid_callback_payload") from exc
+            if isinstance(parsed, dict):
+                payload_obj = parsed
+
+        if "challenge" in payload_obj:
+            return {"challenge": payload_obj.get("challenge")}
+
+        actions = payload_obj.get("actions", []) if isinstance(payload_obj.get("actions", []), list) else []
+        if not actions:
+            return {"ok": True, "ignored": True}
+        action = actions[0] if isinstance(actions[0], dict) else {}
+        value_raw = str(action.get("value", "")).strip()
+        if not value_raw:
+            raise HTTPException(status_code=400, detail="missing_action_value")
+        try:
+            value_obj = json.loads(value_raw)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail="invalid_action_value") from exc
+        if not isinstance(value_obj, dict):
+            raise HTTPException(status_code=400, detail="invalid_action_value")
+        approval_id = str(value_obj.get("approval_id", "")).strip()
+        decision = str(value_obj.get("decision", "")).strip().lower()
+        if decision not in {"approved", "denied"}:
+            raise HTTPException(status_code=400, detail="invalid_action_decision")
+        if not approval_id:
+            raise HTTPException(status_code=400, detail="missing_approval_id")
+        actor_id = str(((payload_obj.get("user", {}) or {}).get("id", ""))).strip()
+        record = dispatcher.resolve_approval(
+            approval_id=approval_id,
+            decision=ApprovalDecision(
+                decision=decision,
+                actor_id=actor_id,
+                source="slack_callback",
+            ).normalized(),
+        )
+        if record is None:
+            raise HTTPException(status_code=404, detail="approval_not_found")
+        return {"ok": True, "approval_id": approval_id, "status": str(record.status)}
+
+    @app.post("/v1/notifications/callback/telegram")
+    async def telegram_callback(request: Request) -> Dict[str, Any]:
+        runtime: ScanRuntime = app.state.scan_runtime
+        notifications_cfg = _notifications_cfg(runtime)
+        dispatcher = runtime.notification_dispatcher
+        if not bool(notifications_cfg.get("enabled", False)) or dispatcher is None:
+            raise HTTPException(status_code=503, detail="notifications_not_enabled")
+        tg_cfg = notifications_cfg.get("telegram", {}) if isinstance(notifications_cfg.get("telegram", {}), dict) else {}
+        if not bool(tg_cfg.get("enabled", False)):
+            raise HTTPException(status_code=503, detail="telegram_not_enabled")
+        secret_env = str(tg_cfg.get("secret_token_env", "TG_BOT_SECRET_TOKEN")).strip()
+        expected_secret = str(os.environ.get(secret_env, "")).strip()
+        if not expected_secret:
+            raise HTTPException(status_code=503, detail="telegram_secret_missing")
+        provided_secret = str(request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")).strip()
+        if not verify_telegram_secret_token(provided=provided_secret, expected=expected_secret):
+            raise HTTPException(status_code=401, detail="invalid_telegram_secret")
+        try:
+            payload_obj = await request.json()
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="invalid_callback_payload") from exc
+        if not isinstance(payload_obj, dict):
+            raise HTTPException(status_code=400, detail="invalid_callback_payload")
+        callback_query = payload_obj.get("callback_query", {}) if isinstance(payload_obj.get("callback_query", {}), dict) else {}
+        data = str(callback_query.get("data", "")).strip()
+        if not data:
+            return {"ok": True, "ignored": True}
+        parts = data.split(":")
+        if len(parts) != 3 or parts[0] != "omega" or parts[1] not in {"approved", "denied"}:
+            raise HTTPException(status_code=400, detail="invalid_callback_data")
+        approval_id = str(parts[2]).strip()
+        decision = str(parts[1]).strip()
+        actor_id = str((((callback_query.get("from", {}) or {}).get("id", "")))).strip()
+        record = dispatcher.resolve_approval(
+            approval_id=approval_id,
+            decision=ApprovalDecision(
+                decision=decision,
+                actor_id=actor_id,
+                source="telegram_callback",
+            ).normalized(),
+        )
+        if record is None:
+            raise HTTPException(status_code=404, detail="approval_not_found")
+        return {"ok": True, "approval_id": approval_id, "status": str(record.status)}
+
+    @app.get("/v1/approvals/{approval_id}")
+    async def get_approval(
+        approval_id: str,
+        x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
+    ) -> Dict[str, Any]:
+        runtime: ScanRuntime = app.state.scan_runtime
+        if not x_api_key or not _valid_api_key(str(x_api_key), runtime.api_keys):
+            raise HTTPException(status_code=401, detail="unauthorized")
+        dispatcher = runtime.notification_dispatcher
+        if dispatcher is None:
+            raise HTTPException(status_code=503, detail="notifications_not_enabled")
+        record = dispatcher.get_approval(str(approval_id))
+        if record is None:
+            raise HTTPException(status_code=404, detail="approval_not_found")
+        return {"approval": record.to_dict()}
+
+    @app.post("/v1/approvals/{approval_id}/resolve")
+    async def resolve_approval(
+        approval_id: str,
+        request: Request,
+        x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
+    ) -> Dict[str, Any]:
+        runtime: ScanRuntime = app.state.scan_runtime
+        if not x_api_key or not _valid_api_key(str(x_api_key), runtime.api_keys):
+            raise HTTPException(status_code=401, detail="unauthorized")
+        dispatcher = runtime.notification_dispatcher
+        if dispatcher is None:
+            raise HTTPException(status_code=503, detail="notifications_not_enabled")
+        body_bytes = await request.body()
+        try:
+            body = json.loads(body_bytes.decode("utf-8", errors="replace"))
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail="invalid_json_body") from exc
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="invalid_json_body")
+        tenant_id = str(body.get("tenant_id", "")).strip()
+        request_id = str(body.get("request_id", "")).strip() or str(uuid.uuid4())
+        decision_raw = str(body.get("decision", "")).strip().lower()
+        actor_id = str(body.get("actor_id", "")).strip()
+        reason = str(body.get("reason", "")).strip()
+        source = str(body.get("source", "internal_manual")).strip()
+        try:
+            decision = ApprovalDecision(
+                decision=decision_raw,
+                actor_id=actor_id,
+                source=source,
+                reason=reason,
+            ).normalized()
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="invalid_approval_decision") from exc
+
+        internal_auth = _approval_internal_auth_cfg(runtime)
+        if bool(internal_auth.get("require_hmac", True)):
+            headers_cfg = internal_auth.get("headers", {}) if isinstance(internal_auth.get("headers", {}), dict) else {}
+            sig_header = str(headers_cfg.get("signature", "X-Internal-Signature")).strip()
+            ts_header = str(headers_cfg.get("timestamp", "X-Internal-Timestamp")).strip()
+            nonce_header = str(headers_cfg.get("nonce", "X-Internal-Nonce")).strip()
+            signature = str(request.headers.get(sig_header, "")).strip()
+            ts = str(request.headers.get(ts_header, "")).strip()
+            nonce = str(request.headers.get(nonce_header, "")).strip()
+            secret_env = str(internal_auth.get("hmac_secret_env", "OMEGA_NOTIFICATION_HMAC_SECRET")).strip()
+            secret = str(os.environ.get(secret_env, "")).strip()
+            if not secret:
+                raise HTTPException(status_code=503, detail="notification_hmac_secret_missing")
+            max_skew = int(internal_auth.get("max_clock_skew_sec", 300))
+            valid = verify_internal_hmac(
+                method=request.method,
+                path=request.url.path,
+                body_bytes=body_bytes,
+                tenant_id=tenant_id,
+                request_id=request_id,
+                signature=signature,
+                timestamp=ts,
+                nonce=nonce,
+                secret=secret,
+                seen_nonces=dispatcher.nonce_cache,
+                max_skew_sec=max_skew,
+            )
+            if not valid:
+                raise HTTPException(status_code=401, detail="invalid_internal_signature")
+
+        record = dispatcher.resolve_approval(approval_id=str(approval_id), decision=decision)
+        if record is None:
+            raise HTTPException(status_code=404, detail="approval_not_found")
+        return {"approval": record.to_dict()}
 
     @app.post("/v1/scan/attachment")
     async def scan_attachment(
@@ -1288,12 +1953,19 @@ def create_app(*, resolved_config: Optional[Dict[str, Any]] = None, profile: str
                 tenant_id=str(parsed["tenant_id"]),
                 session_id=str(parsed["session_id"]),
             )
+            approvals_cleared = False
+            if runtime.notification_dispatcher is not None:
+                approvals_cleared = runtime.notification_dispatcher.store.clear_session(
+                    tenant_id=str(parsed["tenant_id"]),
+                    session_id=str(parsed["session_id"]),
+                )
         return {
             "request_id": str(parsed["request_id"]),
             "tenant_id": str(parsed["tenant_id"]),
             "session_id": str(parsed["session_id"]),
             "reset": True,
             "existed": bool(existed),
+            "approvals_cleared": bool(approvals_cleared),
         }
 
     return app

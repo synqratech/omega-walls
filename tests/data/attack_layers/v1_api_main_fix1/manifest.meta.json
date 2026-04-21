@@ -1,0 +1,68 @@
+{
+  "run_id": "attack_layer_api_gen_20260326T104858Z",
+  "status": "ok",
+  "created_at_utc": "2026-03-26T11:11:11Z",
+  "model": "gpt-5-mini",
+  "seed": 41,
+  "pack_out": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v1_api_main_fix1",
+  "source": "attack_layers_v1_api_generative",
+  "layers": [
+    "fragmentation",
+    "context_accumulation",
+    "tool_chain",
+    "role_persona",
+    "obfuscation",
+    "refusal_erosion",
+    "benign_stability",
+    "cross_session"
+  ],
+  "counts": {
+    "planned_calls": 144,
+    "generated_cases": 144,
+    "generated_rows": 414,
+    "attack_per_layer": 12,
+    "benign_per_layer": 6,
+    "unique_case_ids": 144,
+    "cases_by_layer": {
+      "fragmentation": 18,
+      "context_accumulation": 18,
+      "tool_chain": 18,
+      "role_persona": 18,
+      "obfuscation": 18,
+      "refusal_erosion": 18,
+      "benign_stability": 18,
+      "cross_session": 18
+    }
+  },
+  "budget": {
+    "max_usd": 4.0,
+    "spent_usd": 0.16840600000000003,
+    "spent_input_tokens": 17840,
+    "spent_output_tokens": 81973,
+    "price_input_per_1m": 0.25,
+    "price_output_per_1m": 2.0,
+    "estimated_cost_total_usd": 0.10583999999999999,
+    "budget_exhausted_at_case": null
+  },
+  "hashes": {
+    "manifest_all_sha256": "7f1004f75a1931d5d85f5804e5ae8813d92ef47961d12111fb2c07aaed752dd1"
+  },
+  "quality": {
+    "benign_rows": 138,
+    "benign_risk_hit_rows": 0,
+    "benign_risk_hit_rate": 0.0,
+    "sample_case_ids": []
+  },
+  "artifacts": {
+    "manifest_all": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v1_api_main_fix1\\manifest_all.jsonl",
+    "manifest_meta": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v1_api_main_fix1\\manifest.meta.json",
+    "raw_dir": "D:\\AI_Models\\experiments\\injection_RAG\\artifacts\\attack_layer_api_gen\\attack_layer_api_gen_20260326T104858Z\\raw"
+  },
+  "protocol": {
+    "manifest_gold": true,
+    "expected_block_turn_default": null,
+    "temperature_requested": 0,
+    "temperature_mode": "auto_zero_or_model_default",
+    "promotion_gate": "Metrics+NoReg"
+  }
+}

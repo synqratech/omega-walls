@@ -1,0 +1,7 @@
+{
+  "id": "omega-openclaw-guard",
+  "name": "Omega OpenClaw Guard",
+  "description": "Trust-boundary guard for OpenClaw hooks and web fetch with Omega Walls.",
+  "version": "0.1.0",
+  "entry": "./dist/index.js"
+}

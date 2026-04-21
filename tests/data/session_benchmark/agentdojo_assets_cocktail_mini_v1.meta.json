@@ -1,0 +1,39 @@
+{
+  "status": "ok",
+  "created_at_utc": "2026-03-30T07:38:30Z",
+  "input": {
+    "runs_root": "D:\\AI_Models\\experiments\\injection_RAG\\data\\agentdojo_assets\\agentdojo-inspect\\runs",
+    "pipeline": "gpt-4o-2024-05-13",
+    "attack_type": "important_instructions",
+    "suites": [
+      "banking",
+      "travel",
+      "slack",
+      "workspace"
+    ],
+    "seed": 41,
+    "max_attack_sessions": 12,
+    "max_cross_pairs": 4,
+    "max_turn_chars": 1500
+  },
+  "counts": {
+    "rows_total": 112,
+    "sessions_total": 40,
+    "attack_sessions_total": 20,
+    "benign_sessions_total": 20,
+    "core_attack_sessions": 12,
+    "core_benign_sessions": 12,
+    "cross_attack_sessions": 8,
+    "cross_benign_sessions": 8,
+    "selected_attack_cases": 12
+  },
+  "by_suite": {
+    "slack": 2,
+    "travel": 1,
+    "workspace": 9
+  },
+  "artifacts": {
+    "pack_jsonl": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\session_benchmark\\agentdojo_assets_cocktail_mini_v1.jsonl",
+    "meta_json": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\session_benchmark\\agentdojo_assets_cocktail_mini_v1.meta.json"
+  }
+}

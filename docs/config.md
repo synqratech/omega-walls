@@ -292,3 +292,271 @@ At runtime, emit in logs once per session:
 ---
 
 End of document.
+
+---
+
+## Tool Args Validation (FW-ToolArgs P0)
+
+`ToolGateway` now enforces per-tool argument validation before any tool execution allow-path.
+
+Default block in `tools.yml`:
+
+```yaml
+tools:
+  arg_validation:
+    enabled: true
+    fail_mode: deny
+    network_post:
+      max_payload_bytes: 8192
+      max_headers: 16
+      max_header_key_chars: 64
+      max_header_value_chars: 256
+    write_file:
+      max_filename_chars: 120
+      max_content_bytes: 8192
+    shell_like_name_patterns: [shell, bash, cmd, exec, execute, powershell, terminal, sh]
+    shell_like:
+      max_command_chars: 2048
+```
+
+Reason taxonomy:
+- `INVALID_TOOL_ARGS_SCHEMA`: required fields missing, unsupported keys, wrong types.
+- `INVALID_TOOL_ARGS_SECURITY`: path traversal, invalid URL scheme/shape, payload or content over limits.
+- `INVALID_TOOL_ARGS_SHELLLIKE`: shell-like command missing/invalid or destructive command pattern.
+
+Telemetry:
+- `tool_gateway_step_v1.decision.validation_status`
+- `tool_gateway_step_v1.decision.validation_reason`
+
+---
+
+## Notifications (v1)
+
+`notifications.*` controls Slack/Telegram alerts and approval lifecycle.
+
+Minimal keys:
+
+```yaml
+notifications:
+  enabled: true
+  startup:
+    preflight:
+      enabled: true
+      terminal: true
+      channels: true
+      once_per_process: true
+    outreach:
+      enabled: true
+      terminal: true
+      channels: true
+      once_per_process: true
+      github_url: https://github.com/omega-walls/omega-walls
+      docs_url: https://github.com/omega-walls/omega-walls/tree/main/docs
+      linkedin_url: https://www.linkedin.com/company/omega-walls
+      commercial_cta_enabled: true
+  approvals:
+    backend: sqlite   # memory|sqlite
+    sqlite_path: artifacts/state/notification_approvals.db
+    timeout_sec: 900
+    internal_auth:
+      require_hmac: true
+      hmac_secret_env: OMEGA_NOTIFICATION_HMAC_SECRET
+      headers:
+        signature: X-Internal-Signature
+        timestamp: X-Internal-Timestamp
+        nonce: X-Internal-Nonce
+      max_clock_skew_sec: 300
+  slack:
+    enabled: true
+    bot_token_env: SLACK_BOT_TOKEN
+    channel_env: SLACK_ALERT_CHANNEL
+    signing_secret_env: SLACK_SIGNING_SECRET
+    triggers: [BLOCK, SOFT_BLOCK, SOURCE_QUARANTINE, TOOL_FREEZE, HUMAN_ESCALATE, REQUIRE_APPROVAL, FALLBACK]
+    throttle_windows_sec: { WARN: 300, BLOCK: 60 }
+  telegram:
+    enabled: true
+    bot_token_env: TG_BOT_TOKEN
+    chat_id_env: TG_ADMIN_CHAT_ID
+    secret_token_env: TG_BOT_SECRET_TOKEN
+    triggers: [BLOCK, SOFT_BLOCK, SOURCE_QUARANTINE, TOOL_FREEZE, HUMAN_ESCALATE, REQUIRE_APPROVAL, FALLBACK]
+    throttle_windows_sec: { WARN: 300, BLOCK: 60 }
+```
+
+Startup behavior:
+- `startup.preflight`: emits a startup checklist with `OK|WARN|MISSING|DISABLED` statuses.
+- `startup.outreach`: emits a short one-time onboarding message (GitHub/docs/LinkedIn).
+- Channel delivery requires `notifications.enabled=true`; terminal output can still be enabled independently.
+- `once_per_process=true` deduplicates per process.
+
+---
+
+## Monitor Mode (FW-003 P0)
+
+`runtime.guard_mode` controls enforcement behavior:
+
+```yaml
+runtime:
+  guard_mode: enforce   # enforce|monitor
+```
+
+- `enforce`: normal policy enforcement.
+- `monitor`: full detection/path computation, but effective action is passthrough (`actual_action=ALLOW`).
+
+Backward-compatible implicit monitor is still supported when:
+- `off_policy.enforcement_mode=LOG_ONLY`
+- `tools.execution_mode=DRY_RUN`
+
+### Monitoring config
+
+```yaml
+monitoring:
+  enabled: true
+  aggregation_window: 1h
+  export:
+    path: artifacts/monitor/monitor_events.jsonl
+    format: jsonl        # jsonl|csv
+    rotation: none       # none|daily|size
+    rotation_size_mb: 100
+  false_positive_hints:
+    low_confidence_near_threshold:
+      min_risk: 0.65
+      max_risk: 0.82
+      max_triggered_rules: 2
+      allowed_reason_codes: ["reason_spike"]
+    trusted_source_mismatch:
+      trusted_levels: ["trusted", "semi", "semi_trusted"]
+    transient_spike:
+      spike_only_reason_codes: ["reason_spike"]
+```
+
+### Monitor report CLI
+
+```bash
+omega-walls report --session <id> --format json
+omega-walls report --window 24h --format csv
+omega-walls report --events-path artifacts/monitor/monitor_events.jsonl
+```
+
+Report fields:
+- `total_checks`
+- `risk_distribution` (`0.0-0.3`, `0.3-0.7`, `0.7-1.0`)
+- `would_block`, `would_escalate`
+- `top_rules_triggered`
+- `false_positive_hints`
+
+### Session timeline explain CLI (FW-004 P0)
+
+```bash
+omega-walls explain --session <id> --format json
+omega-walls explain --session <id> --window 24h --limit 200 --format csv
+omega-walls explain --session <id> --events-path artifacts/monitor/monitor_events.jsonl
+```
+
+Explain output:
+- `summary`: event count, time span, surfaces, max risk, intended outcome counts
+- `timeline[]`: per-event `rules`, `primary_fragment`, `fragments[]`, `intended_action`, `actual_action`, `downstream`
+- `mttd`: first non-allow index/timestamp and seconds from session start
+- `data_quality`: missing/legacy field diagnostics
+
+Monitor event enrichment fields used by explain (additive, optional):
+- `fragments[]`: `doc_id`, `source_id`, `trust`, `excerpt_redacted`, `excerpt_sha256`, `contribution`
+- `downstream`: `context_prevented`, `blocked_doc_ids`, `quarantined_source_ids`, `tool_execution_prevented`, `prevented_tools`
+- `rules`: `triggered_rules`, `reason_codes`
+
+### API monitor health
+
+`GET /v1/monitor/health` returns collector/runtime status:
+- `enabled`
+- `guard_mode`
+- `events_path`
+- `events_total`
+- `write_failures`
+- `last_error`
+- `last_event_ts`
+
+### API Hallucination Guard-Lite (opt-in, soft)
+
+`hallucination_guard_lite` is a lightweight policy-mapping layer for low-confidence answers over untrusted/mixed sources.
+It is **not** a truth engine and does not auto-rewrite model output.
+
+```yaml
+api:
+  policy_mapper:
+    hallucination_guard_lite:
+      enabled: false
+      apply_when_source_trust: [untrusted, mixed]
+      low_confidence_lte: 0.35
+      only_if_intended_allow: true
+      soft_quarantine:
+        enabled: false
+        mixed_only: true
+        very_low_confidence_lte: 0.20
+        pattern_synergy_gte: 0.30
+```
+
+Behavior when triggered:
+- intended routing is upgraded from `ALLOW` to `WARN` (soft).
+- response includes additive `response_constraints` with:
+  - `disclaimer_required=true`
+  - `citation_required=true`
+  - `citation_candidates[]` (`doc_id`, `source_id`, `trust`)
+  - `suggested_mode=answer_with_uncertainty_and_citations`
+- monitor/policy_trace include `hallucination_guard_lite` summary and `response_constraints`.
+
+Important:
+- strict outcomes (`SOFT_BLOCK`, `TOOL_FREEZE`, `HUMAN_ESCALATE`, `REQUIRE_APPROVAL`) are never weakened.
+- default is disabled for backward-compatible rollout.
+
+Example API fragment:
+
+```json
+{
+  "control_outcome": "WARN",
+  "response_constraints": {
+    "enabled": true,
+    "disclaimer_required": true,
+    "citation_required": true,
+    "reason_code": "hallucination_guard_lite_low_confidence_untrusted",
+    "citation_candidates": [{"doc_id": "req:c000", "source_id": "api:tenant:req", "trust": "untrusted"}],
+    "suggested_mode": "answer_with_uncertainty_and_citations"
+  }
+}
+```
+
+---
+
+## Structured Logging Contract (FW-005 P0)
+
+Structured logs are optional and additive to monitor JSONL artifacts.
+
+Enable canonical JSON logs on `stdout`:
+
+```yaml
+logging:
+  structured:
+    enabled: true
+    level: INFO
+    json_output: true
+    validate: true
+```
+
+Notes:
+- `enabled=false` keeps previous behavior.
+- `validate=true` validates each structured event against `OmegaLogEvent`.
+- logger failures are fail-open (runtime keeps working).
+
+Canonical required fields in each structured event:
+- `ts`, `level`, `event`, `session_id`, `mode`, `engine_version`
+- `risk_score`, `intended_action`, `actual_action`
+- `triggered_rules`, `attribution`
+
+Key invariants:
+- `risk_score` is normalized to `[0,1]`.
+- `session_id` is required and non-empty.
+- in `mode=monitor`, `actual_action` is always `ALLOW`.
+
+Privacy guardrails:
+- sensitive keys are redacted (`raw_prompt`, `full_context`, `tool_args`, `api_key`, `token`, `secret`, `password`, ...).
+- use safe proxy metadata such as `input_type`, `input_length`, `source_type`, `chunk_hash`.
+
+For full schema and mapping details, see [Structured Logging Contract](logging_contract.md).

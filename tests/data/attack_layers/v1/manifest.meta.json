@@ -1,0 +1,49 @@
+{
+  "status": "ok",
+  "version": "attack_layers_v1",
+  "created_at_utc": "2026-03-25T19:26:23Z",
+  "seed": 41,
+  "out_root": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v1",
+  "counts": {
+    "cases_total": 28,
+    "rows_total": 55,
+    "active_cases": 26,
+    "active_rows": 51,
+    "deferred_cases": 2,
+    "deferred_rows": 4
+  },
+  "cases_by_layer": {
+    "fragmentation": 3,
+    "context_accumulation": 3,
+    "tool_chain": 3,
+    "role_persona": 3,
+    "obfuscation": 3,
+    "refusal_erosion": 3,
+    "benign_stability": 4,
+    "cross_session": 4,
+    "temporal_deferred": 2
+  },
+  "rows_by_layer": {
+    "fragmentation": 8,
+    "context_accumulation": 9,
+    "tool_chain": 3,
+    "role_persona": 3,
+    "obfuscation": 3,
+    "refusal_erosion": 9,
+    "benign_stability": 10,
+    "cross_session": 6,
+    "temporal_deferred": 4
+  },
+  "hashes": {
+    "manifest_all_sha256": "dc5071d157c55b324e1c6432fced5451be5890f3c8bd57151b725c2a3e1a3d36"
+  },
+  "files": {
+    "manifest_all": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v1\\manifest_all.jsonl",
+    "temporal_deferred_manifest": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v1\\temporal_deferred\\manifest.jsonl"
+  },
+  "protocol": {
+    "mode": "local_first",
+    "manifest_gold": true,
+    "temporal_release_gate": "deferred"
+  }
+}

@@ -2,6 +2,87 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Public results snapshot contract for frozen reproducible README metrics:
+  - `docs/public_results_snapshot.json`
+  - `scripts/sync_readme_results_from_snapshot.py`
+- OSS docs/export contract validation:
+  - `scripts/validate_oss_docs_contract.py`
+  - `tests/test_oss_docs_link_contract.py`
+  - `tests/test_public_results_snapshot_contract.py`
+
+### Changed
+
+- Canonical OSS entrypoint is now `README.md` with:
+  - explicit two-phase onboarding (`monitor` first, then required alerts/approvals hardening)
+  - framework route map (`install -> adapter wiring -> strict smoke -> alerts setup -> API run`)
+  - frozen run-ID results policy and baseline-D model scope disclaimer (`gpt-5.4-mini`)
+- GitHub OSS export manifest is tightened to curated English docs and excludes:
+  - RU/historical/research docs from public export
+  - legacy ambiguous docs and private/internal layers
+- `docs/README.md` is reshaped into a strict canonical onboarding order.
+
+## [0.1.3] - 2026-04-20
+
+### Added
+
+- Official adapter coverage for six agent frameworks with a unified fail-closed contract:
+  - `OmegaLangChainGuard`
+  - `OmegaLangGraphGuard`
+  - `OmegaLlamaIndexGuard`
+  - `OmegaHaystackGuard`
+  - `OmegaAutoGenGuard`
+  - `OmegaCrewAIGuard`
+- Shared adapter runtime contract for custom integrations:
+  - `OmegaAdapterRuntime`, `AdapterSessionContext`, `AdapterDecision`, `ToolGateDecision`
+  - typed exceptions: `OmegaBlockedError`, `OmegaToolBlockedError`
+- OpenClaw integration (in-repo npm plugin):
+  - guarded hooks + tool gate + WebFetch guard
+  - strict local bridge to `omega-walls-api` with API key + HMAC/nonce/timestamp
+- Monitor and explainability surface:
+  - explicit `runtime.guard_mode` (`monitor|enforce`)
+  - `omega-walls report` and `omega-walls explain --session <id>`
+  - API collector status endpoint: `GET /v1/monitor/health`
+- Structured logging contract:
+  - canonical `OmegaLogEvent` model and normalization
+  - sanitized JSON structured logging path
+- Secure agent scaffold:
+  - Copier template: `templates/secure_agent_template`
+  - generator: `scripts/init_secure_agent_template.py`
+- Canonical benchmark entrypoint:
+  - `scripts/run_benchmark.py`
+  - standard outputs: `report.json`, `scorecard.csv`, `dataset_manifest.json`
+- Unified validation stands:
+  - framework contract/workflow/stress matrix stand
+  - real workflow stand for LangChain + OpenClaw e2e
+- Custom integration runbook:
+  - `docs/custom_integration_from_scratch.md`
+
+### CI / Quality Gates
+
+- FW-001 release gate is now codified as a dedicated CI workflow:
+  - `.github/workflows/fw001-release-gate.yml`
+  - coverage gate: `>= 85%`
+  - perf gate: `<= 15%` overhead vs frozen baseline
+- Docs executable validation is enforced:
+  - `.github/workflows/docs-examples-smoke.yml`
+  - `tests/test_docs_examples.py`
+  - `tests/test_docs_reliability_contract.py`
+- OpenClaw plugin CI contract added:
+  - `.github/workflows/openclaw-plugin-ci.yml`
+
+### Changed
+
+- Documentation is now adoption-first and executable-first:
+  - framework quickstart with all six adapters and smoke commands
+  - clear OpenClaw and notifications connector docs
+  - reliability runbooks for debugging, policy tuning, and continuity
+- Packaging and release docs were tightened for reproducibility and hygiene.
+- Docker API release path now includes multi-arch GHCR pipeline and runbook.
+
 ## [0.1.2] - 2026-04-14
 
 ### Added
@@ -20,6 +101,23 @@ All notable changes to this project are documented in this file.
   - explicit semantic fallback warning when `semantic_active=false` (run does not fail).
 - Advanced quick-demo dataset mode:
   - `--dataset-source agentdojo_runs` builds mini-pack from local AgentDojo cached runs before evaluation.
+- Notifications & Human Escalation v1:
+  - new notification subsystem (`omega.notifications`) with async dispatcher, approval store, Slack/Telegram providers
+  - API callback endpoints:
+    - `POST /v1/notifications/callback/slack`
+    - `POST /v1/notifications/callback/telegram`
+  - approval lifecycle endpoints:
+    - `GET /v1/approvals/{approval_id}`
+    - `POST /v1/approvals/{approval_id}/resolve`
+  - API/runtime response additions (when applicable): `approval_required`, `approval_id`, `approval_status`
+  - new config layer `notifications.yml` (bundled + filesystem)
+  - monitoring runbook: `docs/monitoring_alerts.md`
+- FW-008 Docker multi-arch API packaging:
+  - root multi-stage `Dockerfile` + `.dockerignore` for API-only runtime image
+  - image hygiene gate script: `scripts/check_docker_image_hygiene.py`
+  - CI workflow for multi-arch build/smoke and GHCR publish:
+    - `.github/workflows/docker-multiarch-ghcr-api.yml`
+  - Docker quickstart docs (`docker run` + `/healthz` + `/v1/scan/attachment`) in README and evaluation docs
 
 ### Changed
 
@@ -27,9 +125,6 @@ All notable changes to this project are documented in this file.
   - API-key-based default (`hybrid_api`)
   - cross-platform one-command launch examples
   - offline fallback (`--mode pi0`) troubleshooting path.
-- Lean OSS repo curation:
-  - removed research-only directories/scripts from the public tree
-  - retained onboarding/runtime scripts and minimal smoke test set.
 - `omega-walls` CLI default profile switched from `dev` to `quickstart` for pip-first onboarding.
 - Release notes now include latency optimization references in:
   - `docs/reports/omega_latency_optimization_plan_20260403.md`
@@ -38,7 +133,6 @@ All notable changes to this project are documented in this file.
 ### Fixed
 
 - Packaging metadata hygiene:
-  - added strict `MANIFEST.in` exclusions so `sdist` does not include internal/large local assets.
   - added root `LICENSE` file to match declared Apache-2.0 license and eliminate sdist warning.
 
 ## [0.1.1] - 2026-04-02

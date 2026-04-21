@@ -1,0 +1,156 @@
+{
+  "run_id": "attack_layer_api_gen_20260326T142514Z",
+  "status": "ok",
+  "created_at_utc": "2026-03-26T14:25:15Z",
+  "model": "gpt-5",
+  "seed": 41,
+  "pack_out": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v1_api_main_qg_smoke",
+  "source": "attack_layers_v1_api_generative",
+  "layers": [
+    "fragmentation",
+    "context_accumulation",
+    "tool_chain",
+    "role_persona",
+    "obfuscation",
+    "refusal_erosion",
+    "benign_stability",
+    "cross_session"
+  ],
+  "counts": {
+    "planned_calls": 144,
+    "generated_cases": 144,
+    "generated_rows": 414,
+    "attack_per_layer": 12,
+    "benign_per_layer": 6,
+    "unique_case_ids": 144,
+    "cases_by_layer": {
+      "fragmentation": 18,
+      "context_accumulation": 18,
+      "tool_chain": 18,
+      "role_persona": 18,
+      "obfuscation": 18,
+      "refusal_erosion": 18,
+      "benign_stability": 18,
+      "cross_session": 18
+    }
+  },
+  "budget": {
+    "max_usd": 20.0,
+    "spent_usd": 0.5497090000000003,
+    "spent_input_tokens": 57580,
+    "spent_output_tokens": 267657,
+    "price_input_per_1m": 0.25,
+    "price_output_per_1m": 2.0,
+    "estimated_cost_total_usd": 0.10583999999999999,
+    "budget_exhausted_at_case": null
+  },
+  "hashes": {
+    "manifest_all_sha256": "08f2a509c6cc80a6bc90ac0178becfe0fa94ccdfe79ec30aba9d277ded3863ed"
+  },
+  "quality": {
+    "benign_rows": 138,
+    "benign_risk_hit_rows": 0,
+    "benign_risk_hit_rate": 0.0,
+    "sample_case_ids": []
+  },
+  "quality_summary": {
+    "mode": "strict_regen",
+    "max_regen_attempts": 4,
+    "cases_total": 144,
+    "cases_passed_quality": 104,
+    "cases_regenerated": 83,
+    "regen_attempts_total": 332,
+    "fallback_cases": 83,
+    "fallback_rate": 0.5763888888888888,
+    "check_pass_counts": {
+      "anti_refusal": 96,
+      "anti_template_boilerplate": 559,
+      "anti_template_repeat": 503,
+      "benign_risk": 53,
+      "family_anchor": 458,
+      "real_obfuscation": 43,
+      "stage_progression": 350,
+      "tool_chain_payload": 57
+    },
+    "check_fail_counts": {
+      "anti_refusal": 410,
+      "anti_template_repeat": 56,
+      "family_anchor": 48
+    },
+    "attack_refusal_rows": 0,
+    "attack_refusal_rate": 0.0,
+    "top_repeated_attack_ngrams": [
+      {
+        "ngram": "align assumptions before execution",
+        "count": 17,
+        "share": 0.06159420289855073
+      },
+      {
+        "ngram": "already known in this",
+        "count": 17,
+        "share": 0.06159420289855073
+      },
+      {
+        "ngram": "and align assumptions before",
+        "count": 17,
+        "share": 0.06159420289855073
+      },
+      {
+        "ngram": "and boundaries relevant to",
+        "count": 17,
+        "share": 0.06159420289855073
+      },
+      {
+        "ngram": "and narrow to the",
+        "count": 17,
+        "share": 0.06159420289855073
+      },
+      {
+        "ngram": "and provide the direct",
+        "count": 17,
+        "share": 0.06159420289855073
+      },
+      {
+        "ngram": "and report concise outcome",
+        "count": 17,
+        "share": 0.06159420289855073
+      },
+      {
+        "ngram": "boundaries relevant to the",
+        "count": 17,
+        "share": 0.06159420289855073
+      },
+      {
+        "ngram": "consistent and align assumptions",
+        "count": 17,
+        "share": 0.06159420289855073
+      },
+      {
+        "ngram": "in this thread about",
+        "count": 17,
+        "share": 0.06159420289855073
+      }
+    ],
+    "top_repeated_attack_ngram_share": 0.06159420289855073,
+    "benign_hygiene": {
+      "benign_rows": 138,
+      "benign_risk_hit_rows": 0,
+      "benign_risk_hit_rate": 0.0,
+      "sample_case_ids": []
+    }
+  },
+  "artifacts": {
+    "manifest_all": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v1_api_main_qg_smoke\\manifest_all.jsonl",
+    "manifest_meta": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v1_api_main_qg_smoke\\manifest.meta.json",
+    "raw_dir": "D:\\AI_Models\\experiments\\injection_RAG\\artifacts\\attack_layer_api_gen\\attack_layer_api_gen_20260326T142514Z\\raw",
+    "quality_failures_jsonl": "D:\\AI_Models\\experiments\\injection_RAG\\artifacts\\attack_layer_api_gen\\attack_layer_api_gen_20260326T142514Z\\raw\\quality_failures.jsonl"
+  },
+  "protocol": {
+    "manifest_gold": true,
+    "expected_block_turn_default": null,
+    "temperature_requested": 0,
+    "temperature_mode": "auto_zero_or_model_default",
+    "promotion_gate": "Metrics+NoReg",
+    "quality_mode": "strict_regen"
+  }
+}

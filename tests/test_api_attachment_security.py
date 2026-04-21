@@ -16,6 +16,7 @@ pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
 
 from omega.api import server as api_server
+from omega.config.loader import load_resolved_config, validate_resolved_config
 from omega.interfaces.contracts_v1 import OffDecision, OmegaOffReasons, OmegaStepResult, ProjectionEvidence, ProjectionResult
 
 
@@ -360,3 +361,31 @@ def test_document_scan_report_requires_auth(monkeypatch: pytest.MonkeyPatch):
     )
     assert resp.status_code == 401
     assert resp.json()["detail"] == "unauthorized"
+
+
+def test_policy_mapper_hallucination_guard_lite_config_validation_accepts_valid_block():
+    cfg = load_resolved_config(profile="dev").resolved
+    cfg["api"]["policy_mapper"]["hallucination_guard_lite"] = {
+        "enabled": True,
+        "apply_when_source_trust": ["untrusted", "mixed"],
+        "low_confidence_lte": 0.35,
+        "only_if_intended_allow": True,
+        "soft_quarantine": {
+            "enabled": False,
+            "mixed_only": True,
+            "very_low_confidence_lte": 0.20,
+            "pattern_synergy_gte": 0.30,
+        },
+    }
+    validate_resolved_config(cfg)
+
+
+def test_policy_mapper_hallucination_guard_lite_config_validation_rejects_invalid_values():
+    cfg = load_resolved_config(profile="dev").resolved
+    cfg["api"]["policy_mapper"]["hallucination_guard_lite"] = {
+        "enabled": True,
+        "apply_when_source_trust": ["untrusted", "bogus"],
+        "low_confidence_lte": 1.2,
+    }
+    with pytest.raises(ValueError):
+        validate_resolved_config(cfg)

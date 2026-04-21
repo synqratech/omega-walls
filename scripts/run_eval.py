@@ -58,9 +58,14 @@ def main() -> int:
     parser.add_argument("--require-semantic", action="store_true")
     parser.add_argument("--require-pitheta-calibration", action="store_true")
     parser.add_argument("--semantic-model-path", default=None)
-    parser.add_argument("--projector-mode", choices=["pi0", "pitheta", "hybrid"], default=None)
+    parser.add_argument("--projector-mode", choices=["pi0", "pitheta", "hybrid", "hybrid_api"], default=None)
     parser.add_argument("--pitheta-checkpoint-dir", default=None)
     parser.add_argument("--pitheta-base-model-path", default=None)
+    parser.add_argument("--api-model", default=None)
+    parser.add_argument("--api-base-url", default=None)
+    parser.add_argument("--api-timeout-sec", type=float, default=None)
+    parser.add_argument("--api-retries", type=int, default=None)
+    parser.add_argument("--api-cache-path", default=None)
     parser.add_argument("--strict-projector", action="store_true")
     args = parser.parse_args()
 
@@ -79,6 +84,11 @@ def main() -> int:
                 **(
                     {"pitheta": {"enabled": "true"}}
                     if args.strict_projector and args.projector_mode in {"pitheta", "hybrid"}
+                    else {}
+                ),
+                **(
+                    {"api_perception": {"enabled": "true", "strict": True}}
+                    if args.strict_projector and args.projector_mode == "hybrid_api"
                     else {}
                 ),
             },
@@ -105,6 +115,25 @@ def main() -> int:
                         if args.pitheta_base_model_path
                         else {}
                     ),
+                },
+            },
+        }
+    if any(x is not None for x in (args.api_model, args.api_base_url, args.api_timeout_sec, args.api_retries, args.api_cache_path)):
+        projector_overrides = cli_overrides.get("projector", {})
+        projector_overrides = projector_overrides if isinstance(projector_overrides, dict) else {}
+        api_overrides = projector_overrides.get("api_perception", {})
+        api_overrides = api_overrides if isinstance(api_overrides, dict) else {}
+        cli_overrides = {
+            **cli_overrides,
+            "projector": {
+                **projector_overrides,
+                "api_perception": {
+                    **api_overrides,
+                    **({"model": str(args.api_model)} if args.api_model else {}),
+                    **({"base_url": str(args.api_base_url)} if args.api_base_url else {}),
+                    **({"timeout_sec": float(args.api_timeout_sec)} if args.api_timeout_sec is not None else {}),
+                    **({"max_retries": int(args.api_retries)} if args.api_retries is not None else {}),
+                    **({"cache_path": str(args.api_cache_path)} if args.api_cache_path else {}),
                 },
             },
         }
@@ -223,6 +252,26 @@ def main() -> int:
                 failures.append("pitheta calibration enforcement requested but projector has no pitheta support")
         except Exception as exc:
             failures.append(f"pitheta calibration validation failed: {exc}")
+
+    if args.strict_projector and effective_mode == "hybrid_api":
+        try:
+            ensure_api = getattr(projector, "ensure_api_adapter_active", None)
+            status_fn = getattr(projector, "api_perception_status", None)
+            if callable(ensure_api):
+                if not bool(ensure_api()):
+                    status = status_fn() if callable(status_fn) else {}
+                    failures.append(
+                        "api perception adapter inactive in strict mode "
+                        f"(error={status.get('api_adapter_error', 'unknown')})"
+                    )
+                else:
+                    status = status_fn() if callable(status_fn) else {}
+                    if status.get("schema_valid", None) is False:
+                        failures.append("api perception schema invalid in strict mode")
+            else:
+                failures.append("strict API-hybrid requested but projector has no api perception adapter")
+        except Exception as exc:
+            failures.append(f"api perception validation failed: {exc}")
 
     if hard_fp != 0:
         failures.append(f"hard negative FP != 0 ({hard_fp})")
@@ -435,6 +484,18 @@ def main() -> int:
     pitheta_status_fn = getattr(projector, "pitheta_conversion_status", None)
     report["pitheta_conversion"] = (
         pitheta_status_fn() if callable(pitheta_status_fn) else {"active": False, "error": "not_supported"}
+    )
+    api_status_fn = getattr(projector, "api_perception_status", None)
+    report["api_perception"] = (
+        api_status_fn()
+        if callable(api_status_fn)
+        else {
+            "api_adapter_active": False,
+            "api_adapter_error": "not_supported",
+            "schema_valid": None,
+            "model": None,
+            "cache_hit_rate": 0.0,
+        }
     )
 
     if args.bipia_json_output:

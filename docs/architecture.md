@@ -1,6 +1,6 @@
-﻿# Omega Walls: System Architecture (v1)
+# Omega Walls: System Architecture (v1)
 
-This document describes **how the О© (Omega) layer integrates with RAG / agentic pipelines** and where each component lives in the project.  
+This document describes **how the Ω (Omega) layer integrates with RAG / agentic pipelines** and where each component lives in the project.  
 It is written to align **end-to-end architecture** with the mathematical spec in `math.md`.
 
 ---
@@ -16,8 +16,8 @@ Attackers embed directives that try to:
 - bypass policies (wall 4).
 
 ### 1.2. Omega principle
-Treat retrieved/attached content as **pressure** on an О© wall-space, not as instructions.  
-О© converts untrusted content into a **structured risk state** \(m_t\) and deterministic `Off` decisions.
+Treat retrieved/attached content as **pressure** on an Ω wall-space, not as instructions.  
+Ω converts untrusted content into a **structured risk state** \(m_t\) and deterministic `Off` decisions.
 
 ---
 
@@ -33,19 +33,19 @@ Omega is implemented as a **trust boundary middleware** between:
 - search + ranking + chunking
 - provides packet \(X_t\) of candidate chunks
 
-2) **Projector** `ПЂ` (v1 baseline `ПЂв‚Ђ`, future learned `ПЂОё`)
-- maps chunk \(x\) в†’ wall pressure vector \(v(x)\inв„ќ_{в‰Ґ0}^K\)
+2) **Projector** `π` (v1 baseline `π₀`, future learned `πθ`)
+- maps chunk \(x\) → wall pressure vector \(v(x)\inℝ_{≥0}^K\)
 - emits **evidence** (polarity, matches, raw scores)
 
-3) **О©-core**
-- applies \(Оµ\)-flooring
+3) **Ω-core**
+- applies \(ε\)-flooring
 - aggregates packet pressures
 - computes toxicity \(p_t\), deposit \(e_t\), state update \(m_{t+1}\)
 - evaluates `Off` + reason flags
 - computes per-doc contribution scores \(c_{t,j}\)
 
 4) **Reaction policy engine**
-- converts (`Off`, reasons, {top docs}, snapshots) в†’ **actions**
+- converts (`Off`, reasons, {top docs}, snapshots) → **actions**
 - actions: `SOFT_BLOCK`, `SOURCE_QUARANTINE`, `TOOL_FREEZE`, `HUMAN_ESCALATE`
 
 5) **Context builder**
@@ -53,7 +53,7 @@ Omega is implemented as a **trust boundary middleware** between:
   - system/developer instructions (trusted)
   - user query (trusted-ish)
   - **only allowed chunks** (untrusted but filtered)
-  - О© diagnostics (optional, for internal trace)
+  - Ω diagnostics (optional, for internal trace)
 
 6) **Tool gateway**
 - single chokepoint for all tool calls
@@ -93,7 +93,7 @@ A content item is the atomic unit for projection and attribution.
 }
 ```
 
-### 3.3. О©-step result (diagnostics)
+### 3.3. Ω-step result (diagnostics)
 ```json
 {
   "v_total": [0.30, 0.10, 1.05, 0.00],
@@ -107,16 +107,16 @@ A content item is the atomic unit for projection and attribution.
 
 ---
 
-## 4. Runtime flow (RAG + О©)
+## 4. Runtime flow (RAG + Ω)
 
-### 4.1. Where О© sits in a classic RAG call
+### 4.1. Where Ω sits in a classic RAG call
 1) User query arrives
 2) Retriever fetches top-N chunks
-3) О© projects and filters chunks
+3) Ω projects and filters chunks
 4) Context builder assembles prompt
 5) Model generates response (and possibly tool calls)
-6) Tool gateway enforces О© tool policy
-7) Optionally: post-generation О© checks on model-produced tool intents (future)
+6) Tool gateway enforces Ω tool policy
+7) Optionally: post-generation Ω checks on model-produced tool intents (future)
 
 ### 4.2. Sequence diagram (single step)
 ```mermaid
@@ -124,8 +124,8 @@ sequenceDiagram
   participant U as User
   participant A as App/Agent
   participant R as Retriever
-  participant P as Projector ПЂ
-  participant O as О©-core
+  participant P as Projector π
+  participant O as Ω-core
   participant X as Reaction Policy
   participant C as Context Builder
   participant M as LLM
@@ -151,12 +151,12 @@ sequenceDiagram
 
 ---
 
-## 5. О© placement in **agentic** loops (multi-step)
+## 5. Ω placement in **agentic** loops (multi-step)
 
 In agentic systems, \(t\) increments across steps:
 - each step produces new retrievals, new external messages, new tool outputs
 - all of those become **new packets** \(X_t\)
-- О© state \(m_t\) persists per session, yielding detection of **distributed attacks**
+- Ω state \(m_t\) persists per session, yielding detection of **distributed attacks**
 
 ### 5.1. State scoping
 - `m_t` is **session-scoped** (conversation / workflow)
@@ -173,15 +173,15 @@ All inputs that can carry injection should be treated as \(x\):
 
 ## 6. Reaction policy (how architecture uses `Off`)
 
-О© provides `Off` + attribution; **product policy** decides how to respond.
+Ω provides `Off` + attribution; **product policy** decides how to respond.
 
 ### 6.1. Default action mapping (v1)
-- If wall 2 (exfil) participates в†’ `HUMAN_ESCALATE` (always) + `TOOL_FREEZE`
-- If wall 3 (tool) participates в†’ `TOOL_FREEZE`
-- Always `SOFT_BLOCK` top docs (Оі-rule)
-- If repeated same source triggers Off в†’ `SOURCE_QUARANTINE`
+- If wall 2 (exfil) participates → `HUMAN_ESCALATE` (always) + `TOOL_FREEZE`
+- If wall 3 (tool) participates → `TOOL_FREEZE`
+- Always `SOFT_BLOCK` top docs (γ-rule)
+- If repeated same source triggers Off → `SOURCE_QUARANTINE`
 
-### 6.2. Object of вЂњshutdownвЂќ
+### 6.2. Object of “shutdown”
 We treat `Off` as a **controlled degradation**, not a single hard stop:
 - block docs first (DOC)
 - then quarantine sources (SOURCE)
@@ -195,7 +195,7 @@ This prevents the system from being either too rigid or useless.
 ## 7. Interaction with the model
 
 ### 7.1. Prompt structure (recommended)
-The model prompt should **separate roles clearly** and keep untrusted content in a strict вЂњevidenceвЂќ section.
+The model prompt should **separate roles clearly** and keep untrusted content in a strict “evidence” section.
 
 **Trusted**:
 - system/developer instructions
@@ -204,10 +204,10 @@ The model prompt should **separate roles clearly** and keep untrusted content in
 **Untrusted**:
 - retrieved chunks + attachments
 
-OmegaвЂ™s filtering ensures only non-blocked chunks enter context.
+Omega’s filtering ensures only non-blocked chunks enter context.
 
-### 7.2. What О© does *not* rely on
-О© does not assume the model will вЂњbehaveвЂќ based on text-only policies.  
+### 7.2. What Ω does *not* rely on
+Ω does not assume the model will “behave” based on text-only policies.  
 Instead, it **prevents untrusted text** from controlling the instruction boundary by:
 - removing toxic chunks,
 - freezing tools when tool-abuse pressure appears,
@@ -220,10 +220,10 @@ Instead, it **prevents untrusted text** from controlling the instruction boundar
 ```
 omega/
   core/
-    omega_core.py            # implements math.md: Оµ-floor, П†, S, m update, Off, attribution
-    params.py                # О© parameters and defaults
+    omega_core.py            # implements math.md: ε-floor, φ, S, m update, Off, attribution
+    params.py                # Ω parameters and defaults
   projector/
-    pi0_intent_v2.py         # rule-based baseline ПЂ0
+    pi0_intent_v2.py         # rule-based baseline π0
     interfaces.py            # Projector / TrainableProjector interfaces
     normalize.py             # text normalization (norm, nospace, homoglyph)
   policy/
@@ -237,11 +237,13 @@ omega/
     tool_gateway.py          # centralized guard & allowlist
   telemetry/
     logger.py                # structured event emitter
-  scripts/
-    quick_demo.py            # 5-minute OSS demo orchestration
-    eval_agentdojo_stateful_mini.py
+  redteam/
+    generator.py             # obfuscations + paraphrases + cocktails + distributed
+    runner.py                # evaluation runner for π0 + Ω
   tests/
-    data/session_benchmark/agentdojo_cocktail_mini_smoke_v1.jsonl
+    redteam_pos_20.jsonl
+    hard_negatives_50.jsonl
+    redteam_obf_20.jsonl
     test_pi0.py
     test_omega_core.py
     test_off_policy.py
@@ -254,15 +256,15 @@ omega/
 Choose one (v1 recommendation: start simplest):
 
 ### 9.1. Library mode (in-process)
-- О©-core + ПЂ0 as a Python/Go library inside the agent service
+- Ω-core + π0 as a Python/Go library inside the agent service
 - lowest latency, easiest debugging
 
 ### 9.2. Sidecar service
-- О© runs as local service (HTTP/gRPC) beside the agent
+- Ω runs as local service (HTTP/gRPC) beside the agent
 - centralized logging and policy enforcement
 
 ### 9.3. Gateway / middleware
-- О© sits between application and LLM provider
+- Ω sits between application and LLM provider
 - can be reused across products, but needs clear contracts for retrieval packets
 
 ---
@@ -284,24 +286,24 @@ Emit one structured event on each Off (schema in policy docs), including:
 This is needed for:
 - incident review,
 - regression testing,
-- tuning \(Оµ, О»,\) thresholds.
+- tuning \(ε, λ,\) thresholds.
 
 ---
 
-## 11. How О© relates to RAG defenses (conceptually)
+## 11. How Ω relates to RAG defenses (conceptually)
 
 Traditional RAG defenses often rely on:
 - heuristic filters,
 - role separation by prompt text,
 - post-hoc moderation.
 
-О© reframes the problem:
+Ω reframes the problem:
 - **untrusted text becomes a measurable pressure**,
 - accumulation detects distributed attacks,
 - tool freezing makes the system safe even if the model is partially compromised,
 - `Off` is deterministic and auditable.
 
-О© does not replace retrieval/ranking; it is a **trust-layer** over the entire content + tool loop.
+Ω does not replace retrieval/ranking; it is a **trust-layer** over the entire content + tool loop.
 
 ---
 
@@ -309,15 +311,14 @@ Traditional RAG defenses often rely on:
 
 A v1 system is considered correctly integrated if:
 
-1) **All untrusted inputs** pass through ПЂ + О© before entering context.
+1) **All untrusted inputs** pass through π + Ω before entering context.
 2) Tool calls go exclusively through the Tool Gateway.
 3) `SOFT_BLOCK` removes flagged docs from context.
 4) `TOOL_FREEZE` prevents tool execution reliably.
 5) `HUMAN_ESCALATE` produces a minimal incident packet with snapshots.
-6) Lean OSS smoke tests pass and quick demo shows blocked attack behavior on the mini session pack.
+6) Tests pass: 20 positives trigger, 50 hard negatives do not, 20 obf/paraphrase trigger.
 7) `omega_off_v1` events contain enough data to reproduce the Off decision.
 
 ---
 
 End of document.
-

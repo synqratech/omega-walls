@@ -1,0 +1,63 @@
+name: framework-contract-gate
+
+on:
+  pull_request:
+    paths:
+      - "omega/**"
+      - "plugins/openclaw-omega-guard/**"
+      - "scripts/run_framework_*"
+      - "scripts/smoke_*guard.py"
+      - "tests/test_*framework*"
+      - "tests/test_approval_resume_e2e.py"
+      - "tests/test_webfetch_edge_corpus.py"
+      - ".github/workflows/framework-*.yml"
+  push:
+    paths:
+      - "omega/**"
+      - "plugins/openclaw-omega-guard/**"
+      - "scripts/run_framework_*"
+      - "scripts/smoke_*guard.py"
+      - "tests/test_*framework*"
+      - "tests/test_approval_resume_e2e.py"
+      - "tests/test_webfetch_edge_corpus.py"
+      - ".github/workflows/framework-*.yml"
+  workflow_dispatch:
+
+jobs:
+  contract-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[api,integrations]"
+
+      - name: Install OpenClaw plugin dependencies
+        working-directory: plugins/openclaw-omega-guard
+        run: npm ci --no-audit --no-fund
+
+      - name: Run contract layer
+        run: |
+          python scripts/run_framework_matrix_stand.py --layer contract --profile dev --strict --artifacts-root artifacts/framework_contract_ci
+
+      - name: Upload contract artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: framework-contract-artifacts
+          path: artifacts/framework_contract_ci
+          if-no-files-found: warn

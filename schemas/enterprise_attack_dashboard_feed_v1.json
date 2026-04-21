@@ -1,0 +1,363 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Enterprise Attack Dashboard Feed v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generated_at_utc",
+    "window",
+    "source_runs",
+    "kpi",
+    "mismatch_clusters",
+    "alerts",
+    "baseline"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "generated_at_utc": {
+      "type": "string",
+      "minLength": 1
+    },
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "days",
+        "from_utc",
+        "to_utc",
+        "runs_considered",
+        "sessions_considered"
+      ],
+      "properties": {
+        "days": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "from_utc": {
+          "type": "string",
+          "minLength": 1
+        },
+        "to_utc": {
+          "type": "string",
+          "minLength": 1
+        },
+        "runs_considered": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sessions_considered": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "source_runs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "run_id",
+          "run_timestamp_utc",
+          "report_json",
+          "rows_jsonl",
+          "sessions_total",
+          "attack_sessions",
+          "benign_sessions"
+        ],
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "run_timestamp_utc": {
+            "type": "string",
+            "minLength": 1
+          },
+          "report_json": {
+            "type": "string",
+            "minLength": 1
+          },
+          "rows_jsonl": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sessions_total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "attack_sessions": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "benign_sessions": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "kpi": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attack_volume",
+        "family_split",
+        "attack_off_rate",
+        "benign_off_rate",
+        "confusion"
+      ],
+      "properties": {
+        "attack_volume": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "attack_sessions",
+            "attack_turn_events"
+          ],
+          "properties": {
+            "attack_sessions": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "attack_turn_events": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "family_split": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "family",
+              "attack_sessions",
+              "share"
+            ],
+            "properties": {
+              "family": {
+                "type": "string",
+                "minLength": 1
+              },
+              "attack_sessions": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "share": {
+                "type": "number",
+                "minimum": 0.0,
+                "maximum": 1.0
+              }
+            }
+          }
+        },
+        "attack_off_rate": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "benign_off_rate": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "confusion": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "tp",
+            "fp",
+            "tn",
+            "fn",
+            "attack_sessions",
+            "benign_sessions"
+          ],
+          "properties": {
+            "tp": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "fp": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "tn": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "fn": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "attack_sessions": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "benign_sessions": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    "mismatch_clusters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fn_clusters",
+        "fp_clusters"
+      ],
+      "properties": {
+        "fn_clusters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/cluster"
+          }
+        },
+        "fp_clusters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/cluster"
+          }
+        }
+      }
+    },
+    "alerts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "severity",
+          "type",
+          "metric",
+          "message"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "warning",
+              "high"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "attack_off_rate_breach",
+              "benign_off_rate_breach"
+            ]
+          },
+          "metric": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1
+          },
+          "value": {
+            "type": "number"
+          },
+          "baseline": {
+            "type": "number"
+          },
+          "delta_pp": {
+            "type": "number"
+          },
+          "threshold_pp": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "provided",
+            "missing"
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "attack_off_rate": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "benign_off_rate": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        }
+      }
+    }
+  },
+  "definitions": {
+    "cluster": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cluster_key",
+        "family",
+        "bucket",
+        "reason_signature",
+        "count",
+        "sample_session_ids"
+      ],
+      "properties": {
+        "cluster_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "family": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bucket": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason_signature": {
+          "type": "string",
+          "minLength": 1
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sample_session_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sample_run_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

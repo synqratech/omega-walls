@@ -1,0 +1,198 @@
+name: docker-multiarch-ghcr-api
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "omega/**"
+      - "config/**"
+      - "pyproject.toml"
+      - "MANIFEST.in"
+      - "scripts/check_docker_image_hygiene.py"
+      - ".github/workflows/docker-multiarch-ghcr-api.yml"
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "omega/**"
+      - "config/**"
+      - "pyproject.toml"
+      - "MANIFEST.in"
+      - "scripts/check_docker_image_hygiene.py"
+      - ".github/workflows/docker-multiarch-ghcr-api.yml"
+  release:
+    types: [published]
+
+jobs:
+  pr-build-and-smoke:
+    name: Build + smoke (multi-arch no-push, amd64 run)
+    if: github.event_name != 'release' && !startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build multi-arch image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: false
+          provenance: false
+          sbom: false
+
+      - name: Build amd64 image for local smoke
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: omega-walls-api:ci
+          provenance: false
+          sbom: false
+
+      - name: Run docker hygiene gate
+        run: |
+          python scripts/check_docker_image_hygiene.py --image omega-walls-api:ci > docker_hygiene_report.json
+          cat docker_hygiene_report.json
+
+      - name: Start API container
+        run: |
+          docker run --rm -d --name omega-api-ci -p 8080:8080 omega-walls-api:ci
+
+      - name: Health check and scan smoke
+        run: |
+          for i in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:8080/healthz >/tmp/healthz.json; then
+              break
+            fi
+            sleep 1
+          done
+          cat /tmp/healthz.json
+          curl -fsS \
+            -H "Content-Type: application/json" \
+            -H "X-API-Key: quickstart-api-key" \
+            -d '{"tenant_id":"docker-smoke","request_id":"req-1","extracted_text":"Hello from docker smoke."}' \
+            http://127.0.0.1:8080/v1/scan/attachment >/tmp/scan.json
+          cat /tmp/scan.json
+          python -c "import json; d=json.load(open('/tmp/scan.json','r',encoding='utf-8')); assert 'risk_score' in d and 'verdict' in d and 'tenant_id' in d"
+
+      - name: Stop API container
+        if: always()
+        run: docker rm -f omega-api-ci || true
+
+      - name: Upload docker artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-api-smoke-artifacts
+          path: |
+            docker_hygiene_report.json
+            /tmp/healthz.json
+            /tmp/scan.json
+          if-no-files-found: error
+
+  release-publish-ghcr:
+    name: Publish GHCR multi-arch (amd64+arm64)
+    if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Normalize image name
+        id: image_name
+        run: |
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY}/omega-walls-api"
+          IMAGE_LOWER="$(echo "${IMAGE}" | tr '[:upper:]' '[:lower:]')"
+          echo "value=${IMAGE_LOWER}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image_name.outputs.value }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable=${{ github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v') }}
+          labels: |
+            org.opencontainers.image.title=omega-walls-api
+            org.opencontainers.image.description=Omega Walls API runtime container
+            org.opencontainers.image.vendor=omega-walls
+
+      - name: Build amd64 image for release hygiene gate
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: omega-walls-api:release-check
+          provenance: false
+          sbom: false
+
+      - name: Run docker hygiene gate (release)
+        run: |
+          python scripts/check_docker_image_hygiene.py --image omega-walls-api:release-check > docker_hygiene_report_release.json
+          cat docker_hygiene_report_release.json
+
+      - name: Build and push multi-arch image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: false
+          sbom: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Validate manifest platforms
+        run: |
+          REF="${{ steps.image_name.outputs.value }}:${GITHUB_REF_NAME}"
+          docker buildx imagetools inspect "${REF}" > /tmp/imagetools.txt
+          cat /tmp/imagetools.txt
+          grep -q "linux/amd64" /tmp/imagetools.txt
+          grep -q "linux/arm64" /tmp/imagetools.txt
+
+      - name: Upload release docker artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-release-artifacts
+          path: |
+            docker_hygiene_report_release.json
+            /tmp/imagetools.txt
+          if-no-files-found: error

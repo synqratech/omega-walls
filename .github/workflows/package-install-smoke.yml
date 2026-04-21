@@ -1,0 +1,43 @@
+name: package-install-smoke
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "omega/**"
+      - "scripts/smoke_package_install.py"
+      - "pyproject.toml"
+      - "MANIFEST.in"
+      - ".github/workflows/package-install-smoke.yml"
+  pull_request:
+    paths:
+      - "omega/**"
+      - "scripts/smoke_package_install.py"
+      - "pyproject.toml"
+      - "MANIFEST.in"
+      - ".github/workflows/package-install-smoke.yml"
+
+jobs:
+  install-contract:
+    name: install-contract (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: Run package install smoke
+        run: python scripts/smoke_package_install.py
+

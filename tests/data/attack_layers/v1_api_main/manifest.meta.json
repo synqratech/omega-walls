@@ -1,0 +1,62 @@
+{
+  "run_id": "attack_layer_api_gen_20260326T051803Z",
+  "status": "ok",
+  "created_at_utc": "2026-03-26T06:02:21Z",
+  "model": "gpt-5-mini",
+  "seed": 41,
+  "pack_out": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v1_api_main",
+  "source": "attack_layers_v1_api_generative",
+  "layers": [
+    "fragmentation",
+    "context_accumulation",
+    "tool_chain",
+    "role_persona",
+    "obfuscation",
+    "refusal_erosion",
+    "benign_stability",
+    "cross_session"
+  ],
+  "counts": {
+    "planned_calls": 288,
+    "generated_cases": 288,
+    "generated_rows": 828,
+    "attack_per_layer": 24,
+    "benign_per_layer": 12,
+    "unique_case_ids": 288,
+    "cases_by_layer": {
+      "fragmentation": 36,
+      "context_accumulation": 36,
+      "tool_chain": 36,
+      "role_persona": 36,
+      "obfuscation": 36,
+      "refusal_erosion": 36,
+      "benign_stability": 36,
+      "cross_session": 36
+    }
+  },
+  "budget": {
+    "max_usd": 3.5,
+    "spent_usd": 0.39192999999999995,
+    "spent_input_tokens": 28288,
+    "spent_output_tokens": 192429,
+    "price_input_per_1m": 0.25,
+    "price_output_per_1m": 2.0,
+    "estimated_cost_total_usd": 0.21167999999999998,
+    "budget_exhausted_at_case": null
+  },
+  "hashes": {
+    "manifest_all_sha256": "a3e6424d485d14356148de3beb13564374aa188739b60176526aa21fe2e189af"
+  },
+  "artifacts": {
+    "manifest_all": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v1_api_main\\manifest_all.jsonl",
+    "manifest_meta": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v1_api_main\\manifest.meta.json",
+    "raw_dir": "D:\\AI_Models\\experiments\\injection_RAG\\artifacts\\attack_layer_api_gen\\attack_layer_api_gen_20260326T051803Z\\raw"
+  },
+  "protocol": {
+    "manifest_gold": true,
+    "expected_block_turn_default": null,
+    "temperature_requested": 0,
+    "temperature_mode": "auto_zero_or_model_default",
+    "promotion_gate": "Metrics+NoReg"
+  }
+}

@@ -112,6 +112,7 @@ def build_comparative_payload(
     contour_manifest: Optional[Mapping[str, Any]],
     pint_report: Optional[Mapping[str, Any]],
     wainject_report: Optional[Mapping[str, Any]],
+    promptshield_report: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     direct: List[Dict[str, Any]] = []
     partial: List[Dict[str, Any]] = []
@@ -143,12 +144,14 @@ def build_comparative_payload(
 
     if isinstance(wainject_report, Mapping):
         wa_external = wainject_report.get("external_benchmark", {}) if isinstance(wainject_report.get("external_benchmark"), Mapping) else {}
+        wa_status = str(wainject_report.get("comparability_status", "non_comparable"))
+        wa_reason = str(wainject_report.get("comparability_reason", "")).strip()
         wa_row = {
             "benchmark": "WAInjectBench",
             "source_url": wa_external.get("source_url"),
             "source_date": wa_external.get("source_date"),
             "metric_mapping": wa_external.get("metric_mapping"),
-            "comparability_status": "partial_comparison" if bool(wainject_report.get("dataset_ready", False)) else "non_comparable",
+            "comparability_status": wa_status,
             "omega_metrics": wainject_report.get("summary", {}),
             "public_baselines": [],
         }
@@ -157,9 +160,43 @@ def build_comparative_payload(
             limits.append("WAInjectBench has no benchmark-maintainer detector leaderboard table in official source card/readme.")
         else:
             non_comp.append(wa_row)
-            limits.append("WAInjectBench local dataset was not available.")
+            if wa_reason:
+                limits.append(f"WAInjectBench run marked non-comparable: {wa_reason}.")
+            else:
+                limits.append("WAInjectBench run marked non-comparable by source report.")
     else:
         limits.append("WAInjectBench report missing.")
+
+    if isinstance(promptshield_report, Mapping):
+        ps_external = (
+            promptshield_report.get("external_benchmark", {})
+            if isinstance(promptshield_report.get("external_benchmark"), Mapping)
+            else {}
+        )
+        ps_status = str(promptshield_report.get("comparability_status", "non_comparable"))
+        ps_reason = str(promptshield_report.get("comparability_reason", "")).strip()
+        ps_row = {
+            "benchmark": "PromptShield",
+            "source_url": ps_external.get("source_url"),
+            "source_date": ps_external.get("source_date"),
+            "metric_mapping": ps_external.get("metric_mapping"),
+            "comparability_status": ps_status,
+            "omega_metrics": promptshield_report.get("summary", {}),
+            "public_baselines": [],
+        }
+        if ps_status == "direct_comparison":
+            direct.append(ps_row)
+        elif ps_status == "partial_comparison":
+            partial.append(ps_row)
+            limits.append("PromptShield currently treated as partial-comparison diagnostic anchor.")
+        else:
+            non_comp.append(ps_row)
+            if ps_reason:
+                limits.append(f"PromptShield marked non-comparable: {ps_reason}.")
+            else:
+                limits.append("PromptShield marked non-comparable (diagnostic external anchor; not leaderboard claim).")
+    else:
+        limits.append("PromptShield report missing.")
 
     if len(direct) == 0:
         limits.append("No direct external benchmark comparison available.")
@@ -191,16 +228,19 @@ def main() -> int:
     parser.add_argument("--contour-manifest", default=None)
     parser.add_argument("--pint-report", default=None)
     parser.add_argument("--wainject-report", default=None)
+    parser.add_argument("--promptshield-report", default=None)
     parser.add_argument("--artifacts-root", default="artifacts/comparative_report")
     args = parser.parse_args()
 
     contour_path = (ROOT / str(args.contour_manifest)).resolve() if args.contour_manifest else _latest_contour_manifest((ROOT / "artifacts" / "post_patch_contour").resolve())
     pint_path = (ROOT / str(args.pint_report)).resolve() if args.pint_report else _latest_json((ROOT / "artifacts" / "pint_eval").resolve())
     wa_path = (ROOT / str(args.wainject_report)).resolve() if args.wainject_report else _latest_json((ROOT / "artifacts" / "wainject_eval").resolve())
+    ps_path = (ROOT / str(args.promptshield_report)).resolve() if args.promptshield_report else _latest_json((ROOT / "artifacts" / "promptshield_eval").resolve())
 
     contour_manifest = _load_json(contour_path) if contour_path and contour_path.exists() else None
     pint_report = _load_json(pint_path) if pint_path and pint_path.exists() else None
     wainject_report = _load_json(wa_path) if wa_path and wa_path.exists() else None
+    promptshield_report = _load_json(ps_path) if ps_path and ps_path.exists() else None
 
     run_id = str(args.run_id or f"comparative_{_utc_compact_now()}")
     out_dir = (ROOT / str(args.artifacts_root) / run_id).resolve()
@@ -213,6 +253,7 @@ def main() -> int:
         contour_manifest=contour_manifest,
         pint_report=pint_report,
         wainject_report=wainject_report,
+        promptshield_report=promptshield_report,
     )
     report_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     report_md.write_text(_render_markdown(payload), encoding="utf-8")
@@ -228,6 +269,7 @@ def main() -> int:
             "contour_manifest": str(contour_path) if contour_path else None,
             "pint_report": str(pint_path) if pint_path else None,
             "wainject_report": str(wa_path) if wa_path else None,
+            "promptshield_report": str(ps_path) if ps_path else None,
         },
     }
     print(json.dumps(out_payload, ensure_ascii=False, indent=2))

@@ -1,0 +1,15 @@
+{
+  "run_id": "attack_layer_api_gen_20260328T152307Z",
+  "planned_calls": 2,
+  "completed_cases": 1,
+  "completed_case_ids": [
+    "ALAPI-FRG-A001"
+  ],
+  "rows_written": 1,
+  "spent_usd": 0.0,
+  "spent_input_tokens": 0,
+  "spent_output_tokens": 0,
+  "last_case_id": "ALAPI-FRG-B001",
+  "case_errors": 1,
+  "updated_at_utc": "2026-03-28T15:23:14Z"
+}

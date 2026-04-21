@@ -20,6 +20,18 @@ def main() -> int:
     parser.add_argument("--profile", default="dev")
     parser.add_argument("--strict", action="store_true")
     parser.add_argument("--use-semantic-labeling", action="store_true")
+    parser.add_argument(
+        "--content-filter-mode",
+        default="off",
+        choices=["off", "heuristic", "openai", "openai_then_heuristic"],
+        help="Filter out unacceptable content in generated rows before writing dataset artifacts.",
+    )
+    parser.add_argument("--content-filter-fail-closed", action="store_true")
+    parser.add_argument(
+        "--content-filter-log",
+        default=None,
+        help="Optional JSONL path for dropped rows (relative to --output-dir if not absolute).",
+    )
     args = parser.parse_args()
 
     report = build_pitheta_dataset_artifacts(
@@ -29,6 +41,11 @@ def main() -> int:
         profile=str(args.profile),
         strict=bool(args.strict),
         use_semantic_labeling=bool(args.use_semantic_labeling),
+        content_filter={
+            "mode": str(args.content_filter_mode),
+            "fail_closed": bool(args.content_filter_fail_closed),
+            "log_path": str(args.content_filter_log) if args.content_filter_log else "",
+        },
     )
     print(json.dumps(report, ensure_ascii=True, indent=2))
     return 0

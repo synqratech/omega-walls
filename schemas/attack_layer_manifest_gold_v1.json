@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Attack Layer Manifest Gold V1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "case_id",
+    "layer",
+    "family",
+    "mode",
+    "session_id",
+    "turn_id",
+    "input_text",
+    "expected_policy",
+    "expected_off",
+    "tags",
+    "source"
+  ],
+  "properties": {
+    "case_id": { "type": "string", "minLength": 1 },
+    "layer": { "type": "string", "minLength": 1 },
+    "family": { "type": "string", "minLength": 1 },
+    "mode": { "type": "string", "enum": ["stateless", "session"] },
+    "phase": { "type": "string", "enum": ["active", "deferred"] },
+    "session_id": { "type": "string", "minLength": 1 },
+    "turn_id": { "type": "integer", "minimum": 1 },
+    "input_text": { "type": "string", "minLength": 1 },
+    "tool_output_text": { "type": "string" },
+    "expected_policy": { "type": "string", "enum": ["PASS", "WARN", "BLOCK"] },
+    "expected_off": { "type": "boolean" },
+    "expected_block_turn": { "type": "integer", "minimum": 1 },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "source": { "type": "string", "minLength": 1 },
+    "notes": { "type": "string" }
+  }
+}

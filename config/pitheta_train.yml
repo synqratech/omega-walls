@@ -39,6 +39,27 @@ pitheta_train:
     gold_slice_path: data/gold_slice/gold_slice.jsonl
     gold_ratio: 0.70
     weak_ratio: 0.30
+  content_filter:
+    mode: "off"  # off | heuristic | openai | openai_then_heuristic
+    fail_closed: false
+    api_key_env: OPENAI_API_KEY
+    base_url: https://api.openai.com/v1
+    model: omni-moderation-latest
+    timeout_sec: 20.0
+    max_retries: 2
+    backoff_sec: 0.75
+    block_categories:
+      - violence
+      - violence/graphic
+      - harassment/threatening
+      - hate/threatening
+      - self-harm/instructions
+      - self-harm/intent
+      - sexual/minors
+      - illicit/violent
+    block_score_threshold: 0.0
+    apply_splits: [train, dev, holdout]
+    log_path: content_filter_drops.jsonl
   lora:
     enabled: true
     r: 16

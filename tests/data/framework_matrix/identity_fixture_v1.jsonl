@@ -1,0 +1,4 @@
+{"fixture_id":"id01","tenant_id":"tenant-a","session_id":"sess-001","actor_id":"user-001","thread_id":"thread-001","conversation_id":"conv-001","user_id":"user-001","customer_id":"cust-001"}
+{"fixture_id":"id02","tenant_id":"tenant-a","session_id":"sess-002","actor_id":"user-002","thread_id":"thread-002","conversation_id":"conv-002","user_id":"user-002","customer_id":"cust-002"}
+{"fixture_id":"id03","tenant_id":"tenant-b","session_id":"sess-003","actor_id":"agent-003","thread_id":"thread-003","conversation_id":"conv-003","user_id":"user-003","customer_id":"cust-003"}
+{"fixture_id":"id04","tenant_id":"tenant-b","session_id":"sess-004","actor_id":"user-004","thread_id":"thread-004","conversation_id":"conv-004","user_id":"user-004","customer_id":"cust-004"}

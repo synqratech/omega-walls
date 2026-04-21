@@ -68,6 +68,7 @@ def _mk_session(
                 label_session=label_session,
                 family=family,
                 source_ref="test",
+                source_type="other",
                 actor_id=actor,
                 bucket=bucket,
                 eval_slice=eval_slice,

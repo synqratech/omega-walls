@@ -1,0 +1,21 @@
+runtime:
+  guard_mode: enforce
+
+monitoring:
+  enabled: false
+  aggregation_window: 1h
+  export:
+    path: artifacts/monitor/monitor_events.jsonl
+    format: jsonl
+    rotation: none
+    rotation_size_mb: 100
+  false_positive_hints:
+    low_confidence_near_threshold:
+      min_risk: 0.65
+      max_risk: 0.82
+      max_triggered_rules: 2
+      allowed_reason_codes: ["reason_spike"]
+    trusted_source_mismatch:
+      trusted_levels: ["trusted", "semi", "semi_trusted"]
+    transient_spike:
+      spike_only_reason_codes: ["reason_spike"]

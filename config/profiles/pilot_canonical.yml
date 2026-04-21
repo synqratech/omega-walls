@@ -1,0 +1,33 @@
+profiles:
+  env: pilot_canonical
+
+runtime:
+  mode: pilot_canonical
+
+off_policy:
+  policy_version: pilot_canonical_v1
+  enforcement_mode: ENFORCE
+  incident_artifact:
+    enabled: true
+    emit_for_outcomes: ['WARN', 'SOFT_BLOCK', 'SOURCE_QUARANTINE', 'TOOL_FREEZE', 'HUMAN_ESCALATE', 'REQUIRE_APPROVAL']
+    include_timeline: true
+  control_outcome:
+    warn:
+      enabled: true
+      target: SESSION
+      max_p_gte: 0.30
+      sum_m_next_gte: 0.22
+    require_approval:
+      enabled: true
+      on_off: true
+      on_warn: false
+      tools: ['network_post', 'write_file']
+      horizon_steps: 8
+
+tools:
+  execution_mode: ENFORCE
+
+api:
+  debug:
+    enable_document_scan_report: true
+    max_report_chunks: 200

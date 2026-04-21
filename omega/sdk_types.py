@@ -44,6 +44,7 @@ class DetectionResult:
     wall_scores: Dict[str, float]
     memory_scores: Dict[str, float]
     decision: GuardDecision
+    monitor: Optional[Dict[str, Any]] = None
 
     @property
     def off(self) -> bool:
@@ -86,9 +87,10 @@ class DetectionResult:
             "top_docs": list(self.decision.top_docs),
             "actions": [a.to_dict() for a in self.decision.actions],
         }
+        if isinstance(self.monitor, dict):
+            out["monitor"] = dict(self.monitor)
         return out
 
 
 # Backward-compatible alias for existing code.
 OmegaDetectionResult = DetectionResult
-

@@ -1,0 +1,54 @@
+{
+  "run_id": "attack_layer_api_gen_20260326T093836Z",
+  "status": "ok",
+  "created_at_utc": "2026-03-26T09:41:39Z",
+  "model": "gpt-5-mini",
+  "seed": 41,
+  "pack_out": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v1_api_role_persona_fix1",
+  "source": "attack_layers_v1_api_generative",
+  "layers": [
+    "role_persona"
+  ],
+  "counts": {
+    "planned_calls": 24,
+    "generated_cases": 24,
+    "generated_rows": 24,
+    "attack_per_layer": 12,
+    "benign_per_layer": 12,
+    "unique_case_ids": 24,
+    "cases_by_layer": {
+      "role_persona": 24
+    }
+  },
+  "budget": {
+    "max_usd": 1.0,
+    "spent_usd": 0.02339100000000001,
+    "spent_input_tokens": 3052,
+    "spent_output_tokens": 11314,
+    "price_input_per_1m": 0.25,
+    "price_output_per_1m": 2.0,
+    "estimated_cost_total_usd": 0.01764,
+    "budget_exhausted_at_case": null
+  },
+  "hashes": {
+    "manifest_all_sha256": "e25ccc76ef0687572783497d4b3bf99f40e2b1f244aa8aaf114640a555714b22"
+  },
+  "quality": {
+    "benign_rows": 12,
+    "benign_risk_hit_rows": 0,
+    "benign_risk_hit_rate": 0.0,
+    "sample_case_ids": []
+  },
+  "artifacts": {
+    "manifest_all": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v1_api_role_persona_fix1\\manifest_all.jsonl",
+    "manifest_meta": "D:\\AI_Models\\experiments\\injection_RAG\\tests\\data\\attack_layers\\v1_api_role_persona_fix1\\manifest.meta.json",
+    "raw_dir": "D:\\AI_Models\\experiments\\injection_RAG\\artifacts\\attack_layer_api_gen\\attack_layer_api_gen_20260326T093836Z\\raw"
+  },
+  "protocol": {
+    "manifest_gold": true,
+    "expected_block_turn_default": null,
+    "temperature_requested": 0,
+    "temperature_mode": "auto_zero_or_model_default",
+    "promotion_gate": "Metrics+NoReg"
+  }
+}

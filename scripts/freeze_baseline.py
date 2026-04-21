@@ -271,6 +271,7 @@ def main() -> int:
             "omega/eval/bipia_metrics.py",
             "omega/rag/retriever_prod_adapter.py",
             "omega/rag/retriever_provider.py",
+            "schemas/incident_artifact_v1.json",
             "schemas/tool_gateway_step_v1.json",
         ]
     )
