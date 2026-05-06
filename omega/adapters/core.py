@@ -64,6 +64,13 @@ class AdapterDecision:
     trace_id: str
     decision_id: str
     risk_score: Optional[float] = None
+    incident_id: Optional[str] = None
+    policy_id: Optional[str] = None
+    fallback_hint: Optional[str] = None
+    provider_id: Optional[str] = None
+    health_state: Optional[str] = None
+    llm_fallback_active: Optional[bool] = None
+    fallback_level: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -97,6 +104,22 @@ class OmegaBlockedError(RuntimeError):
         self.decision = decision
         super().__init__(str(message))
 
+    def to_structured_payload(self) -> Dict[str, Any]:
+        policy_id = str(self.decision.policy_id or "").strip() or None
+        fallback_hint = str(self.decision.fallback_hint or "").strip() or None
+        reason = str(self.decision.control_outcome or "BLOCK")
+        if self.decision.reason_codes:
+            reason = str(self.decision.reason_codes[0])
+        return {
+            "action": str(self.decision.control_outcome or "BLOCK"),
+            "reason": reason,
+            "policy_id": policy_id,
+            "fallback_hint": fallback_hint,
+            "incident_id": str(self.decision.incident_id or "").strip() or None,
+            "trace_id": str(self.decision.trace_id or ""),
+            "decision_id": str(self.decision.decision_id or ""),
+        }
+
 
 class OmegaToolBlockedError(RuntimeError):
     """Raised when a tool call is blocked by Omega tool gate."""
@@ -104,6 +127,20 @@ class OmegaToolBlockedError(RuntimeError):
     def __init__(self, message: str, gate_decision: ToolGateDecision):
         self.gate_decision = gate_decision
         super().__init__(str(message))
+
+    def to_structured_payload(self) -> Dict[str, Any]:
+        decision = self.gate_decision.decision_ref
+        policy_id = str(decision.policy_id or "").strip() or None
+        fallback_hint = str(decision.fallback_hint or "").strip() or None
+        return {
+            "action": str(decision.control_outcome or "TOOL_FREEZE"),
+            "reason": str(self.gate_decision.reason or "TOOL_BLOCKED"),
+            "policy_id": policy_id,
+            "fallback_hint": fallback_hint,
+            "incident_id": str(decision.incident_id or "").strip() or None,
+            "trace_id": str(decision.trace_id or ""),
+            "decision_id": str(decision.decision_id or ""),
+        }
 
 
 class OmegaAdapterRuntime:
@@ -116,6 +153,9 @@ class OmegaAdapterRuntime:
         config_dir: Optional[str] = None,
         projector_mode: Optional[str] = None,
         api_model: Optional[str] = None,
+        api_provider: Optional[str] = None,
+        api_key_env: Optional[str] = None,
+        api_base_url: Optional[str] = None,
         cli_overrides: Optional[Mapping[str, Any]] = None,
         env: Optional[Mapping[str, str]] = None,
         default_source_type: str = "other",
@@ -131,6 +171,12 @@ class OmegaAdapterRuntime:
             projector_override.setdefault("projector", {})["mode"] = str(projector_mode)
         if api_model is not None:
             projector_override.setdefault("projector", {}).setdefault("api_perception", {})["model"] = str(api_model)
+        if api_provider is not None:
+            projector_override.setdefault("projector", {}).setdefault("api_perception", {})["provider"] = str(api_provider)
+        if api_key_env is not None:
+            projector_override.setdefault("projector", {}).setdefault("api_perception", {})["api_key_env"] = str(api_key_env)
+        if api_base_url is not None:
+            projector_override.setdefault("projector", {}).setdefault("api_perception", {})["base_url"] = str(api_base_url)
         if projector_override:
             effective_overrides = _deep_merge(effective_overrides, projector_override)
 
@@ -197,6 +243,8 @@ class OmegaAdapterRuntime:
     def _to_adapter_decision(self, out: Dict[str, Any]) -> AdapterDecision:
         step_result = out["step_result"]
         decision = out["decision"]
+        policy_decision = out.get("policy_decision")
+        incident_id = str(out.get("incident_artifact_id", "") or "").strip() or None
         risk_value = getattr(step_result, "m", None)
         risk_score: Optional[float] = None
         if risk_value is not None:
@@ -204,6 +252,26 @@ class OmegaAdapterRuntime:
                 risk_score = float(risk_value)
             except Exception:
                 risk_score = None
+        policy_id = None
+        fallback_hint = None
+        if policy_decision is not None:
+            policy_id = (
+                str(getattr(policy_decision, "policy_id", "") or "").strip()
+                or str(getattr(policy_decision, "rule_id", "") or "").strip()
+                or None
+            )
+            fallback_hint = str(getattr(policy_decision, "fallback_hint", "") or "").strip() or None
+        api_status = {}
+        try:
+            harness = self._harness_by_session.get(str(step_result.session_id))
+            if harness is not None:
+                api_status_fn = getattr(harness.projector, "api_perception_status", None)
+                if callable(api_status_fn):
+                    raw = api_status_fn()
+                    if isinstance(raw, dict):
+                        api_status = dict(raw)
+        except Exception:
+            api_status = {}
         return AdapterDecision(
             session_id=str(step_result.session_id),
             step=int(step_result.step),
@@ -214,7 +282,68 @@ class OmegaAdapterRuntime:
             trace_id=str(out.get("trace_id", "")),
             decision_id=str(out.get("decision_id", "")),
             risk_score=risk_score,
+            incident_id=incident_id,
+            policy_id=policy_id,
+            fallback_hint=fallback_hint,
+            provider_id=str(api_status.get("provider_id", "") or "").strip() or None,
+            health_state=str(api_status.get("health_state", "") or "").strip() or None,
+            llm_fallback_active=(
+                bool(api_status.get("llm_fallback_active"))
+                if "llm_fallback_active" in api_status
+                else None
+            ),
+            fallback_level=str(api_status.get("fallback_level", "") or "").strip() or None,
         )
+
+    @staticmethod
+    def build_block_contract_from_decision(decision: AdapterDecision) -> Dict[str, Any]:
+        reason = str(decision.control_outcome or "BLOCK")
+        if decision.reason_codes:
+            reason = str(decision.reason_codes[0])
+        return {
+            "action": str(decision.control_outcome or "BLOCK"),
+            "reason": reason,
+            "policy_id": str(decision.policy_id or "").strip() or None,
+            "fallback_hint": str(decision.fallback_hint or "").strip() or None,
+            "incident_id": str(decision.incident_id or "").strip() or None,
+            "trace_id": str(decision.trace_id or ""),
+            "decision_id": str(decision.decision_id or ""),
+        }
+
+    @classmethod
+    def build_block_contract_from_tool_gate(cls, gate_decision: ToolGateDecision) -> Dict[str, Any]:
+        payload = cls.build_block_contract_from_decision(gate_decision.decision_ref)
+        payload["reason"] = str(gate_decision.reason or payload["reason"])
+        return payload
+
+    @staticmethod
+    def build_security_metadata(
+        decision: AdapterDecision,
+        *,
+        phase: str = "decision",
+        extra: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        mode = "allow"
+        outcome = str(decision.control_outcome or "ALLOW").upper()
+        if decision.off or outcome in {"OFF", "BLOCK", "TOOL_FREEZE", "ESCALATE"}:
+            mode = "deny"
+        elif outcome in {"WARN", "SOFT_BLOCK", "SOURCE_QUARANTINE", "HUMAN_ESCALATE", "REQUIRE_APPROVAL"}:
+            mode = "degraded"
+        out: Dict[str, Any] = {
+            "phase": str(phase),
+            "mode": mode,
+            "risk": (float(decision.risk_score) if decision.risk_score is not None else None),
+            "action": str(decision.control_outcome or "ALLOW"),
+            "trace_id": str(decision.trace_id or ""),
+            "decision_id": str(decision.decision_id or ""),
+            "provider_id": str(decision.provider_id or "").strip() or None,
+            "health_state": str(decision.health_state or "").strip() or None,
+            "llm_fallback_active": bool(decision.llm_fallback_active) if decision.llm_fallback_active is not None else None,
+            "fallback_level": str(decision.fallback_level or "").strip() or None,
+        }
+        if isinstance(extra, Mapping):
+            out.update(dict(extra))
+        return out
 
     @staticmethod
     def _normalize_trust(source_trust: str) -> str:

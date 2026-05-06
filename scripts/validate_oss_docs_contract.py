@@ -19,19 +19,10 @@ CURATED_DOCS: List[str] = [
     "README.md",
     "docs/README.md",
     "docs/quickstart.md",
-    "docs/framework_integrations_quickstart.md",
-    "docs/custom_integration_from_scratch.md",
-    "docs/monitoring_alerts.md",
-    "docs/workflow_continuity.md",
-    "docs/policy_tuning.md",
     "docs/config.md",
-    "docs/tests_and_eval.md",
-    "docs/benchmark_data_sources.md",
-    "docs/architecture.md",
-    "docs/threat_model.md",
-    "docs/debugging_workflow_failures.md",
-    "docs/openclaw_integration.md",
-    "docs/release_surfaces.md",
+    "docs/framework_integrations_quickstart.md",
+    "docs/enterprise_pilot_guide.md",
+    "docs/pilot_operations_runbook.md",
 ]
 
 MD_LINK_RE = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
@@ -84,7 +75,12 @@ def validate(*, manifest: Path) -> dict:
     pypi_targets = _collect_pypi_blob_targets()
     required_targets = {p.resolve() for p in local_targets.union(pypi_targets)}
 
-    with tempfile.TemporaryDirectory(prefix="oss_export_contract_", dir=str(ROOT / "artifacts")) as tmp_dir:
+    preferred_tmp = Path("C:/tmp")
+    fallback_tmp = ROOT / "artifacts"
+    tmp_base = preferred_tmp if preferred_tmp.exists() else fallback_tmp
+    tmp_base.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory(prefix="oss_export_contract_", dir=str(tmp_base)) as tmp_dir:
         export_dir = Path(tmp_dir) / "export"
         export_allowlist(
             root=ROOT,

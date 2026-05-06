@@ -13,8 +13,11 @@ def test_oss_export_github_manifest_has_required_excludes():
     assert "omega" in include
     assert "scripts" in include
     assert "docs/README.md" in include
+    assert "docs/enterprise_pilot_guide.md" in include
+    assert "docs/pilot_operations_runbook.md" in include
 
     for required in (
+        "internal_docs/**",
         "internal_data/**",
         "redteam/**",
         "data/**",

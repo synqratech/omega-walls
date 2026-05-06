@@ -76,6 +76,29 @@ Raw attachment text is not included.
 ## Runtime Behavior
 
 - Notification delivery failures are fail-open with metrics/audit (`notifications_failed`, etc.).
+
+## Quota/Fallback Alerts (Orchestrator)
+
+For provider quota and fallback lifecycle, enable webhook channel and allow alert kinds:
+
+```yaml
+notifications:
+  webhook:
+    enabled: true
+    url: https://ops.example/hooks/omega
+    types:
+      - quota_warning
+      - quota_exhausted
+      - fallback_activated
+      - fallback_recovered
+      - key_invalid
+      - provider_outage
+```
+
+Operational commands:
+- `omega-walls alerts configure --webhook <url> --types quota_exhausted,fallback_activated`
+- `omega-walls alerts test --channel webhook`
+- `omega-walls alerts silence --duration 1h`
 - Tool path remains fail-closed by policy/tool gateway.
 - When `HUMAN_ESCALATE` or `REQUIRE_APPROVAL` is active, an approval record is created with `approval_id`.
 - Approval timeout expires pending requests (auto-deny by policy lifecycle).
@@ -86,6 +109,7 @@ At startup, Omega can emit two optional message types:
 
 1. `startup_preflight`: operator checklist with status (`OK|WARN|MISSING|DISABLED`) for guard mode, projector semantic readiness/fallback, tool mode, approval config, and channel readiness.
 2. `startup_outreach`: short one-time onboarding message (GitHub/docs/LinkedIn links, optional commercial CTA).
+3. `startup_telemetry`: one-time transparency notice about anonymous telemetry and opt-out controls.
 
 Config keys:
 
@@ -108,6 +132,10 @@ Notes:
 - Startup flow is `warn + continue`: runtime does not stop on notification/preflight issues.
 - `notifications.enabled=false` disables channel delivery, but terminal preflight can still be shown when enabled.
 - Startup dedup is process-local (`once_per_process=true`).
+- If channel triggers are explicitly filtered, include startup triggers:
+  - `STARTUP_PREFLIGHT`
+  - `STARTUP_OUTREACH`
+  - `STARTUP_TELEMETRY`
 
 ## Quick Smoke (Local)
 

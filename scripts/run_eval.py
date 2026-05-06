@@ -62,6 +62,8 @@ def main() -> int:
     parser.add_argument("--pitheta-checkpoint-dir", default=None)
     parser.add_argument("--pitheta-base-model-path", default=None)
     parser.add_argument("--api-model", default=None)
+    parser.add_argument("--api-provider", default=None)
+    parser.add_argument("--api-key-env", default=None)
     parser.add_argument("--api-base-url", default=None)
     parser.add_argument("--api-timeout-sec", type=float, default=None)
     parser.add_argument("--api-retries", type=int, default=None)
@@ -118,7 +120,18 @@ def main() -> int:
                 },
             },
         }
-    if any(x is not None for x in (args.api_model, args.api_base_url, args.api_timeout_sec, args.api_retries, args.api_cache_path)):
+    if any(
+        x is not None
+        for x in (
+            args.api_model,
+            args.api_provider,
+            args.api_key_env,
+            args.api_base_url,
+            args.api_timeout_sec,
+            args.api_retries,
+            args.api_cache_path,
+        )
+    ):
         projector_overrides = cli_overrides.get("projector", {})
         projector_overrides = projector_overrides if isinstance(projector_overrides, dict) else {}
         api_overrides = projector_overrides.get("api_perception", {})
@@ -130,6 +143,8 @@ def main() -> int:
                 "api_perception": {
                     **api_overrides,
                     **({"model": str(args.api_model)} if args.api_model else {}),
+                    **({"provider": str(args.api_provider)} if args.api_provider else {}),
+                    **({"api_key_env": str(args.api_key_env)} if args.api_key_env else {}),
                     **({"base_url": str(args.api_base_url)} if args.api_base_url else {}),
                     **({"timeout_sec": float(args.api_timeout_sec)} if args.api_timeout_sec is not None else {}),
                     **({"max_retries": int(args.api_retries)} if args.api_retries is not None else {}),

@@ -4,6 +4,8 @@
   api_perception:
     enabled: auto
     strict: false
+    provider: openai
+    provider_options: {}
     model: gpt-5.4-mini
     base_url: https://api.openai.com/v1
     api_key_env: OPENAI_API_KEY
@@ -50,6 +52,21 @@
         - system prompt
         - hidden prompt
         - internal prompt
+    orchestrator:
+      enabled: false
+      master_key_env: OMEGA_MASTER_KEY
+      store:
+        sqlite_path: artifacts/state/provider_orchestrator.db
+      fallback:
+        mode: rule_only
+        threshold:
+          errors: 3
+          window_sec: 60
+      recovery:
+        healthcheck_interval_sec: 180
+      alerts:
+        cooldown_sec: 900
+      providers: []
     deescalation:
       confidence_min: 0.75
       p_strong: 0.35

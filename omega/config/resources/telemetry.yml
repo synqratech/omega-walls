@@ -1,0 +1,13 @@
+telemetry:
+  enabled: true
+  endpoint: https://telemetry.omega-walls.io/v1/collect
+  interval_hours: 24
+  max_batch_kb: 50
+  retry_schedule_sec: [60, 300, 900]
+  tier: oss
+  deployment_mode: auto
+  policy_urls:
+    privacy: https://github.com/synqratech/omega-walls/tree/main/docs#privacy
+    dpa: https://github.com/synqratech/omega-walls/tree/main/docs#data-processing
+  audit_log_path: artifacts/logs/telemetry_audit.log
+  state_path: artifacts/state/telemetry_state.json

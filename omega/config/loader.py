@@ -27,6 +27,7 @@ _CONFIG_LAYER_FILES: Dict[str, str] = {
     "api": "api.yml",
     "monitoring": "monitoring.yml",
     "notifications": "notifications.yml",
+    "telemetry": "telemetry.yml",
     "bipia": "bipia.yml",
     "deepset": "deepset.yml",
     "pitheta_dataset_registry": "pitheta_dataset_registry.yml",
@@ -45,6 +46,7 @@ _CONFIG_LAYER_ORDER: Tuple[str, ...] = (
     "api",
     "monitoring",
     "notifications",
+    "telemetry",
     "bipia",
     "deepset",
     "pitheta_dataset_registry",
@@ -495,6 +497,84 @@ def validate_resolved_config(config: Dict[str, Any]) -> None:
                 raise ValueError("api.attestation.private_key_pem_env must be non-empty")
             if int(att_cfg.get("exp_sec", 300)) <= 0:
                 raise ValueError("api.attestation.exp_sec must be > 0")
+        incident_export_cfg = api_cfg.get("incident_export", {}) or {}
+        if incident_export_cfg and not isinstance(incident_export_cfg, dict):
+            raise ValueError("api.incident_export must be a mapping")
+        if isinstance(incident_export_cfg, dict) and incident_export_cfg:
+            _ = bool(incident_export_cfg.get("enabled", False))
+            if not str(incident_export_cfg.get("contract_version", "1.0")).strip():
+                raise ValueError("api.incident_export.contract_version must be non-empty")
+            default_env = str(incident_export_cfg.get("default_environment", "staging")).strip().lower()
+            if default_env not in {"dev", "staging", "prod"}:
+                raise ValueError("api.incident_export.default_environment must be dev|staging|prod")
+            if int(incident_export_cfg.get("retention_days", 30)) <= 0:
+                raise ValueError("api.incident_export.retention_days must be > 0")
+            store_cfg = incident_export_cfg.get("store", {}) or {}
+            if store_cfg and not isinstance(store_cfg, dict):
+                raise ValueError("api.incident_export.store must be a mapping")
+            if not str(store_cfg.get("sqlite_path", "artifacts/state/incident_export.db")).strip():
+                raise ValueError("api.incident_export.store.sqlite_path must be non-empty")
+            auth_cfg_ie = incident_export_cfg.get("auth", {}) or {}
+            if auth_cfg_ie and not isinstance(auth_cfg_ie, dict):
+                raise ValueError("api.incident_export.auth must be a mapping")
+            if not str(auth_cfg_ie.get("key_store_path", "artifacts/state/incident_export_keys.db")).strip():
+                raise ValueError("api.incident_export.auth.key_store_path must be non-empty")
+            if not str(auth_cfg_ie.get("required_scope", "incidents:read")).strip():
+                raise ValueError("api.incident_export.auth.required_scope must be non-empty")
+            rl_cfg = incident_export_cfg.get("rate_limit", {}) or {}
+            if rl_cfg and not isinstance(rl_cfg, dict):
+                raise ValueError("api.incident_export.rate_limit must be a mapping")
+            if int(rl_cfg.get("rpm", 60)) <= 0:
+                raise ValueError("api.incident_export.rate_limit.rpm must be > 0")
+            if int(rl_cfg.get("burst", 10)) <= 0:
+                raise ValueError("api.incident_export.rate_limit.burst must be > 0")
+            cors_cfg = incident_export_cfg.get("cors", {}) or {}
+            if cors_cfg and not isinstance(cors_cfg, dict):
+                raise ValueError("api.incident_export.cors must be a mapping")
+            allowed_origins = cors_cfg.get("allowed_origins", [])
+            if allowed_origins is not None and not isinstance(allowed_origins, list):
+                raise ValueError("api.incident_export.cors.allowed_origins must be a list")
+        incident_replay_cfg = api_cfg.get("incident_replay", {}) or {}
+        if incident_replay_cfg and not isinstance(incident_replay_cfg, dict):
+            raise ValueError("api.incident_replay must be a mapping")
+        if isinstance(incident_replay_cfg, dict) and incident_replay_cfg:
+            _ = bool(incident_replay_cfg.get("enabled", False))
+            if not str(incident_replay_cfg.get("contract_version", "1.0.0")).strip():
+                raise ValueError("api.incident_replay.contract_version must be non-empty")
+            if int(incident_replay_cfg.get("download_ttl_hours", 24)) <= 0:
+                raise ValueError("api.incident_replay.download_ttl_hours must be > 0")
+            if int(incident_replay_cfg.get("job_ttl_hours", 72)) <= 0:
+                raise ValueError("api.incident_replay.job_ttl_hours must be > 0")
+            max_steps = int(incident_replay_cfg.get("max_steps", 50))
+            if max_steps <= 0 or max_steps > 50:
+                raise ValueError("api.incident_replay.max_steps must be in 1..50")
+            store_cfg = incident_replay_cfg.get("store", {}) or {}
+            if store_cfg and not isinstance(store_cfg, dict):
+                raise ValueError("api.incident_replay.store must be a mapping")
+            if not str(store_cfg.get("sqlite_path", "artifacts/state/incident_replay.db")).strip():
+                raise ValueError("api.incident_replay.store.sqlite_path must be non-empty")
+            package_cfg = incident_replay_cfg.get("package_storage", {}) or {}
+            if package_cfg and not isinstance(package_cfg, dict):
+                raise ValueError("api.incident_replay.package_storage must be a mapping")
+            if not str(package_cfg.get("path", "artifacts/replay/packages")).strip():
+                raise ValueError("api.incident_replay.package_storage.path must be non-empty")
+            if not str(package_cfg.get("encryption_key_env", "OMEGA_REPLAY_ENCRYPTION_KEY")).strip():
+                raise ValueError("api.incident_replay.package_storage.encryption_key_env must be non-empty")
+            worker_cfg = incident_replay_cfg.get("worker", {}) or {}
+            if worker_cfg and not isinstance(worker_cfg, dict):
+                raise ValueError("api.incident_replay.worker must be a mapping")
+            if int(worker_cfg.get("max_concurrent_jobs", 4)) <= 0:
+                raise ValueError("api.incident_replay.worker.max_concurrent_jobs must be > 0")
+            auth_cfg_ir = incident_replay_cfg.get("auth", {}) or {}
+            if auth_cfg_ir and not isinstance(auth_cfg_ir, dict):
+                raise ValueError("api.incident_replay.auth must be a mapping")
+            scopes_cfg = auth_cfg_ir.get("required_scopes", {}) or {}
+            if scopes_cfg and not isinstance(scopes_cfg, dict):
+                raise ValueError("api.incident_replay.auth.required_scopes must be a mapping")
+            if not str(scopes_cfg.get("read", "incidents:replay:read")).strip():
+                raise ValueError("api.incident_replay.auth.required_scopes.read must be non-empty")
+            if not str(scopes_cfg.get("raw", "incidents:replay:raw")).strip():
+                raise ValueError("api.incident_replay.auth.required_scopes.raw must be non-empty")
 
     notifications_cfg = config.get("notifications", {}) or {}
     if notifications_cfg:
@@ -600,6 +680,53 @@ def validate_resolved_config(config: Dict[str, Any]) -> None:
                     raise ValueError("notifications.telegram.chat_id_env must be non-empty")
                 if not str(provider_cfg.get("secret_token_env", "TG_BOT_SECRET_TOKEN")).strip():
                     raise ValueError("notifications.telegram.secret_token_env must be non-empty")
+        webhook_cfg = notifications_cfg.get("webhook", {}) or {}
+        if webhook_cfg and not isinstance(webhook_cfg, dict):
+            raise ValueError("notifications.webhook must be a mapping")
+        if isinstance(webhook_cfg, dict):
+            _ = bool(webhook_cfg.get("enabled", False))
+            if bool(webhook_cfg.get("enabled", False)):
+                if not str(webhook_cfg.get("url", "")).strip():
+                    raise ValueError("notifications.webhook.url must be non-empty when enabled")
+            types = webhook_cfg.get("types", [])
+            if types and not isinstance(types, list):
+                raise ValueError("notifications.webhook.types must be a list")
+
+    telemetry_cfg = config.get("telemetry", {}) or {}
+    if telemetry_cfg and not isinstance(telemetry_cfg, dict):
+        raise ValueError("telemetry must be a mapping")
+    if isinstance(telemetry_cfg, dict) and telemetry_cfg:
+        _ = bool(telemetry_cfg.get("enabled", True))
+        if not str(telemetry_cfg.get("endpoint", "https://telemetry.omega-walls.io/v1/collect")).strip():
+            raise ValueError("telemetry.endpoint must be non-empty")
+        if int(telemetry_cfg.get("interval_hours", 24)) <= 0:
+            raise ValueError("telemetry.interval_hours must be > 0")
+        if int(telemetry_cfg.get("max_batch_kb", 50)) <= 0:
+            raise ValueError("telemetry.max_batch_kb must be > 0")
+        retry_schedule = telemetry_cfg.get("retry_schedule_sec", [60, 300, 900])
+        if not isinstance(retry_schedule, list) or not retry_schedule:
+            raise ValueError("telemetry.retry_schedule_sec must be a non-empty list")
+        for idx, raw in enumerate(list(retry_schedule)):
+            if int(raw) <= 0:
+                raise ValueError(f"telemetry.retry_schedule_sec[{idx}] must be > 0")
+        tier = str(telemetry_cfg.get("tier", "oss")).strip().lower()
+        if tier not in {"oss", "enterprise"}:
+            raise ValueError("telemetry.tier must be oss|enterprise")
+        deployment_mode = str(telemetry_cfg.get("deployment_mode", "auto")).strip().lower()
+        if deployment_mode not in {"auto", "lib", "sidecar", "gateway"}:
+            raise ValueError("telemetry.deployment_mode must be auto|lib|sidecar|gateway")
+        if not str(telemetry_cfg.get("audit_log_path", "artifacts/logs/telemetry_audit.log")).strip():
+            raise ValueError("telemetry.audit_log_path must be non-empty")
+        if not str(telemetry_cfg.get("state_path", "artifacts/state/telemetry_state.json")).strip():
+            raise ValueError("telemetry.state_path must be non-empty")
+        policy_urls = telemetry_cfg.get("policy_urls", {}) or {}
+        if policy_urls and not isinstance(policy_urls, dict):
+            raise ValueError("telemetry.policy_urls must be a mapping")
+        if isinstance(policy_urls, dict):
+            for key in ("privacy", "dpa"):
+                value = policy_urls.get(key, "")
+                if value is not None and not isinstance(value, str):
+                    raise ValueError(f"telemetry.policy_urls.{key} must be a string")
 
     bipia_cfg = config.get("bipia", {})
     if bipia_cfg:
@@ -780,14 +907,22 @@ def validate_resolved_config(config: Dict[str, Any]) -> None:
             raise ValueError("projector.mode must be pi0|pitheta|hybrid|hybrid_api")
         api_cfg = projector_cfg.get("api_perception", {}) or {}
         if api_cfg:
+            provider = str(api_cfg.get("provider", "openai")).strip().lower()
+            if provider not in {"openai", "anthropic", "openai_compat"}:
+                raise ValueError("projector.api_perception.provider must be openai|anthropic|openai_compat")
+            provider_options = api_cfg.get("provider_options", {}) or {}
+            if provider_options and not isinstance(provider_options, dict):
+                raise ValueError("projector.api_perception.provider_options must be a mapping")
             enabled = str(api_cfg.get("enabled", "auto")).lower()
             if enabled not in {"auto", "true", "false"}:
                 raise ValueError("projector.api_perception.enabled must be auto|true|false")
             if not str(api_cfg.get("model", "gpt-5")).strip():
                 raise ValueError("projector.api_perception.model must be non-empty")
-            if not str(api_cfg.get("base_url", "https://api.openai.com/v1")).strip():
+            default_base_url = "https://api.anthropic.com/v1" if provider == "anthropic" else "https://api.openai.com/v1"
+            if not str(api_cfg.get("base_url", default_base_url)).strip():
                 raise ValueError("projector.api_perception.base_url must be non-empty")
-            if not str(api_cfg.get("api_key_env", "OPENAI_API_KEY")).strip():
+            default_api_key_env = "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
+            if not str(api_cfg.get("api_key_env", default_api_key_env)).strip():
                 raise ValueError("projector.api_perception.api_key_env must be non-empty")
             if float(api_cfg.get("timeout_sec", 30.0)) <= 0.0:
                 raise ValueError("projector.api_perception.timeout_sec must be > 0")
@@ -832,6 +967,60 @@ def validate_resolved_config(config: Dict[str, Any]) -> None:
                 raise ValueError("projector.api_perception.cache_path must be non-empty when provided")
             if "error_log_path" in api_cfg and not str(api_cfg.get("error_log_path", "")).strip():
                 raise ValueError("projector.api_perception.error_log_path must be non-empty when provided")
+            orch_cfg = api_cfg.get("orchestrator", {}) or {}
+            if orch_cfg and not isinstance(orch_cfg, dict):
+                raise ValueError("projector.api_perception.orchestrator must be a mapping")
+            if isinstance(orch_cfg, dict) and orch_cfg:
+                _ = bool(orch_cfg.get("enabled", False))
+                if not str(orch_cfg.get("master_key_env", "OMEGA_MASTER_KEY")).strip():
+                    raise ValueError("projector.api_perception.orchestrator.master_key_env must be non-empty")
+                store_cfg = orch_cfg.get("store", {}) or {}
+                if store_cfg and not isinstance(store_cfg, dict):
+                    raise ValueError("projector.api_perception.orchestrator.store must be a mapping")
+                if not str(store_cfg.get("sqlite_path", "artifacts/state/provider_orchestrator.db")).strip():
+                    raise ValueError("projector.api_perception.orchestrator.store.sqlite_path must be non-empty")
+                fallback_cfg = orch_cfg.get("fallback", {}) or {}
+                if fallback_cfg and not isinstance(fallback_cfg, dict):
+                    raise ValueError("projector.api_perception.orchestrator.fallback must be a mapping")
+                mode = str(fallback_cfg.get("mode", "rule_only")).strip().lower()
+                if mode not in {"rule_only", "fail_closed"}:
+                    raise ValueError("projector.api_perception.orchestrator.fallback.mode must be rule_only|fail_closed")
+                threshold_cfg = fallback_cfg.get("threshold", {}) or {}
+                if threshold_cfg and not isinstance(threshold_cfg, dict):
+                    raise ValueError("projector.api_perception.orchestrator.fallback.threshold must be a mapping")
+                if int(threshold_cfg.get("errors", 3)) <= 0:
+                    raise ValueError("projector.api_perception.orchestrator.fallback.threshold.errors must be > 0")
+                if int(threshold_cfg.get("window_sec", 60)) <= 0:
+                    raise ValueError("projector.api_perception.orchestrator.fallback.threshold.window_sec must be > 0")
+                recovery_cfg = orch_cfg.get("recovery", {}) or {}
+                if recovery_cfg and not isinstance(recovery_cfg, dict):
+                    raise ValueError("projector.api_perception.orchestrator.recovery must be a mapping")
+                interval = int(recovery_cfg.get("healthcheck_interval_sec", 180))
+                if interval < 120 or interval > 300:
+                    raise ValueError("projector.api_perception.orchestrator.recovery.healthcheck_interval_sec must be in [120,300]")
+                alerts_cfg = orch_cfg.get("alerts", {}) or {}
+                if alerts_cfg and not isinstance(alerts_cfg, dict):
+                    raise ValueError("projector.api_perception.orchestrator.alerts must be a mapping")
+                if int(alerts_cfg.get("cooldown_sec", 900)) <= 0:
+                    raise ValueError("projector.api_perception.orchestrator.alerts.cooldown_sec must be > 0")
+                providers_cfg = orch_cfg.get("providers", [])
+                if providers_cfg and not isinstance(providers_cfg, list):
+                    raise ValueError("projector.api_perception.orchestrator.providers must be a list")
+                if isinstance(providers_cfg, list):
+                    for idx, row in enumerate(providers_cfg):
+                        if not isinstance(row, dict):
+                            raise ValueError(f"projector.api_perception.orchestrator.providers[{idx}] must be a mapping")
+                        if not str(row.get("id", "")).strip():
+                            raise ValueError(f"projector.api_perception.orchestrator.providers[{idx}].id must be non-empty")
+                        ptype = str(row.get("type", "")).strip().lower()
+                        if ptype not in {"openai", "anthropic", "openai_compat"}:
+                            raise ValueError(
+                                f"projector.api_perception.orchestrator.providers[{idx}].type must be openai|anthropic|openai_compat"
+                            )
+                        if "priority" in row and int(row.get("priority", 0)) < 0:
+                            raise ValueError(
+                                f"projector.api_perception.orchestrator.providers[{idx}].priority must be >= 0"
+                            )
         pitheta_cfg = projector_cfg.get("pitheta", {}) or {}
         if pitheta_cfg:
             if int(pitheta_cfg.get("max_length", 256)) <= 0:

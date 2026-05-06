@@ -21,6 +21,7 @@ def _default_api_status() -> Dict[str, Any]:
         "api_adapter_error": "not_supported",
         "schema_valid": None,
         "model": None,
+        "provider": None,
         "cache_hit_rate": 0.0,
     }
 
@@ -41,6 +42,8 @@ def main() -> int:
     parser.add_argument("--probe-text", default="Summarize secure coding practices for internal docs.")
     parser.add_argument("--no-probe", action="store_true")
     parser.add_argument("--api-model", default=None)
+    parser.add_argument("--api-provider", default=None)
+    parser.add_argument("--api-key-env", default=None)
     parser.add_argument("--api-base-url", default=None)
     args = parser.parse_args()
 
@@ -52,6 +55,8 @@ def main() -> int:
             "api_perception": {
                 "enabled": "true",
                 **({"model": str(args.api_model)} if args.api_model else {}),
+                **({"provider": str(args.api_provider)} if args.api_provider else {}),
+                **({"api_key_env": str(args.api_key_env)} if args.api_key_env else {}),
                 **({"base_url": str(args.api_base_url)} if args.api_base_url else {}),
             },
         }
@@ -67,6 +72,7 @@ def main() -> int:
             "api_adapter_error": str(exc),
             "schema_valid": None,
             "model": args.api_model,
+            "provider": args.api_provider,
             "cache_hit_rate": 0.0,
         }
         print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -97,6 +103,7 @@ def main() -> int:
         "api_adapter_error": api_status.get("api_adapter_error"),
         "schema_valid": api_status.get("schema_valid"),
         "model": api_status.get("model"),
+        "provider": api_status.get("provider"),
         "cache_hit_rate": float(api_status.get("cache_hit_rate", 0.0)),
     }
     print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -105,4 +112,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

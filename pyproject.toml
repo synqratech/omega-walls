@@ -4,9 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "omega-walls"
-version = "0.1.3"
+version = "0.1.5"
 description = "Omega Walls v1 safety layer for RAG/agents"
-readme = "README_PYPI.md"
+readme = { file = "README_PYPI.md", content-type = "text/markdown" }
 requires-python = ">=3.10"
 license = "Apache-2.0"
 authors = [
@@ -21,13 +21,14 @@ keywords = [
   "stateful-firewall"
 ]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Topic :: Security",
   "Topic :: Software Development :: Libraries",
@@ -43,9 +44,13 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://synqra.tech/"
+Documentation = "https://docs.omegawalls.io"
 Repository = "https://github.com/synqratech/omega-walls"
+"Framework Integrations" = "https://docs.omegawalls.io/integrations"
 Issues = "https://github.com/synqratech/omega-walls/issues"
 Changelog = "https://github.com/synqratech/omega-walls/blob/main/CHANGELOG.md"
+"Security Policy" = "https://github.com/synqratech/omega-walls/blob/main/SECURITY.md"
+"Enterprise Pilots" = "https://docs.omegawalls.io/enterprise"
 
 [project.scripts]
 omega-walls = "omega.cli:main"

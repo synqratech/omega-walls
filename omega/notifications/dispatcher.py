@@ -20,7 +20,7 @@ from omega.notifications.models import (
     new_approval_id,
     utc_now_iso,
 )
-from omega.notifications.providers import SlackNotifier, TelegramNotifier
+from omega.notifications.providers import SlackNotifier, TelegramNotifier, WebhookNotifier
 from omega.notifications.store import InMemoryApprovalStore, SQLiteApprovalStore
 
 LOGGER = logging.getLogger(__name__)
@@ -207,7 +207,7 @@ class NotificationDispatcher:
     def _provider_configs(self) -> Dict[str, Dict[str, Any]]:
         cfg = dict((self.config.get("notifications", {}) or {}))
         out: Dict[str, Dict[str, Any]] = {}
-        for name in ("slack", "telegram"):
+        for name in ("slack", "telegram", "webhook"):
             provider_cfg = cfg.get(name, {}) if isinstance(cfg.get(name, {}), Mapping) else {}
             if not bool(provider_cfg.get("enabled", False)):
                 continue
@@ -237,6 +237,27 @@ class NotificationDispatcher:
         outcome = str(getattr(event, "control_outcome", "")).upper()
         bucket = "WARN" if outcome == "WARN" else "BLOCK"
         window_sec = int(buckets.get(bucket, 0))
+        event_kind = str(getattr(event, "event_kind", "") or "").strip().lower()
+        if str(provider_name) == "webhook" and event_kind in {
+            "quota_warning",
+            "quota_exhausted",
+            "fallback_activated",
+            "fallback_recovered",
+            "key_invalid",
+            "provider_outage",
+        }:
+            window_sec = int(provider_cfg.get("cooldown_sec", 900))
+            provider_id = str((getattr(event, "payload_redacted", {}) or {}).get("provider_id", "")).strip() or "n/a"
+            dedup_key = f"{provider_id}:{event_kind}"
+            trigger_key = "quota_fallback"
+            now = datetime.now(timezone.utc)
+            key = (str(provider_name), str(trigger_key), str(dedup_key))
+            with self._throttle_lock:
+                prev = self._last_sent.get(key)
+                if prev is not None and (now - prev).total_seconds() < float(window_sec):
+                    return True
+                self._last_sent[key] = now
+            return False
         if window_sec <= 0:
             return False
         dedup_key = str(getattr(event, "session_id", "")) or str(getattr(event, "trace_id", ""))
@@ -329,6 +350,19 @@ def build_dispatcher_from_config(*, config: Mapping[str, Any], store_sqlite_path
             providers["telegram"] = TelegramNotifier(bot_token=token, chat_id=chat_id, base_url=str(tg_cfg.get("base_url", "https://api.telegram.org")))
         else:
             LOGGER.warning("telegram notifier disabled due to missing bot token/chat id env")
+
+    webhook_cfg = cfg.get("webhook", {}) if isinstance(cfg.get("webhook", {}), Mapping) else {}
+    if bool(webhook_cfg.get("enabled", False)):
+        webhook_url = str(webhook_cfg.get("url", "")).strip()
+        allowed_types = [str(x).strip() for x in list(webhook_cfg.get("types", [])) if str(x).strip()]
+        if webhook_url:
+            providers["webhook"] = WebhookNotifier(
+                url=webhook_url,
+                allowed_types=allowed_types,
+                max_retries=int(webhook_cfg.get("max_retries", 3)),
+            )
+        else:
+            LOGGER.warning("webhook notifier disabled due to missing url")
 
     merged_cfg = {"notifications": cfg}
     return NotificationDispatcher(config=merged_cfg, store=store, providers=providers)

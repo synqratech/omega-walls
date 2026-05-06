@@ -222,6 +222,12 @@ def run_quick_demo(args: argparse.Namespace) -> int:
         eval_argv.append("--strict-projector")
     if args.api_model:
         eval_argv.extend(["--api-model", str(args.api_model)])
+    if args.api_provider:
+        eval_argv.extend(["--api-provider", str(args.api_provider)])
+    if args.api_key_env:
+        eval_argv.extend(["--api-key-env", str(args.api_key_env)])
+    if args.api_base_url:
+        eval_argv.extend(["--api-base-url", str(args.api_base_url)])
 
     proc = _run_cmd(eval_argv)
     if proc.returncode != 0:
@@ -297,6 +303,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--profile", default=DEFAULT_PROFILE)
     parser.add_argument("--api-model", default=DEFAULT_API_MODEL)
+    parser.add_argument("--api-provider", default=None)
+    parser.add_argument("--api-key-env", default=None)
+    parser.add_argument("--api-base-url", default=None)
     parser.add_argument(
         "--strict-projector",
         action=argparse.BooleanOptionalAction,

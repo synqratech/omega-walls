@@ -32,9 +32,15 @@ Aggregate summary is written to:
 - `orphan_executions == 0`
 - `blocked_input_seen == true`
 - `blocked_tool_seen == true`
+- `structured_block_contract_ok == true`
+- `security_metadata_ok == true`
 - `require_approval_resume_success_rate == 1.0`
 - `replay_block_rate == 1.0`
 - `webfetch_edge_handling_rate == 1.0`
+- integration package contract is valid for all entries under `/integrations/*`:
+  - required files exist (`README.md`, `example.py`, `requirements.txt`, `test_integration.py`)
+  - local links resolve
+  - executable integration smoke launchers succeed in contract CI
 
 In `--strict` mode, any gate failure returns non-zero exit code.
 
@@ -44,6 +50,7 @@ In `--strict` mode, any gate failure returns non-zero exit code.
 
 - Runs 6 framework guard smokes.
 - Runs OpenClaw mapper contract subset (`npm run typecheck`, `npm run test`).
+- Runs integration package executable launchers in `/integrations/<framework>/test_integration.py`.
 - Writes canonical report with target-level statuses and aggregate gates.
 
 ### Workflow layer (nightly)
@@ -64,3 +71,4 @@ In `--strict` mode, any gate failure returns non-zero exit code.
 - **Replay rejections**: ensure nonce/timestamp are unique and clock skew is in policy range.
 - **Approval stuck pending**: inspect approval records and timeout handling in stress report.
 - **WebFetch edge failure**: verify `tests/data/framework_matrix/webfetch_edge_corpus/*` fixtures are present and readable.
+- **Integration package contract failure**: run `python -m pytest tests/test_docs_integrations_contract.py -q` locally and fix missing file/link/launcher issues.

@@ -108,6 +108,9 @@ class OmegaWalls:
         config_dir: Optional[str] = None,
         projector_mode: Optional[str] = None,
         api_model: Optional[str] = None,
+        api_provider: Optional[str] = None,
+        api_key_env: Optional[str] = None,
+        api_base_url: Optional[str] = None,
         cli_overrides: Optional[Mapping[str, Any]] = None,
         env: Optional[Mapping[str, str]] = None,
         default_trust: str = "untrusted",
@@ -123,6 +126,12 @@ class OmegaWalls:
             projector_override.setdefault("projector", {})["mode"] = str(projector_mode)
         if api_model is not None:
             projector_override.setdefault("projector", {}).setdefault("api_perception", {})["model"] = str(api_model)
+        if api_provider is not None:
+            projector_override.setdefault("projector", {}).setdefault("api_perception", {})["provider"] = str(api_provider)
+        if api_key_env is not None:
+            projector_override.setdefault("projector", {}).setdefault("api_perception", {})["api_key_env"] = str(api_key_env)
+        if api_base_url is not None:
+            projector_override.setdefault("projector", {}).setdefault("api_perception", {})["base_url"] = str(api_base_url)
         if projector_override:
             effective_overrides = _deep_merge(effective_overrides, projector_override)
 
@@ -387,4 +396,10 @@ class OmegaWalls:
             allowlist=list(action.allowlist) if action.allowlist else None,
             horizon_steps=int(action.horizon_steps) if action.horizon_steps is not None else None,
             incident_packet=dict(action.incident_packet) if action.incident_packet else None,
+            capability_class=str(action.capability_class) if action.capability_class else None,
+            risk_level=str(action.risk_level) if action.risk_level else None,
+            freeze_stage=int(action.freeze_stage) if action.freeze_stage is not None else None,
+            stage_reason=str(action.stage_reason) if action.stage_reason else None,
+            escalation_required=bool(action.escalation_required) if action.escalation_required is not None else None,
+            approval_required=bool(action.approval_required) if action.approval_required is not None else None,
         )

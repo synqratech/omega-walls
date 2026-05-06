@@ -7,6 +7,10 @@ This guide shows how to wire Omega Walls into OpenClaw via a plugin package:
 - guarded web fetch provider
 - strict local bridge to `omega-walls-api`
 
+Repository executable package:
+
+- [`/integrations/openclaw`](../integrations/openclaw/README.md)
+
 ## 1) What gets installed
 
 Plugin package in this repository:
@@ -84,6 +88,13 @@ The plugin maps Omega decisions into OpenClaw hook decisions:
 - escalation/approval outcome -> `{ requireApproval: true, reason?: string }`
 - allow -> no decision object
 
+Extended mapping payload fields (P0 hardening):
+
+- `action` / `controlOutcome`
+- `incidentArtifactId`
+- `policyId` (when available)
+- `fallbackHint` (when available)
+
 Human escalation uses OpenClaw-native approval flow (`requireApproval` / `/approve`).
 
 ## 6) WebFetch behavior
@@ -117,6 +128,12 @@ export OMEGA_OPENCLAW_API_BASE_URL=http://127.0.0.1:8080
 export OMEGA_OPENCLAW_API_KEY=...
 export OMEGA_OPENCLAW_HMAC_SECRET=...
 npm run smoke:local-api
+```
+
+Repository integration launcher (used by CI package contract):
+
+```bash
+python integrations/openclaw/test_integration.py
 ```
 
 Quick API sanity check before running plugin smoke:

@@ -51,3 +51,26 @@ def test_adapter_runtime_tool_preflight_stays_dry_run() -> None:
     assert gate.orphan_executions == 0
     assert gate.executed is False
 
+
+def test_adapter_runtime_builds_structured_contracts_and_security_metadata() -> None:
+    runtime = OmegaAdapterRuntime(profile="dev", projector_mode="pi0", max_chars=2000)
+    ctx = AdapterSessionContext(session_id="sess-contract", actor_id="actor-contract")
+    decision = runtime.check_model_input("Benign support request.", ctx)
+
+    block_contract = runtime.build_block_contract_from_decision(decision)
+    assert set(block_contract.keys()) == {
+        "action",
+        "reason",
+        "policy_id",
+        "fallback_hint",
+        "incident_id",
+        "trace_id",
+        "decision_id",
+    }
+    assert block_contract["trace_id"] == decision.trace_id
+    assert block_contract["decision_id"] == decision.decision_id
+
+    security_metadata = runtime.build_security_metadata(decision, phase="test_phase")
+    assert security_metadata["phase"] == "test_phase"
+    assert security_metadata["action"] == decision.control_outcome
+    assert security_metadata["trace_id"] == decision.trace_id

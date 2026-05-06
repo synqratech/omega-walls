@@ -35,7 +35,16 @@ def _normalize_action(action: Any) -> Dict[str, Any]:
         values = raw.get(key)
         if values is not None:
             out[key] = _to_sorted_unique(values)
-    for key in ("tool_mode", "horizon_steps"):
+    for key in (
+        "tool_mode",
+        "horizon_steps",
+        "capability_class",
+        "risk_level",
+        "freeze_stage",
+        "stage_reason",
+        "escalation_required",
+        "approval_required",
+    ):
         value = raw.get(key)
         if value is not None:
             out[key] = value

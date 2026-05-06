@@ -198,7 +198,7 @@ omega:
   - **θ=0.40, N=2**: catches two-wall distributed/cocktail attacks early without flagging single-wall benign spikes.
 - **γ=0.70**: usually blocks 1–2 top docs, but can block more if distributed within packet.
 
-> Calibration note: these defaults are a starting point; tune using `tests_and_eval.md` procedures.  
+> Calibration note: these defaults are a starting point; tune using your benchmark/evaluation procedures for the target workload.  
 > Never change defaults without bumping config version and recording the diff.
 
 ---
@@ -561,3 +561,93 @@ Privacy guardrails:
 - use safe proxy metadata such as `input_type`, `input_length`, `source_type`, `chunk_hash`.
 
 For full schema and mapping details, see [Structured Logging Contract](logging_contract.md).
+
+---
+
+## Hybrid API Provider Configuration
+
+`projector.api_perception` supports provider selection for `hybrid_api` mode:
+
+```yaml
+projector:
+  mode: hybrid_api
+  api_perception:
+    enabled: true
+    provider: openai          # openai | anthropic | openai_compat
+    model: gpt-5.4-mini
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+    provider_options: {}      # optional provider-specific knobs
+```
+
+Defaults and compatibility:
+- default provider is `openai`;
+- legacy keys (`model`, `base_url`, `api_key_env`) remain valid;
+- `openai_compat` is intended for OpenAI-compatible gateways (for example DeepSeek/Kimi-compatible endpoints);
+- if you switch provider/model family, run a dedicated smoke/eval before production rollout.
+
+Orchestrator quota fallback (optional, additive):
+
+```yaml
+projector:
+  mode: hybrid_api
+  api_perception:
+    orchestrator:
+      enabled: true
+      master_key_env: OMEGA_MASTER_KEY
+      store:
+        sqlite_path: artifacts/state/provider_orchestrator.db
+      fallback:
+        mode: rule_only         # rule_only | fail_closed
+        threshold:
+          errors: 3
+          window_sec: 60
+      recovery:
+        healthcheck_interval_sec: 180
+      alerts:
+        cooldown_sec: 900
+      providers:
+        - id: openai-main
+          type: openai          # openai | anthropic | openai_compat
+          model: gpt-5.4-mini
+          base_url: https://api.openai.com/v1
+          primary_ref: openai-main
+          backup_ref: openai-main
+```
+
+When orchestrator is enabled, runtime emits explicit degraded status fields:
+`provider_id`, `health_state`, `llm_fallback_active`, `fallback_level`, `fallback_reason`, `quota_signal`.
+
+---
+
+## Anonymous Telemetry (MVP)
+
+Telemetry is additive and enabled by default, with explicit opt-out.
+
+```yaml
+telemetry:
+  enabled: true
+  endpoint: https://telemetry.omega-walls.io/v1/collect
+  interval_hours: 24
+  max_batch_kb: 50
+  retry_schedule_sec: [60, 300, 900]
+  tier: oss                 # oss | enterprise
+  deployment_mode: auto     # auto | lib | sidecar | gateway
+  policy_urls:
+    privacy: https://github.com/synqratech/omega-walls/tree/main/docs#privacy
+    dpa: https://github.com/synqratech/omega-walls/tree/main/docs#data-processing
+  audit_log_path: artifacts/logs/telemetry_audit.log
+  state_path: artifacts/state/telemetry_state.json
+```
+
+Environment override (highest priority):
+- `OMEGA_TELEMETRY=false` disables collection and sending.
+
+CLI:
+- `omega-walls telemetry status --profile <name>`
+- `omega-walls telemetry show-pending --profile <name>`
+- `omega-walls telemetry disable --profile <name>`
+
+Privacy guarantees:
+- only anonymous aggregates and structural pattern hashes;
+- no raw prompts/documents/tool payloads, keys/tokens/passwords, or host/network identifiers.

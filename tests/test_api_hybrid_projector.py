@@ -35,6 +35,7 @@ def _mk_cfg(tmp_path: Path, *, strict: bool = False) -> dict:
             "api_perception": {
                 "enabled": "true",
                 "strict": bool(strict),
+                "provider": "openai",
                 "model": "gpt-5",
                 "base_url": "https://api.openai.com/v1",
                 "api_key_env": "OPENAI_API_KEY",
@@ -181,6 +182,7 @@ def test_api_projector_cache_determinism(monkeypatch: pytest.MonkeyPatch):
     assert float(api_match["scores"]["secret_exfiltration"]) == 0.0
     st = projector.api_perception_status()
     assert st["api_adapter_active"] is True
+    assert st["provider"] == "openai"
     assert st["schema_valid"] is True
     assert st["cache_hits"] >= 1
     cache_rows = [x for x in (tmp_path / "cache.jsonl").read_text(encoding="utf-8").splitlines() if x.strip()]
@@ -457,6 +459,94 @@ def test_api_projector_short_chat_only_skips_responses(monkeypatch: pytest.Monke
     assert calls["responses"] == 0
     assert calls["chat"] == 1
     assert projector._prewarmed is True
+
+
+def test_api_projector_openai_compat_uses_chat_path(monkeypatch: pytest.MonkeyPatch):
+    tmp_path = _mk_local_tmp("api-hybrid-openai-compat-chat")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    calls = {"responses": 0, "chat": 0}
+
+    def _post_compat(*, url, payload, headers, timeout_sec):
+        _ = (payload, headers, timeout_sec)
+        if str(url).endswith("/responses"):
+            calls["responses"] += 1
+            raise AssertionError("openai_compat must not call /responses")
+        if str(url).endswith("/chat/completions"):
+            calls["chat"] += 1
+            return {
+                "id": "resp_compat_chat",
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"schema_version":"api_hybrid_v2","pressure_signed":{"override_instructions":0.2,'
+                                '"secret_exfiltration":0.0,"tool_or_action_abuse":0.0,"policy_evasion":0.0},'
+                                '"directive_intent":{"override_instructions":true,"secret_exfiltration":false,'
+                                '"tool_or_action_abuse":false,"policy_evasion":false},"defensive_context":false,'
+                                '"confidence":0.8}'
+                            )
+                        }
+                    }
+                ],
+            }
+        raise AssertionError(f"unexpected url: {url}")
+
+    monkeypatch.setattr(api_hybrid_module, "_post_json", _post_compat)
+    cfg = _mk_cfg(tmp_path, strict=True)
+    cfg["projector"]["api_perception"]["provider"] = "openai_compat"
+    projector = APIPerceptionProjector(config=cfg)
+    out = projector.project(
+        ContentItem(doc_id="d-compat", source_id="s-compat", source_type="other", trust="untrusted", text="compat")
+    )
+    st = projector.api_perception_status()
+    assert st["provider"] == "openai_compat"
+    assert out.evidence.matches["api_perception"]["provider"] == "openai_compat"
+    assert calls["responses"] == 0
+    assert calls["chat"] >= 1
+
+
+def test_api_projector_anthropic_provider_contract(monkeypatch: pytest.MonkeyPatch):
+    tmp_path = _mk_local_tmp("api-hybrid-anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test")
+
+    def _post_anthropic(*, url, payload, headers, timeout_sec):
+        _ = (payload, timeout_sec)
+        assert str(url).endswith("/messages")
+        assert "x-api-key" in headers
+        return {
+            "id": "msg_123",
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        '{"schema_version":"api_hybrid_v2","pressure_signed":{"override_instructions":0.0,'
+                        '"secret_exfiltration":-0.2,"tool_or_action_abuse":0.0,"policy_evasion":0.0},'
+                        '"directive_intent":{"override_instructions":false,"secret_exfiltration":false,'
+                        '"tool_or_action_abuse":false,"policy_evasion":false},"defensive_context":true,'
+                        '"confidence":0.9}'
+                    ),
+                }
+            ],
+        }
+
+    monkeypatch.setattr(api_hybrid_module, "_post_json", _post_anthropic)
+    cfg = _mk_cfg(tmp_path, strict=True)
+    cfg["projector"]["api_perception"].update(
+        {
+            "provider": "anthropic",
+            "base_url": "https://api.anthropic.com/v1",
+            "api_key_env": "ANTHROPIC_API_KEY",
+        }
+    )
+    projector = APIPerceptionProjector(config=cfg)
+    out = projector.project(
+        ContentItem(doc_id="d-an", source_id="s-an", source_type="other", trust="untrusted", text="anthropic")
+    )
+    st = projector.api_perception_status()
+    assert st["provider"] == "anthropic"
+    ap = out.evidence.matches["api_perception"]
+    assert ap["provider"] == "anthropic"
+    assert ap["schema_version"] == "api_hybrid_v2"
 
 
 def test_hybrid_api_short_fast_path_skips_api_on_pi0_clean(monkeypatch: pytest.MonkeyPatch):

@@ -118,8 +118,7 @@ then the integrating app should:
 2. include citations from `citation_candidates[]`,
 3. avoid definitive claims without source references.
 
-DevOps-focused baseline profile (deny destructive/exfil shell patterns + approval for force push/deploy):
-- [DevOps Minimal Policy Pack](policy_pack_devops_minimal.md)
+DevOps-focused baseline profile is available as `devops_minimal` (deny destructive/exfil shell patterns + approval for force push/deploy).
 
 ## Troubleshooting
 

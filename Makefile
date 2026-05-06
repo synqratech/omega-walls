@@ -1,4 +1,4 @@
-.PHONY: test eval check smoke-real
+.PHONY: test eval check smoke-real demo
 
 test:
 	python -m pytest
@@ -11,3 +11,6 @@ check:
 
 smoke-real:
 	powershell -ExecutionPolicy Bypass -File scripts/run_real_smoke.ps1
+
+demo:
+	python scripts/quick_demo.py --mode pi0

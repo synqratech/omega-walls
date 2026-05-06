@@ -5,6 +5,10 @@ This quickstart is intentionally split into two phases.
 - Phase 1: monitor-first validation (no disruptive blocking side effects)
 - Phase 2: production hardening (alerts + approvals required)
 
+Profile note:
+- Profile matrix examples (`quickstart`, `dev`, `local_dev`, `devops_minimal`, `autonomy_soft`, `pilot`, `pilot_canonical`, `deepset_tune`) are defined in `config/profiles/*.yml`.
+- For profile behavior and override precedence, use [Configuration & Policy Tuning](config.md).
+
 ## 1) Install
 
 ```bash
@@ -64,6 +68,34 @@ Use continuity-aware routing:
 - `ALLOW` -> continue
 - `SOFT_BLOCK|SOURCE_QUARANTINE|TOOL_FREEZE|WARN` -> continue with degraded context
 - `HUMAN_ESCALATE|REQUIRE_APPROVAL` -> pause high-risk action and resolve approval
+
+## 5) Hybrid API providers (optional)
+
+`hybrid_api` supports multiple LLM providers through `projector.api_perception.provider`:
+- `openai` (default)
+- `anthropic`
+- `openai_compat` (for OpenAI-compatible gateways such as DeepSeek/Kimi-compatible endpoints)
+
+Baseline smoke/eval in this repo is validated on `gpt-5.4-mini`.  
+If you switch provider or model family, run provider-specific smoke/eval before production rollout.
+
+Optional production hardening for quota outages:
+
+```bash
+omega-walls orchestrator keys add --provider openai-main --key sk-...
+omega-walls orchestrator keys set-backup --provider openai-main --key sk-...
+omega-walls orchestrator status --profile dev
+omega-walls fallback set-mode --mode rule_only
+```
+
+Telemetry visibility and opt-out:
+
+```bash
+omega-walls telemetry status --profile dev
+omega-walls telemetry show-pending --profile dev
+# instant opt-out
+omega-walls telemetry disable --profile dev
+```
 
 ## Verification Checklist
 

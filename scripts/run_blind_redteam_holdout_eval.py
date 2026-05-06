@@ -54,6 +54,8 @@ def main() -> int:
     parser.add_argument("--require-semantic-active", action="store_true")
     parser.add_argument("--enable-stateful-support-tuning", action="store_true")
     parser.add_argument("--api-model", default="gpt-5.4-mini")
+    parser.add_argument("--api-provider", default=None)
+    parser.add_argument("--api-key-env", default=None)
     parser.add_argument("--api-base-url", default=None)
     parser.add_argument("--api-timeout-sec", type=float, default=None)
     parser.add_argument("--api-retries", type=int, default=None)
@@ -81,6 +83,8 @@ def main() -> int:
         require_semantic_active=bool(args.require_semantic_active),
         enable_stateful_support_tuning=bool(args.enable_stateful_support_tuning),
         api_model=(str(args.api_model) if args.api_model else None),
+        api_provider=(str(args.api_provider) if args.api_provider else None),
+        api_key_env=(str(args.api_key_env) if args.api_key_env else None),
         api_base_url=(str(args.api_base_url) if args.api_base_url else None),
         api_timeout_sec=(float(args.api_timeout_sec) if args.api_timeout_sec is not None else None),
         api_retries=(int(args.api_retries) if args.api_retries is not None else None),

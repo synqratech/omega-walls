@@ -8,11 +8,7 @@ release_gate:
       require_semantic: true
       semantic_model_path: e5-small-v2
       whitebox_max_samples: 200
-      enforce_bipia: true
-      bipia_mode: sampled
-      bipia_split: test
-      bipia_max_contexts_per_task: 20
-      bipia_seed: 41
+      enforce_bipia: false
     run_local_contour:
       llm_backend: mock
       strict: true

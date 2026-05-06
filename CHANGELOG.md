@@ -6,6 +6,29 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- _No unreleased entries yet._
+
+## [0.1.5] - 2026-05-06
+
+### Changed
+
+- OSS README onboarding tightened for cross-platform startup:
+  - 4-step quickstart now includes optional extras (`[api]`, `[integrations]`, `[attachments]`)
+  - dual shell environment examples (Bash + PowerShell) for notifications and provider keys
+  - explicit demo + smoke path (`make demo`, `smoke_monitor_mode`, `run_framework_smokes --strict`)
+  - added CLI/API one-liner surface in quickstart
+- PyPI package page content hardened for installer-first flow:
+  - explicit OSS vs Enterprise boundary statement
+  - telemetry opt-out documented for Bash and PowerShell (`OMEGA_TELEMETRY=false`)
+  - framework integrations link moved to stable docs endpoint
+  - project URLs/classifiers aligned with published compatibility claims
+- Added release metadata gate workflow:
+  - `.github/workflows/pypi-metadata-check.yml` (`python -m build` + `twine check dist/*`)
+
+## [0.1.4] - 2026-04-21
+
+### Added
+
 - Public results snapshot contract for frozen reproducible README metrics:
   - `docs/public_results_snapshot.json`
   - `scripts/sync_readme_results_from_snapshot.py`
@@ -13,6 +36,10 @@ All notable changes to this project are documented in this file.
   - `scripts/validate_oss_docs_contract.py`
   - `tests/test_oss_docs_link_contract.py`
   - `tests/test_public_results_snapshot_contract.py`
+- Startup preflight UX hints in terminal output:
+  - explicit setup hints when `notifications.enabled=false`
+  - explicit Slack/Telegram env hints when channel config is missing
+  - semantic fallback hint (`transformers`/`torch`) when semantic projector is inactive
 
 ### Changed
 
@@ -24,6 +51,10 @@ All notable changes to this project are documented in this file.
   - RU/historical/research docs from public export
   - legacy ambiguous docs and private/internal layers
 - `docs/README.md` is reshaped into a strict canonical onboarding order.
+- Startup outreach defaults updated to current public contacts:
+  - GitHub: `https://github.com/synqratech/omega-walls`
+  - LinkedIn: `https://www.linkedin.com/in/anvifedotov/`
+  - contact email: `anton.f@synqra.tech`
 
 ## [0.1.3] - 2026-04-20
 

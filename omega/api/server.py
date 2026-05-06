@@ -19,10 +19,31 @@ from urllib.parse import parse_qs
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 import numpy as np
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from omega.api.chunk_pipeline import score_chunks
+from omega.api.incident_export import (
+    IncidentApiKeyRecord,
+    IncidentApiKeyStore,
+    IncidentExportConfig,
+    IncidentExportStore,
+    IncidentHeavyItem,
+    IncidentListResponse,
+    IncidentRateLimiter,
+    build_incident_record_from_scan,
+    incident_access_log_record,
+    key_fingerprint,
+)
+from omega.api.incident_replay import (
+    IncidentReplayConfig,
+    IncidentReplayJobManager,
+    IncidentReplayStore,
+    ReplayGenerateRequest,
+    ReplayGenerateResponse,
+    ReplayJobResponse,
+)
 from omega.api.session_store import ApiSessionStore
 from omega.config.loader import load_resolved_config
 from omega.core.omega_core import OmegaCoreV1
@@ -50,6 +71,7 @@ from omega.rag.attachment_ingestion import AttachmentExtractResult, extract_atta
 from omega.rag.source_policy import SourceTrustPolicy
 from omega.telemetry.ids import build_decision_id, build_trace_id_api
 from omega.telemetry.incident_artifact import build_incident_artifact, should_emit_incident_artifact
+from omega.telemetry.anonymous import AnonymousTelemetryService, build_telemetry_event
 from omega.structured_logging import StructuredLogEmitter, build_structured_emitter_from_config, engine_version
 
 LOGGER = logging.getLogger(__name__)
@@ -373,6 +395,14 @@ class ScanRuntime:
     notification_dispatcher: Optional[NotificationDispatcher] = None
     monitor_collector: Optional[MonitorEventCollector] = None
     structured_emitter: Optional[StructuredLogEmitter] = None
+    incident_export_cfg: Optional[IncidentExportConfig] = None
+    incident_export_store: Optional[IncidentExportStore] = None
+    incident_api_key_store: Optional[IncidentApiKeyStore] = None
+    incident_rate_limiter: Optional[IncidentRateLimiter] = None
+    incident_replay_cfg: Optional[IncidentReplayConfig] = None
+    incident_replay_store: Optional[IncidentReplayStore] = None
+    incident_replay_manager: Optional[IncidentReplayJobManager] = None
+    telemetry_service: Optional[AnonymousTelemetryService] = None
     session_locks: SessionLockPool = field(default_factory=SessionLockPool)
 
 
@@ -419,6 +449,36 @@ def _make_runtime(resolved_config: Dict[str, Any]) -> ScanRuntime:
         force_enable=(guard_mode == GuardMode.MONITOR),
     )
     structured_emitter = build_structured_emitter_from_config(config=resolved_config, logger_name="omega.api")
+    telemetry_service = AnonymousTelemetryService(
+        config=resolved_config,
+        dispatcher=notification_dispatcher,
+        surface="api",
+    )
+    incident_export_cfg = IncidentExportConfig.from_cfg(api_cfg.get("incident_export", {}) or {})
+    incident_replay_cfg = IncidentReplayConfig.from_cfg(api_cfg.get("incident_replay", {}) or {})
+    incident_export_store: Optional[IncidentExportStore] = None
+    incident_api_key_store: Optional[IncidentApiKeyStore] = None
+    incident_rate_limiter: Optional[IncidentRateLimiter] = None
+    incident_replay_store: Optional[IncidentReplayStore] = None
+    incident_replay_manager: Optional[IncidentReplayJobManager] = None
+    if incident_export_cfg.enabled:
+        incident_export_store = IncidentExportStore(
+            sqlite_path=incident_export_cfg.store_path,
+            retention_days=incident_export_cfg.retention_days,
+        )
+        incident_api_key_store = IncidentApiKeyStore(sqlite_path=incident_export_cfg.key_store_path)
+        incident_rate_limiter = IncidentRateLimiter(
+            rpm=incident_export_cfg.rate_limit_rpm,
+            burst=incident_export_cfg.rate_limit_burst,
+        )
+    if incident_replay_cfg.enabled and incident_export_store is not None:
+        incident_replay_store = IncidentReplayStore(sqlite_path=incident_replay_cfg.store_path)
+        incident_replay_manager = IncidentReplayJobManager(
+            config=incident_replay_cfg,
+            replay_store=incident_replay_store,
+            incident_store=incident_export_store,
+            incident_retention_days=incident_export_cfg.retention_days,
+        )
     return ScanRuntime(
         config=resolved_config,
         projector=build_projector(resolved_config),
@@ -441,6 +501,14 @@ def _make_runtime(resolved_config: Dict[str, Any]) -> ScanRuntime:
         notification_dispatcher=notification_dispatcher,
         monitor_collector=monitor_collector,
         structured_emitter=structured_emitter,
+        incident_export_cfg=incident_export_cfg,
+        incident_export_store=incident_export_store,
+        incident_api_key_store=incident_api_key_store,
+        incident_rate_limiter=incident_rate_limiter,
+        incident_replay_cfg=incident_replay_cfg,
+        incident_replay_store=incident_replay_store,
+        incident_replay_manager=incident_replay_manager,
+        telemetry_service=telemetry_service,
     )
 
 
@@ -897,6 +965,140 @@ def _approval_internal_auth_cfg(runtime: ScanRuntime) -> Dict[str, Any]:
     approvals = cfg.get("approvals", {}) if isinstance(cfg.get("approvals", {}), dict) else {}
     internal_auth = approvals.get("internal_auth", {}) if isinstance(approvals.get("internal_auth", {}), dict) else {}
     return dict(internal_auth or {})
+
+
+def _incident_export_enabled(runtime: ScanRuntime) -> bool:
+    cfg = getattr(runtime, "incident_export_cfg", None)
+    return bool(cfg is not None and cfg.enabled)
+
+
+def _incident_replay_enabled(runtime: ScanRuntime) -> bool:
+    cfg = getattr(runtime, "incident_replay_cfg", None)
+    return bool(cfg is not None and cfg.enabled)
+
+
+def _incident_contract_version(runtime: ScanRuntime) -> str:
+    cfg = getattr(runtime, "incident_export_cfg", None)
+    if cfg is None:
+        return "1.0"
+    return str(cfg.contract_version or "1.0")
+
+
+def _incident_required_scope(runtime: ScanRuntime) -> str:
+    api_cfg = runtime.config.get("api", {}) if isinstance(runtime.config, dict) else {}
+    ie_cfg = api_cfg.get("incident_export", {}) if isinstance(api_cfg.get("incident_export", {}), dict) else {}
+    auth_cfg = ie_cfg.get("auth", {}) if isinstance(ie_cfg.get("auth", {}), dict) else {}
+    return str(auth_cfg.get("required_scope", "incidents:read")).strip() or "incidents:read"
+
+
+def _incident_replay_scopes(runtime: ScanRuntime) -> Tuple[str, str]:
+    cfg = getattr(runtime, "incident_replay_cfg", None)
+    if cfg is None:
+        return ("incidents:replay:read", "incidents:replay:raw")
+    return (str(cfg.required_scope_read), str(cfg.required_scope_raw))
+
+
+def _problem_payload(*, status_code: int, title: str, detail: str, instance: str) -> Dict[str, Any]:
+    return {
+        "type": "about:blank",
+        "title": str(title),
+        "status": int(status_code),
+        "detail": str(detail),
+        "instance": str(instance),
+    }
+
+
+def _incident_require_scope(
+    *,
+    runtime: ScanRuntime,
+    provided_key: Optional[str],
+    required_scope: str,
+) -> Tuple[str, List[str], IncidentApiKeyRecord]:
+    if not _incident_export_enabled(runtime):
+        raise HTTPException(status_code=404, detail="incident_export_disabled")
+    store = runtime.incident_api_key_store
+    if store is None:
+        raise HTTPException(status_code=503, detail="incident_key_store_unavailable")
+    raw = str(provided_key or "").strip()
+    if not raw:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    record = store.resolve_key(provided_key=raw)
+    if record is None:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    scopes = [str(x).strip() for x in list(record.scopes) if str(x).strip()]
+    if str(required_scope).strip() not in set(scopes):
+        raise HTTPException(status_code=403, detail="forbidden_scope")
+    return str(record.key_id), scopes, record
+
+
+def _incident_require_scopes(
+    *,
+    runtime: ScanRuntime,
+    provided_key: Optional[str],
+    required_scopes: Sequence[str],
+    feature: str,
+) -> Tuple[str, List[str], IncidentApiKeyRecord]:
+    if feature == "replay":
+        if not _incident_replay_enabled(runtime):
+            raise HTTPException(status_code=404, detail="incident_replay_disabled")
+    else:
+        if not _incident_export_enabled(runtime):
+            raise HTTPException(status_code=404, detail="incident_export_disabled")
+    store = runtime.incident_api_key_store
+    if store is None:
+        raise HTTPException(status_code=503, detail="incident_key_store_unavailable")
+    raw = str(provided_key or "").strip()
+    if not raw:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    record = store.resolve_key(provided_key=raw)
+    if record is None:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    scopes = [str(x).strip() for x in list(record.scopes) if str(x).strip()]
+    scope_set = set(scopes)
+    required = [str(x).strip() for x in list(required_scopes) if str(x).strip()]
+    for req in required:
+        if req not in scope_set:
+            raise HTTPException(status_code=403, detail="forbidden_scope")
+    return str(record.key_id), scopes, record
+
+
+def _incident_rate_limit_headers(runtime: ScanRuntime, *, key_id: str) -> Tuple[Dict[str, str], bool]:
+    limiter = runtime.incident_rate_limiter
+    if limiter is None:
+        return ({}, True)
+    allowed, remaining, reset_epoch = limiter.check(key_ref=str(key_id))
+    headers = {
+        "X-RateLimit-Remaining": str(int(remaining)),
+        "X-RateLimit-Reset": str(int(reset_epoch)),
+    }
+    return headers, bool(allowed)
+
+
+def _replay_access_log(
+    *,
+    runtime: ScanRuntime,
+    key_id: str,
+    endpoint: str,
+    status_code: int,
+    ip: str,
+    incident_id: Optional[str],
+    job_id: Optional[str],
+    scope: str,
+    action: str,
+) -> None:
+    store = runtime.incident_replay_store
+    if store is None:
+        return
+    store.log_access(
+        key_hash=key_fingerprint(key_id),
+        endpoint=endpoint,
+        status_code=int(status_code),
+        ip=str(ip),
+        incident_id=incident_id,
+        job_id=job_id,
+        scope=str(scope),
+        action=str(action),
+    )
 
 
 def _build_api_risk_event(
@@ -1508,10 +1710,35 @@ def _scan_request(
         payload["incident_artifact_id"] = str(incident_artifact.get("incident_artifact_id", ""))
         payload["incident_artifact"] = incident_artifact
 
+    if _incident_export_enabled(runtime):
+        store = runtime.incident_export_store
+        if store is not None:
+            try:
+                incident_record = build_incident_record_from_scan(
+                    payload=payload,
+                    parsed=parsed,
+                    environment=(
+                        str(
+                            (
+                                (runtime.incident_export_cfg.default_env if runtime.incident_export_cfg is not None else "staging")
+                            )
+                        )
+                    ),
+                    runtime_mode=str(runtime_mode),
+                )
+                payload["incident_export_id"] = str(incident_record.get("incident_id", ""))
+                store.insert_record(incident_record)
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.warning("incident_export_store_write_failed: %s", exc)
+
     dispatcher = runtime.notification_dispatcher
     notifications_enabled = bool(_notifications_cfg(runtime).get("enabled", False))
     if notifications_enabled and dispatcher is not None:
-        fallback_active = not bool(getattr(runtime.projector, "semantic_active", True))
+        semantic_fallback = not bool(getattr(runtime.projector, "semantic_active", True))
+        api_status_fn = getattr(runtime.projector, "api_perception_status", None)
+        api_status = api_status_fn() if callable(api_status_fn) else {}
+        api_fallback = bool((api_status or {}).get("llm_fallback_active", False))
+        fallback_active = bool(semantic_fallback or api_fallback)
         risk_event = _build_api_risk_event(payload=payload, parsed=parsed, fallback_active=fallback_active)
         dispatcher.emit_risk_event(risk_event)
         action_types = [str(x) for x in list((((payload.get("policy_trace", {}) or {}).get("action_types", [])) or []))]
@@ -1540,6 +1767,40 @@ def _scan_request(
             payload["approval_id"] = str(approval_id)
             payload["approval_status"] = str(approval_status)
         payload["notification_metrics"] = dispatcher.metrics_snapshot()
+
+    telemetry = getattr(runtime, "telemetry_service", None)
+    if telemetry is not None:
+        api_status_fn = getattr(runtime.projector, "api_perception_status", None)
+        api_status = api_status_fn() if callable(api_status_fn) else {}
+        fallback_active = (not bool(getattr(runtime.projector, "semantic_active", True))) or bool(
+            (api_status or {}).get("llm_fallback_active", False)
+        )
+        fallback_level = str((api_status or {}).get("fallback_level", "none") or "none")
+        orchestrator_cfg = ((((runtime.config.get("projector", {}) or {}).get("api_perception", {}) or {}).get("orchestrator", {}) or {}))
+        module_flags = {
+            "orchestrator": bool(orchestrator_cfg.get("enabled", False)),
+            "incident_export": bool(_incident_export_enabled(runtime)),
+            "incident_replay": bool(_incident_replay_enabled(runtime)),
+            "monitoring": bool((runtime.config.get("monitoring", {}) or {}).get("enabled", False)),
+            "notifications": bool(notifications_enabled),
+        }
+        telemetry.emit_event(
+            build_telemetry_event(
+                surface="api",
+                control_outcome=str(control_outcome),
+                severity=str(severity),
+                walls_triggered=list(walls_triggered),
+                reason_codes=list(reasons_sorted),
+                action_types=list(action_types),
+                risk_score=float(risk_score) / 100.0,
+                fallback_active=bool(fallback_active),
+                fallback_level=str(fallback_level),
+                accumulation_steps=int(step_result.step),
+                provenance_type=str(source_type),
+                module_flags=module_flags,
+                fp_reported=False,
+            )
+        )
 
     att, att_reason = _attestation_block(response_wo_attestation=payload, runtime=runtime)
     if att is not None:
@@ -1577,6 +1838,20 @@ def create_app(*, resolved_config: Optional[Dict[str, Any]] = None, profile: str
     app = FastAPI(title="Omega Attachment Scan API", version="1.0")
     app.state.scan_runtime = _make_runtime(cfg)
     runtime: ScanRuntime = app.state.scan_runtime
+    if _incident_export_enabled(runtime):
+        origins = (
+            list(runtime.incident_export_cfg.cors_allowed_origins)
+            if runtime.incident_export_cfg is not None
+            else []
+        )
+        if origins:
+            app.add_middleware(
+                CORSMiddleware,
+                allow_origins=origins,
+                allow_credentials=False,
+                allow_methods=["GET", "POST"],
+                allow_headers=["X-Omega-API-Key"],
+            )
     app.state.startup_summary = run_startup_notifications(
         config=runtime.config,
         profile=str(profile),
@@ -1588,6 +1863,8 @@ def create_app(*, resolved_config: Optional[Dict[str, Any]] = None, profile: str
     @app.on_event("shutdown")
     async def shutdown_event() -> None:
         runtime: ScanRuntime = app.state.scan_runtime
+        if runtime.telemetry_service is not None:
+            runtime.telemetry_service.close()
         if runtime.notification_dispatcher is not None:
             runtime.notification_dispatcher.close()
 
@@ -1620,11 +1897,464 @@ def create_app(*, resolved_config: Optional[Dict[str, Any]] = None, profile: str
                     ),
                 )
             )
+        path = str(request.url.path)
+        if path.startswith("/v1/incidents") or path.startswith("/v1/replay/") or path == "/v1/health":
+            if isinstance(exc.detail, dict):
+                detail_dict = dict(exc.detail)
+                if {"type", "title", "status", "detail", "instance"} <= set(detail_dict.keys()):
+                    return JSONResponse(status_code=int(exc.status_code), content=detail_dict)
+            payload = _problem_payload(
+                status_code=int(exc.status_code),
+                title="Request Failed",
+                detail=str(exc.detail),
+                instance=path,
+            )
+            return JSONResponse(status_code=int(exc.status_code), content=payload)
         return JSONResponse(status_code=int(exc.status_code), content={"detail": exc.detail})
 
     @app.get("/healthz")
     async def healthz() -> Dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/v1/health")
+    async def incident_export_health() -> Dict[str, Any]:
+        runtime: ScanRuntime = app.state.scan_runtime
+        return {
+            "status": "ok",
+            "contract_version": _incident_contract_version(runtime),
+            "incident_export": {
+                "enabled": bool(_incident_export_enabled(runtime)),
+                "store": (
+                    runtime.incident_export_store.health_snapshot()
+                    if runtime.incident_export_store is not None
+                    else {"enabled": False}
+                ),
+            },
+            "incident_replay": {
+                "enabled": bool(_incident_replay_enabled(runtime)),
+                "store": (
+                    {
+                        "enabled": True,
+                        "sqlite_path": str(runtime.incident_replay_store.sqlite_path),
+                    }
+                    if runtime.incident_replay_store is not None
+                    else {"enabled": False}
+                ),
+            },
+        }
+
+    @app.get("/v1/incidents", response_model=IncidentListResponse)
+    async def list_incidents(
+        request: Request,
+        response: Response,
+        limit: int = 100,
+        cursor: Optional[str] = None,
+        after: Optional[str] = None,
+        before: Optional[str] = None,
+        severity: Optional[str] = None,
+        status: Optional[str] = None,
+        attack_type: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        environment: Optional[str] = None,
+        source_type: Optional[str] = None,
+        action_taken: Optional[str] = None,
+        x_omega_api_key: Optional[str] = Header(default=None, alias="X-Omega-API-Key"),
+    ) -> Dict[str, Any]:
+        runtime: ScanRuntime = app.state.scan_runtime
+        _enforce_transport_security(request=request, security=runtime.security)
+        key_id, _scopes, _record = _incident_require_scope(
+            runtime=runtime,
+            provided_key=x_omega_api_key,
+            required_scope=_incident_required_scope(runtime),
+        )
+        headers, allowed = _incident_rate_limit_headers(runtime, key_id=key_id)
+        for key, value in headers.items():
+            response.headers[key] = value
+        if not allowed:
+            raise HTTPException(
+                status_code=429,
+                detail=_problem_payload(
+                    status_code=429,
+                    title="Too Many Requests",
+                    detail="rate_limit_exceeded",
+                    instance=str(request.url.path),
+                ),
+            )
+        store = runtime.incident_export_store
+        if store is None:
+            raise HTTPException(
+                status_code=503,
+                detail=_problem_payload(
+                    status_code=503,
+                    title="Service Unavailable",
+                    detail="incident_store_unavailable",
+                    instance=str(request.url.path),
+                ),
+            )
+        data, has_more, next_cursor, total = store.list_incidents(
+            limit=limit,
+            cursor=cursor,
+            after=after,
+            before=before,
+            filters={
+                "severity": str(severity or ""),
+                "status": str(status or ""),
+                "attack_type": str(attack_type or ""),
+                "agent_id": str(agent_id or ""),
+                "environment": str(environment or ""),
+                "source_type": str(source_type or ""),
+                "action_taken": str(action_taken or ""),
+            },
+        )
+        LOGGER.info(
+            "%s",
+            json.dumps(
+                incident_access_log_record(
+                    key_hash=key_fingerprint(key_id),
+                    endpoint=str(request.url.path),
+                    status_code=200,
+                    ip=str(getattr(request.client, "host", "") or ""),
+                ),
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+        )
+        return {
+            "data": data,
+            "pagination": {
+                "has_more": bool(has_more),
+                "next_cursor": next_cursor,
+                "total_in_range": int(total),
+            },
+        }
+
+    @app.get("/v1/incidents/{incident_id}", response_model=IncidentHeavyItem)
+    async def get_incident_detail(
+        request: Request,
+        response: Response,
+        incident_id: str,
+        x_omega_api_key: Optional[str] = Header(default=None, alias="X-Omega-API-Key"),
+    ) -> Dict[str, Any]:
+        runtime: ScanRuntime = app.state.scan_runtime
+        _enforce_transport_security(request=request, security=runtime.security)
+        key_id, _scopes, _record = _incident_require_scope(
+            runtime=runtime,
+            provided_key=x_omega_api_key,
+            required_scope=_incident_required_scope(runtime),
+        )
+        headers, allowed = _incident_rate_limit_headers(runtime, key_id=key_id)
+        for key, value in headers.items():
+            response.headers[key] = value
+        if not allowed:
+            raise HTTPException(
+                status_code=429,
+                detail=_problem_payload(
+                    status_code=429,
+                    title="Too Many Requests",
+                    detail="rate_limit_exceeded",
+                    instance=str(request.url.path),
+                ),
+            )
+        store = runtime.incident_export_store
+        if store is None:
+            raise HTTPException(
+                status_code=503,
+                detail=_problem_payload(
+                    status_code=503,
+                    title="Service Unavailable",
+                    detail="incident_store_unavailable",
+                    instance=str(request.url.path),
+                ),
+            )
+        row = store.get_incident(incident_id=str(incident_id))
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail=_problem_payload(
+                    status_code=404,
+                    title="Not Found",
+                    detail="incident_not_found",
+                    instance=str(request.url.path),
+                ),
+            )
+        LOGGER.info(
+            "%s",
+            json.dumps(
+                incident_access_log_record(
+                    key_hash=key_fingerprint(key_id),
+                    endpoint=str(request.url.path),
+                    status_code=200,
+                    ip=str(getattr(request.client, "host", "") or ""),
+                ),
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+        )
+        return row
+
+    @app.post(
+        "/v1/incidents/{incident_id}/replay/generate",
+        response_model=ReplayGenerateResponse,
+        status_code=202,
+    )
+    async def generate_incident_replay(
+        request: Request,
+        response: Response,
+        incident_id: str,
+        body: ReplayGenerateRequest,
+        x_omega_api_key: Optional[str] = Header(default=None, alias="X-Omega-API-Key"),
+    ) -> Dict[str, Any]:
+        runtime: ScanRuntime = app.state.scan_runtime
+        _enforce_transport_security(request=request, security=runtime.security)
+        replay_cfg = runtime.incident_replay_cfg
+        if replay_cfg is None or not _incident_replay_enabled(runtime):
+            raise HTTPException(status_code=404, detail="incident_replay_disabled")
+        scope_read, scope_raw = _incident_replay_scopes(runtime)
+        required_scopes = [scope_read]
+        if bool(body.include_raw_context):
+            required_scopes.append(scope_raw)
+        key_id, _scopes, _record = _incident_require_scopes(
+            runtime=runtime,
+            provided_key=x_omega_api_key,
+            required_scopes=required_scopes,
+            feature="replay",
+        )
+        headers, allowed = _incident_rate_limit_headers(runtime, key_id=key_id)
+        for key, value in headers.items():
+            response.headers[key] = value
+        if not allowed:
+            raise HTTPException(
+                status_code=429,
+                detail=_problem_payload(
+                    status_code=429,
+                    title="Too Many Requests",
+                    detail="rate_limit_exceeded",
+                    instance=str(request.url.path),
+                ),
+            )
+        manager = runtime.incident_replay_manager
+        store = runtime.incident_replay_store
+        if manager is None or store is None:
+            raise HTTPException(
+                status_code=503,
+                detail=_problem_payload(
+                    status_code=503,
+                    title="Service Unavailable",
+                    detail="incident_replay_unavailable",
+                    instance=str(request.url.path),
+                ),
+            )
+        retention_state = manager.incident_retention_status(incident_id=str(incident_id))
+        if retention_state == "expired":
+            raise HTTPException(
+                status_code=410,
+                detail=_problem_payload(
+                    status_code=410,
+                    title="Gone",
+                    detail="incident_out_of_retention",
+                    instance=str(request.url.path),
+                ),
+            )
+        if retention_state == "missing":
+            raise HTTPException(
+                status_code=404,
+                detail=_problem_payload(
+                    status_code=404,
+                    title="Not Found",
+                    detail="incident_not_found",
+                    instance=str(request.url.path),
+                ),
+            )
+        max_steps = min(int(body.max_steps), int(replay_cfg.max_steps))
+        job = store.create_job(
+            incident_id=str(incident_id),
+            key_id=str(key_id),
+            include_raw_context=bool(body.include_raw_context),
+            redact_sensitive=bool(body.redact_sensitive),
+            max_steps=max_steps,
+            out_format=str(body.format),
+            job_ttl_hours=int(replay_cfg.job_ttl_hours),
+        )
+        manager.submit(job_id=str(job.get("job_id", "")))
+        _replay_access_log(
+            runtime=runtime,
+            key_id=str(key_id),
+            endpoint=str(request.url.path),
+            status_code=202,
+            ip=str(getattr(request.client, "host", "") or ""),
+            incident_id=str(incident_id),
+            job_id=str(job.get("job_id", "")),
+            scope="incidents:replay:generate",
+            action="generate",
+        )
+        return {"job_id": str(job.get("job_id", "")), "status": "pending"}
+
+    @app.get("/v1/replay/jobs/{job_id}", response_model=ReplayJobResponse)
+    async def replay_job_status(
+        request: Request,
+        response: Response,
+        job_id: str,
+        x_omega_api_key: Optional[str] = Header(default=None, alias="X-Omega-API-Key"),
+    ) -> Dict[str, Any]:
+        runtime: ScanRuntime = app.state.scan_runtime
+        _enforce_transport_security(request=request, security=runtime.security)
+        scope_read, _scope_raw = _incident_replay_scopes(runtime)
+        key_id, _scopes, _record = _incident_require_scopes(
+            runtime=runtime,
+            provided_key=x_omega_api_key,
+            required_scopes=[scope_read],
+            feature="replay",
+        )
+        headers, allowed = _incident_rate_limit_headers(runtime, key_id=key_id)
+        for key, value in headers.items():
+            response.headers[key] = value
+        if not allowed:
+            raise HTTPException(
+                status_code=429,
+                detail=_problem_payload(
+                    status_code=429,
+                    title="Too Many Requests",
+                    detail="rate_limit_exceeded",
+                    instance=str(request.url.path),
+                ),
+            )
+        store = runtime.incident_replay_store
+        if store is None:
+            raise HTTPException(
+                status_code=503,
+                detail=_problem_payload(
+                    status_code=503,
+                    title="Service Unavailable",
+                    detail="incident_replay_unavailable",
+                    instance=str(request.url.path),
+                ),
+            )
+        row = store.get_job(job_id=str(job_id))
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail=_problem_payload(
+                    status_code=404,
+                    title="Not Found",
+                    detail="replay_job_not_found",
+                    instance=str(request.url.path),
+                ),
+            )
+        if str(row.get("requested_by_key_id", "")) != str(key_id):
+            raise HTTPException(
+                status_code=403,
+                detail=_problem_payload(
+                    status_code=403,
+                    title="Forbidden",
+                    detail="forbidden_scope",
+                    instance=str(request.url.path),
+                ),
+            )
+        download_url: Optional[str] = None
+        expires_at: Optional[str] = None
+        if str(row.get("status", "")) == "completed":
+            token = str(row.get("download_token", "") or "").strip()
+            if token:
+                download_url = f"/v1/replay/downloads/{token}"
+                expires_at = str(row.get("download_expires_at", "") or "")
+        _replay_access_log(
+            runtime=runtime,
+            key_id=str(key_id),
+            endpoint=str(request.url.path),
+            status_code=200,
+            ip=str(getattr(request.client, "host", "") or ""),
+            incident_id=str(row.get("incident_id", "")),
+            job_id=str(job_id),
+            scope="incidents:replay:read",
+            action="status",
+        )
+        return {
+            "job_id": str(row.get("job_id", "")),
+            "incident_id": str(row.get("incident_id", "")),
+            "status": str(row.get("status", "pending")),
+            "created_at": str(row.get("created_at", "")),
+            "updated_at": str(row.get("updated_at", "")),
+            "download_url": download_url,
+            "expires_at": expires_at,
+            "error": (str(row.get("error", "")) if row.get("error") is not None else None),
+        }
+
+    @app.get("/v1/replay/downloads/{token}")
+    async def replay_download(
+        request: Request,
+        response: Response,
+        token: str,
+        x_omega_api_key: Optional[str] = Header(default=None, alias="X-Omega-API-Key"),
+    ) -> Dict[str, Any]:
+        runtime: ScanRuntime = app.state.scan_runtime
+        _enforce_transport_security(request=request, security=runtime.security)
+        scope_read, _scope_raw = _incident_replay_scopes(runtime)
+        key_id, _scopes, _record = _incident_require_scopes(
+            runtime=runtime,
+            provided_key=x_omega_api_key,
+            required_scopes=[scope_read],
+            feature="replay",
+        )
+        headers, allowed = _incident_rate_limit_headers(runtime, key_id=key_id)
+        for key, value in headers.items():
+            response.headers[key] = value
+        if not allowed:
+            raise HTTPException(
+                status_code=429,
+                detail=_problem_payload(
+                    status_code=429,
+                    title="Too Many Requests",
+                    detail="rate_limit_exceeded",
+                    instance=str(request.url.path),
+                ),
+            )
+        store = runtime.incident_replay_store
+        manager = runtime.incident_replay_manager
+        if store is None or manager is None:
+            raise HTTPException(
+                status_code=503,
+                detail=_problem_payload(
+                    status_code=503,
+                    title="Service Unavailable",
+                    detail="incident_replay_unavailable",
+                    instance=str(request.url.path),
+                ),
+            )
+        token_row = store.consume_download_token(token=str(token), key_id=str(key_id))
+        if token_row is None:
+            raise HTTPException(
+                status_code=404,
+                detail=_problem_payload(
+                    status_code=404,
+                    title="Not Found",
+                    detail="replay_download_not_found_or_expired",
+                    instance=str(request.url.path),
+                ),
+            )
+        try:
+            payload = manager.decrypt_package(package_path=str(token_row.get("package_path", "")))
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=500,
+                detail=_problem_payload(
+                    status_code=500,
+                    title="Internal Server Error",
+                    detail=f"replay_download_decrypt_failed:{exc}",
+                    instance=str(request.url.path),
+                ),
+            ) from exc
+        _replay_access_log(
+            runtime=runtime,
+            key_id=str(key_id),
+            endpoint=str(request.url.path),
+            status_code=200,
+            ip=str(getattr(request.client, "host", "") or ""),
+            incident_id=None,
+            job_id=str(token_row.get("job_id", "")),
+            scope="incidents:replay:read",
+            action="download",
+        )
+        return payload
 
     @app.get("/v1/monitor/health")
     async def monitor_health() -> Dict[str, Any]:

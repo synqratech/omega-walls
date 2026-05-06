@@ -11,4 +11,7 @@ def test_framework_contract_workflow_exists_and_has_required_steps() -> None:
     assert "python-version: \"3.13\"" in text
     assert "node-version: \"20\"" in text
     assert "run_framework_matrix_stand.py --layer contract --profile dev --strict" in text
-
+    assert "Validate integration package contract" in text
+    assert "OMEGA_RUN_INTEGRATION_EXEC_TESTS: \"1\"" in text
+    assert "OMEGA_RUN_OPENCLAW_LAUNCHER: \"1\"" in text
+    assert "tests/test_docs_integrations_contract.py" in text

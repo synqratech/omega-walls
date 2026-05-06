@@ -31,6 +31,8 @@ class OmegaCrewAIGuard:
         api_model: Optional[str] = "gpt-5.4-mini",
         session_id_getter: Optional[Callable[..., Optional[str]]] = None,
         actor_id_getter: Optional[Callable[..., Optional[str]]] = None,
+        block_contract_hook: Optional[Callable[[Dict[str, Any]], None]] = None,
+        security_metadata_hook: Optional[Callable[[Dict[str, Any]], None]] = None,
         max_chars: int = 8000,
         cli_overrides: Optional[Mapping[str, Any]] = None,
         config_dir: Optional[str] = None,
@@ -39,7 +41,11 @@ class OmegaCrewAIGuard:
     ) -> None:
         self._session_id_getter = session_id_getter
         self._actor_id_getter = actor_id_getter
+        self._block_contract_hook = block_contract_hook
+        self._security_metadata_hook = security_metadata_hook
         self._max_chars = max(256, int(max_chars))
+        self._last_block_contract: Optional[Dict[str, Any]] = None
+        self._last_security_metadata: Optional[Dict[str, Any]] = None
         self._runtime = runtime or OmegaAdapterRuntime(
             profile=profile,
             projector_mode=projector_mode,
@@ -80,7 +86,9 @@ class OmegaCrewAIGuard:
         text = self._normalize_messages_text(messages=getattr(context, "messages", None))
         ctx = self._build_session_context(context=context, kwargs={})
         decision = self._runtime.check_model_input(text, ctx)
+        self._emit_security_metadata(decision=decision, phase="model_input")
         if self._should_block_decision(decision):
+            self._emit_block_contract(self._build_block_contract_from_decision(decision))
             raise OmegaBlockedError(
                 f"Omega blocked CrewAI LLM call (control_outcome={decision.control_outcome}, off={decision.off})",
                 decision=decision,
@@ -92,7 +100,9 @@ class OmegaCrewAIGuard:
         tool_input_dict = dict(tool_input) if isinstance(tool_input, Mapping) else {"raw": str(tool_input)}
         ctx = self._build_session_context(context=context, kwargs={})
         gate = self._runtime.check_tool_call(tool_name=tool_name, tool_args=tool_input_dict, ctx=ctx)
+        self._emit_security_metadata(decision=gate.decision_ref, phase="tool_precheck")
         if not gate.allowed:
+            self._emit_block_contract(self._build_block_contract_from_tool_gate(gate))
             raise OmegaToolBlockedError(
                 f"Omega blocked CrewAI tool call '{tool_name}' (reason={gate.reason}, mode={gate.mode})",
                 gate_decision=gate,
@@ -108,7 +118,9 @@ class OmegaCrewAIGuard:
 
             async def _wrapped_async(*args: Any, **kwargs: Any) -> Any:
                 gate = self._gate_tool_call(tool_name=str(tool_name), args=args, kwargs=kwargs, runtime_context=None)
+                self._emit_security_metadata(decision=gate.decision_ref, phase="tool_precheck")
                 if not gate.allowed:
+                    self._emit_block_contract(self._build_block_contract_from_tool_gate(gate))
                     raise OmegaToolBlockedError(
                         f"Omega blocked tool call '{tool_name}' (reason={gate.reason}, mode={gate.mode})",
                         gate_decision=gate,
@@ -119,7 +131,9 @@ class OmegaCrewAIGuard:
 
         def _wrapped_sync(*args: Any, **kwargs: Any) -> Any:
             gate = self._gate_tool_call(tool_name=str(tool_name), args=args, kwargs=kwargs, runtime_context=None)
+            self._emit_security_metadata(decision=gate.decision_ref, phase="tool_precheck")
             if not gate.allowed:
+                self._emit_block_contract(self._build_block_contract_from_tool_gate(gate))
                 raise OmegaToolBlockedError(
                     f"Omega blocked tool call '{tool_name}' (reason={gate.reason}, mode={gate.mode})",
                     gate_decision=gate,
@@ -185,6 +199,76 @@ class OmegaCrewAIGuard:
             "kwargs": {str(k): str(v) for k, v in dict(kwargs).items()},
         }
         return self._runtime.check_tool_call(tool_name=str(tool_name), tool_args=tool_args, ctx=ctx)
+
+    def get_last_block_contract(self) -> Optional[Dict[str, Any]]:
+        return dict(self._last_block_contract) if isinstance(self._last_block_contract, dict) else None
+
+    def get_last_security_metadata(self) -> Optional[Dict[str, Any]]:
+        return dict(self._last_security_metadata) if isinstance(self._last_security_metadata, dict) else None
+
+    def _emit_block_contract(self, payload: Dict[str, Any]) -> None:
+        self._last_block_contract = dict(payload)
+        if callable(self._block_contract_hook):
+            self._block_contract_hook(dict(payload))
+
+    def _emit_security_metadata(
+        self,
+        *,
+        decision: AdapterDecision,
+        phase: str,
+        extra: Optional[Mapping[str, Any]] = None,
+    ) -> None:
+        runtime_builder = getattr(self._runtime, "build_security_metadata", None)
+        if callable(runtime_builder):
+            payload = runtime_builder(decision, phase=phase, extra=extra)
+        else:
+            payload = {
+                "phase": str(phase),
+                "mode": "deny" if bool(decision.off) else "allow",
+                "risk": getattr(decision, "risk_score", None),
+                "action": str(getattr(decision, "control_outcome", "ALLOW")),
+                "trace_id": str(getattr(decision, "trace_id", "") or ""),
+                "decision_id": str(getattr(decision, "decision_id", "") or ""),
+                "llm_fallback_active": None,
+                "fallback_level": None,
+            }
+            if isinstance(extra, Mapping):
+                payload.update(dict(extra))
+        self._last_security_metadata = dict(payload)
+        if callable(self._security_metadata_hook):
+            self._security_metadata_hook(dict(payload))
+
+    def _build_block_contract_from_decision(self, decision: AdapterDecision) -> Dict[str, Any]:
+        runtime_builder = getattr(self._runtime, "build_block_contract_from_decision", None)
+        if callable(runtime_builder):
+            return dict(runtime_builder(decision))
+        reason = str(decision.control_outcome or "BLOCK")
+        if decision.reason_codes:
+            reason = str(decision.reason_codes[0])
+        return {
+            "action": str(decision.control_outcome or "BLOCK"),
+            "reason": reason,
+            "policy_id": None,
+            "fallback_hint": None,
+            "incident_id": None,
+            "trace_id": str(decision.trace_id or ""),
+            "decision_id": str(decision.decision_id or ""),
+        }
+
+    def _build_block_contract_from_tool_gate(self, gate_decision: Any) -> Dict[str, Any]:
+        runtime_builder = getattr(self._runtime, "build_block_contract_from_tool_gate", None)
+        if callable(runtime_builder):
+            return dict(runtime_builder(gate_decision))
+        decision = gate_decision.decision_ref
+        return {
+            "action": str(getattr(decision, "control_outcome", "TOOL_FREEZE")),
+            "reason": str(getattr(gate_decision, "reason", "TOOL_BLOCKED")),
+            "policy_id": None,
+            "fallback_hint": None,
+            "incident_id": None,
+            "trace_id": str(getattr(decision, "trace_id", "") or ""),
+            "decision_id": str(getattr(decision, "decision_id", "") or ""),
+        }
 
     @staticmethod
     def _call_optional_getter(

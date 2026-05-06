@@ -42,7 +42,10 @@
         "freeze_active": {"type": "boolean"},
         "control_outcome": {"type": "string"},
         "validation_status": {"type": "string"},
-        "validation_reason": {"type": ["string", "null"]}
+        "validation_reason": {"type": ["string", "null"]},
+        "capability_class": {"type": ["string", "null"]},
+        "risk_level": {"type": ["string", "null"]},
+        "approval_required": {"type": "boolean"}
       }
     },
     "capability": {
@@ -50,7 +53,9 @@
       "required": ["mode", "requires_human_approval"],
       "properties": {
         "mode": {"type": "string"},
-        "requires_human_approval": {"type": "boolean"}
+        "requires_human_approval": {"type": "boolean"},
+        "capability_class": {"type": "string"},
+        "risk_level": {"type": "string"}
       }
     },
     "approval": {

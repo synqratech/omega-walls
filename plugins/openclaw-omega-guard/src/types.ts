@@ -50,6 +50,8 @@ export interface OmegaScanResponse {
   approval_id?: string;
   approval_status?: string;
   incident_artifact_id?: string;
+  policy_id?: string;
+  fallback_hint?: string;
   risk_score?: number;
   monitor?: {
     false_positive_hint?: string;
@@ -63,5 +65,7 @@ export interface GuardDecision {
   traceId?: string;
   decisionId?: string;
   incidentArtifactId?: string;
+  policyId?: string;
+  fallbackHint?: string;
   controlOutcome?: string;
 }

@@ -14,6 +14,8 @@ if str(ROOT) not in sys.path:
 from omega.adapters import OmegaBlockedError, OmegaToolBlockedError
 from omega.integrations.langchain_guard import OmegaLangChainGuard
 
+_REQUIRED_BLOCK_FIELDS = {"action", "reason", "trace_id", "decision_id"}
+
 
 def _build_request(tool_name: str, args: Dict[str, Any], thread_id: str) -> Any:
     return SimpleNamespace(
@@ -34,6 +36,7 @@ def main() -> int:
 
     failures: list[str] = []
     reports: list[dict[str, Any]] = []
+    structured_block_contract_ok = True
 
     # Scenario 1: benign model input passes
     try:
@@ -58,6 +61,10 @@ def main() -> int:
         guard._before_model_impl(state=attack_state, runtime=None)  # noqa: SLF001 - smoke contract validation
         failures.append("attack_input: expected OmegaBlockedError, got success")
     except OmegaBlockedError as exc:
+        contract = exc.to_structured_payload()
+        if not _REQUIRED_BLOCK_FIELDS.issubset(set(contract.keys())):
+            structured_block_contract_ok = False
+            failures.append("attack_input: missing required structured block fields")
         blocked_seen = True
         reports.append(
             {
@@ -65,6 +72,7 @@ def main() -> int:
                 "status": "blocked",
                 "control_outcome": exc.decision.control_outcome,
                 "reason_codes": list(exc.decision.reason_codes),
+                "block_contract": contract,
             }
         )
 
@@ -78,6 +86,10 @@ def main() -> int:
         )
         failures.append("blocked_tool: expected OmegaToolBlockedError, got success")
     except OmegaToolBlockedError as exc:
+        contract = exc.to_structured_payload()
+        if not _REQUIRED_BLOCK_FIELDS.issubset(set(contract.keys())):
+            structured_block_contract_ok = False
+            failures.append("blocked_tool: missing required structured block fields")
         blocked_tool_seen = True
         reports.append(
             {
@@ -86,6 +98,7 @@ def main() -> int:
                 "reason": exc.gate_decision.reason,
                 "gateway_coverage": exc.gate_decision.gateway_coverage,
                 "orphan_executions": exc.gate_decision.orphan_executions,
+                "block_contract": contract,
             }
         )
 
@@ -125,6 +138,10 @@ def main() -> int:
             "orphan_executions": allow_gate.orphan_executions,
         }
     )
+    security_metadata = guard.get_last_security_metadata()
+    security_metadata_present = bool(isinstance(security_metadata, dict) and security_metadata.get("trace_id"))
+    if not security_metadata_present:
+        failures.append("allow_tool: security metadata channel missing")
 
     summary = {
         "framework": "langchain_guard",
@@ -132,6 +149,8 @@ def main() -> int:
         "blocked_tool_seen": blocked_tool_seen,
         "gateway_coverage": allow_gate.gateway_coverage,
         "orphan_executions": allow_gate.orphan_executions,
+        "structured_block_contract_ok": bool(structured_block_contract_ok),
+        "security_metadata_present": bool(security_metadata_present),
     }
     payload = {"framework": "langchain_guard", "reports": reports, "summary": summary, "failures": failures}
 
@@ -149,4 +168,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

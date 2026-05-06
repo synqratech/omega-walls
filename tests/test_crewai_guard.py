@@ -91,8 +91,10 @@ def test_before_llm_hook_blocks_attack() -> None:
         actor_id="u-1",
     )
 
-    with pytest.raises(OmegaBlockedError):
+    with pytest.raises(OmegaBlockedError) as exc_info:
         guard.before_llm_hook(context)
+    payload = exc_info.value.to_structured_payload()
+    assert payload["action"] == "OFF"
 
 
 def test_before_llm_hook_allow_path_records_session() -> None:
@@ -109,6 +111,9 @@ def test_before_llm_hook_allow_path_records_session() -> None:
     _, ctx = fake_runtime.model_calls[0]
     assert ctx.session_id == "run-42"
     assert ctx.actor_id == "usr-42"
+    security_metadata = guard.get_last_security_metadata()
+    assert isinstance(security_metadata, dict)
+    assert security_metadata.get("action") == "ALLOW"
 
 
 def test_before_tool_hook_blocked_raises_typed_error() -> None:
@@ -120,8 +125,10 @@ def test_before_tool_hook_blocked_raises_typed_error() -> None:
         session_id="cr-tool-1",
     )
 
-    with pytest.raises(OmegaToolBlockedError):
+    with pytest.raises(OmegaToolBlockedError) as exc_info:
         guard.before_tool_hook(context)
+    payload = exc_info.value.to_structured_payload()
+    assert payload["reason"] == "BLOCKED"
 
 
 def test_wrap_tool_allow_calls_once_and_strips_context_keys() -> None:
@@ -182,4 +189,3 @@ def test_default_session_actor_fallback() -> None:
     ctx = guard._build_session_context(context=SimpleNamespace(messages=[]), kwargs={})  # noqa: SLF001
     assert ctx.session_id == "omega-cr-default"
     assert ctx.actor_id == "omega-cr-default"
-

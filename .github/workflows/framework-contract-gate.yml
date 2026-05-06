@@ -4,20 +4,30 @@ on:
   pull_request:
     paths:
       - "omega/**"
+      - "integrations/**"
+      - "docs/framework_integrations_quickstart.md"
+      - "docs/framework_matrix_stand.md"
+      - "docs/openclaw_integration.md"
       - "plugins/openclaw-omega-guard/**"
       - "scripts/run_framework_*"
       - "scripts/smoke_*guard.py"
       - "tests/test_*framework*"
+      - "tests/test_docs_integrations_contract.py"
       - "tests/test_approval_resume_e2e.py"
       - "tests/test_webfetch_edge_corpus.py"
       - ".github/workflows/framework-*.yml"
   push:
     paths:
       - "omega/**"
+      - "integrations/**"
+      - "docs/framework_integrations_quickstart.md"
+      - "docs/framework_matrix_stand.md"
+      - "docs/openclaw_integration.md"
       - "plugins/openclaw-omega-guard/**"
       - "scripts/run_framework_*"
       - "scripts/smoke_*guard.py"
       - "tests/test_*framework*"
+      - "tests/test_docs_integrations_contract.py"
       - "tests/test_approval_resume_e2e.py"
       - "tests/test_webfetch_edge_corpus.py"
       - ".github/workflows/framework-*.yml"
@@ -53,6 +63,13 @@ jobs:
       - name: Run contract layer
         run: |
           python scripts/run_framework_matrix_stand.py --layer contract --profile dev --strict --artifacts-root artifacts/framework_contract_ci
+
+      - name: Validate integration package contract
+        env:
+          OMEGA_RUN_INTEGRATION_EXEC_TESTS: "1"
+          OMEGA_RUN_OPENCLAW_LAUNCHER: "1"
+        run: |
+          python -m pytest tests/test_docs_integrations_contract.py -q
 
       - name: Upload contract artifacts
         if: always()

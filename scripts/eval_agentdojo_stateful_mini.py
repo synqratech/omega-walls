@@ -138,6 +138,8 @@ def main() -> int:
     parser.add_argument("--strict-projector", action="store_true")
     parser.add_argument("--allow-api-fallback", action="store_true")
     parser.add_argument("--api-model", default=None)
+    parser.add_argument("--api-provider", default=None)
+    parser.add_argument("--api-key-env", default=None)
     parser.add_argument("--api-base-url", default=None)
     parser.add_argument("--api-timeout-sec", type=float, default=None)
     parser.add_argument("--api-retries", type=int, default=None)
@@ -171,6 +173,8 @@ def main() -> int:
         strict_projector=bool(args.strict_projector),
         require_api_adapter=(str(args.mode) == "hybrid_api" and not bool(args.allow_api_fallback)),
         api_model=(str(args.api_model) if args.api_model else None),
+        api_provider=(str(args.api_provider) if args.api_provider else None),
+        api_key_env=(str(args.api_key_env) if args.api_key_env else None),
         api_base_url=(str(args.api_base_url) if args.api_base_url else None),
         api_timeout_sec=(float(args.api_timeout_sec) if args.api_timeout_sec is not None else None),
         api_retries=(int(args.api_retries) if args.api_retries is not None else None),
@@ -186,6 +190,8 @@ def main() -> int:
         strict_projector=bool(args.strict_projector),
         require_api_adapter=(str(args.mode) == "hybrid_api" and not bool(args.allow_api_fallback)),
         api_model=(str(args.api_model) if args.api_model else None),
+        api_provider=(str(args.api_provider) if args.api_provider else None),
+        api_key_env=(str(args.api_key_env) if args.api_key_env else None),
         api_base_url=(str(args.api_base_url) if args.api_base_url else None),
         api_timeout_sec=(float(args.api_timeout_sec) if args.api_timeout_sec is not None else None),
         api_retries=(int(args.api_retries) if args.api_retries is not None else None),
@@ -260,6 +266,8 @@ def main() -> int:
             "strict_projector": bool(args.strict_projector),
             "require_api_adapter": bool(str(args.mode) == "hybrid_api" and not bool(args.allow_api_fallback)),
             "api_model": str(args.api_model) if args.api_model else None,
+            "api_provider": str(args.api_provider) if args.api_provider else None,
+            "api_key_env": str(args.api_key_env) if args.api_key_env else None,
             "api_base_url": str(args.api_base_url) if args.api_base_url else None,
             "core_runtime": core_runner.projector_status(),
             "cross_runtime": cross_runner.projector_status(),

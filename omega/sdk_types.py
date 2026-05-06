@@ -16,6 +16,12 @@ class GuardAction:
     allowlist: Optional[List[str]] = None
     horizon_steps: Optional[int] = None
     incident_packet: Optional[Dict[str, Any]] = None
+    capability_class: Optional[str] = None
+    risk_level: Optional[str] = None
+    freeze_stage: Optional[int] = None
+    stage_reason: Optional[str] = None
+    escalation_required: Optional[bool] = None
+    approval_required: Optional[bool] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

@@ -721,6 +721,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--strict-projector", action="store_true")
     parser.add_argument("--baseline-d-enable", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--api-model", default="gpt-5.4-mini")
+    parser.add_argument("--api-provider", default=None)
+    parser.add_argument("--api-key-env", default=None)
     parser.add_argument("--api-base-url", default=None)
     parser.add_argument("--api-timeout-sec", type=float, default=None)
     parser.add_argument("--api-retries", type=int, default=None)
@@ -787,6 +789,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         run_eval_argv.append("--strict-projector")
     if str(args.mode) == "hybrid_api":
         run_eval_argv.extend(["--api-model", str(args.api_model)])
+        if args.api_provider:
+            run_eval_argv.extend(["--api-provider", str(args.api_provider)])
+        if args.api_key_env:
+            run_eval_argv.extend(["--api-key-env", str(args.api_key_env)])
         if args.api_base_url:
             run_eval_argv.extend(["--api-base-url", str(args.api_base_url)])
         if args.api_timeout_sec is not None:
@@ -829,6 +835,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         support_argv.append("--strict-projector")
     if str(args.mode) == "hybrid_api":
         support_argv.extend(["--api-model", str(args.api_model)])
+        if args.api_provider:
+            support_argv.extend(["--api-provider", str(args.api_provider)])
+        if args.api_key_env:
+            support_argv.extend(["--api-key-env", str(args.api_key_env)])
         if args.api_base_url:
             support_argv.extend(["--api-base-url", str(args.api_base_url)])
         if args.api_timeout_sec is not None:
@@ -984,6 +994,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "baseline_d_effective": bool(baseline_d_effective),
             "allow_skip_baseline_d": bool(args.allow_skip_baseline_d),
             "api_model": str(args.api_model),
+            "api_provider": (str(args.api_provider) if args.api_provider else None),
+            "api_key_env": (str(args.api_key_env) if args.api_key_env else None),
             "api_base_url": (str(args.api_base_url) if args.api_base_url else None),
             "api_timeout_sec": (float(args.api_timeout_sec) if args.api_timeout_sec is not None else None),
             "api_retries": (int(args.api_retries) if args.api_retries is not None else None),

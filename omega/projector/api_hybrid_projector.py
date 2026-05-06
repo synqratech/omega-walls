@@ -16,11 +16,33 @@ from urllib import request as urlrequest
 import numpy as np
 
 from omega.interfaces.contracts_v1 import ContentItem, ProjectionEvidence, ProjectionResult, WALLS_V1
+from omega.orchestrator.provider_runtime import OrchestratorConfig, OrchestratorRuntime, ProviderCandidate
 
 WALLS = list(WALLS_V1)
 API_HYBRID_SCHEMA_V2 = "api_hybrid_v2"
 LEGACY_SCHEMA_COMPAT = "v1_compat"
 DEFAULT_CONFIDENCE = 0.5
+DEFAULT_API_PROVIDER = "openai"
+SUPPORTED_API_PROVIDERS = {"openai", "anthropic", "openai_compat"}
+
+
+def _normalize_provider(provider: str) -> str:
+    raw = str(provider or DEFAULT_API_PROVIDER).strip().lower()
+    return raw if raw in SUPPORTED_API_PROVIDERS else DEFAULT_API_PROVIDER
+
+
+def _default_base_url_for_provider(provider: str) -> str:
+    p = _normalize_provider(provider)
+    if p == "anthropic":
+        return "https://api.anthropic.com/v1"
+    return "https://api.openai.com/v1"
+
+
+def _default_api_key_env_for_provider(provider: str) -> str:
+    p = _normalize_provider(provider)
+    if p == "anthropic":
+        return "ANTHROPIC_API_KEY"
+    return "OPENAI_API_KEY"
 
 
 class APIRequestError(RuntimeError):
@@ -67,18 +89,21 @@ def _post_json(*, url: str, payload: Mapping[str, Any], headers: Mapping[str, st
     try:
         with urlrequest.urlopen(req, timeout=float(timeout_sec)) as resp:
             raw = resp.read().decode("utf-8")
+            resp_headers = {str(k).lower(): str(v) for k, v in dict(getattr(resp, "headers", {})).items()}
     except urlerror.HTTPError as exc:
         body = ""
         try:
             body = exc.read().decode("utf-8", errors="replace")
         except Exception:  # noqa: BLE001
             body = str(exc)
-        raise APIRequestError(code=int(exc.code), body=body) from exc
+        hdrs = {str(k).lower(): str(v) for k, v in dict(getattr(exc, "headers", {})).items()}
+        raise APIRequestError(code=int(exc.code), body=f"{body} | headers={json.dumps(hdrs, ensure_ascii=False)}") from exc
     except urlerror.URLError as exc:
         raise RuntimeError(f"url_error: {exc}") from exc
     parsed = json.loads(raw)
     if not isinstance(parsed, dict):
         raise ValueError("api response is not a JSON object")
+    parsed["_headers"] = resp_headers
     return parsed
 
 
@@ -201,6 +226,8 @@ def _normalize_api_payload(obj: Mapping[str, Any]) -> Dict[str, Any]:
 
 def _is_transient_api_error(err: str) -> bool:
     t = str(err or "").lower()
+    if "orchestrator_rule_only:" in t:
+        return True
     if "api_call_failed:" not in t:
         return False
     return (
@@ -216,6 +243,125 @@ def _is_transient_api_error(err: str) -> bool:
     )
 
 
+def _quota_signal_from_headers(headers: Mapping[str, Any]) -> Optional[str]:
+    if not isinstance(headers, Mapping):
+        return None
+    def _f(name: str) -> Optional[float]:
+        raw = headers.get(name)
+        if raw is None:
+            return None
+        try:
+            return float(str(raw).strip())
+        except Exception:  # noqa: BLE001
+            return None
+
+    rr = _f("x-ratelimit-remaining-requests")
+    rl = _f("x-ratelimit-limit-requests")
+    tr = _f("x-ratelimit-remaining-tokens")
+    tl = _f("x-ratelimit-limit-tokens")
+    ratios: list[float] = []
+    if rr is not None and rl is not None and rl > 0:
+        ratios.append(float(rr) / float(rl))
+    if tr is not None and tl is not None and tl > 0:
+        ratios.append(float(tr) / float(tl))
+    if ratios and min(ratios) < 0.10:
+        return "low_remaining"
+    return None
+
+
+class ProviderClient:
+    provider: str
+
+    def score_text(
+        self,
+        *,
+        text: str,
+        system_prompt: str,
+        user_prompt: str,
+        model: str,
+        timeout_sec: float,
+        retries: int,
+        metadata: Mapping[str, Any],
+    ) -> Tuple[Dict[str, Any], str]:
+        raise NotImplementedError
+
+
+@dataclass
+class OpenAIProviderClient(ProviderClient):
+    projector: "APIPerceptionProjector"
+    provider: str = "openai"
+
+    def score_text(
+        self,
+        *,
+        text: str,
+        system_prompt: str,
+        user_prompt: str,
+        model: str,
+        timeout_sec: float,
+        retries: int,
+        metadata: Mapping[str, Any],
+    ) -> Tuple[Dict[str, Any], str]:
+        _ = (model, timeout_sec, retries)
+        return self.projector._call_openai_provider_scores(
+            text=text,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            use_responses=True,
+            metadata=metadata,
+        )
+
+
+@dataclass
+class OpenAICompatProviderClient(ProviderClient):
+    projector: "APIPerceptionProjector"
+    provider: str = "openai_compat"
+
+    def score_text(
+        self,
+        *,
+        text: str,
+        system_prompt: str,
+        user_prompt: str,
+        model: str,
+        timeout_sec: float,
+        retries: int,
+        metadata: Mapping[str, Any],
+    ) -> Tuple[Dict[str, Any], str]:
+        _ = (model, timeout_sec, retries)
+        return self.projector._call_openai_provider_scores(
+            text=text,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            use_responses=False,
+            metadata=metadata,
+        )
+
+
+@dataclass
+class AnthropicProviderClient(ProviderClient):
+    projector: "APIPerceptionProjector"
+    provider: str = "anthropic"
+
+    def score_text(
+        self,
+        *,
+        text: str,
+        system_prompt: str,
+        user_prompt: str,
+        model: str,
+        timeout_sec: float,
+        retries: int,
+        metadata: Mapping[str, Any],
+    ) -> Tuple[Dict[str, Any], str]:
+        _ = (text, timeout_sec, retries)
+        return self.projector._call_anthropic_provider_scores(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            metadata=metadata,
+        )
+
+
 @dataclass
 class APIPerceptionProjector:
     config: Dict[str, Any]
@@ -225,9 +371,12 @@ class APIPerceptionProjector:
         api_cfg = projector_cfg.get("api_perception", {}) or {}
         self.enabled_mode = str(api_cfg.get("enabled", "auto")).lower()
         self.strict = bool(api_cfg.get("strict", False))
+        self.provider = _normalize_provider(str(api_cfg.get("provider", DEFAULT_API_PROVIDER)))
+        provider_options = api_cfg.get("provider_options", {})
+        self.provider_options = dict(provider_options) if isinstance(provider_options, Mapping) else {}
         self.model = str(api_cfg.get("model", "gpt-5"))
-        self.base_url = str(api_cfg.get("base_url", "https://api.openai.com/v1")).rstrip("/")
-        self.api_key_env = str(api_cfg.get("api_key_env", "OPENAI_API_KEY"))
+        self.base_url = str(api_cfg.get("base_url", _default_base_url_for_provider(self.provider))).rstrip("/")
+        self.api_key_env = str(api_cfg.get("api_key_env", _default_api_key_env_for_provider(self.provider)))
         self.timeout_sec = float(api_cfg.get("timeout_sec", 30.0))
         self.max_retries = int(api_cfg.get("max_retries", 2))
         self.backoff_sec = float(api_cfg.get("backoff_sec", 0.75))
@@ -249,6 +398,12 @@ class APIPerceptionProjector:
         self.prompt_version = str(api_cfg.get("prompt_version", "api_hybrid_v1"))
         self.cache_path = Path(str(api_cfg.get("cache_path", "artifacts/projector_api/cache.jsonl")))
         self.error_log_path = Path(str(api_cfg.get("error_log_path", "artifacts/projector_api/errors.jsonl")))
+        self.orchestrator_cfg = OrchestratorConfig.from_api_cfg(
+            api_cfg=api_cfg,
+            default_provider=self.provider,
+            default_model=self.model,
+            default_base_url=self.base_url,
+        )
         benign_task_cfg = api_cfg.get("benign_task_guard", {}) if isinstance(api_cfg.get("benign_task_guard", {}), Mapping) else {}
         marker_rows = benign_task_cfg.get("marker_phrases", []) if isinstance(benign_task_cfg.get("marker_phrases", []), list) else []
         attack_rows = benign_task_cfg.get("attack_cues", []) if isinstance(benign_task_cfg.get("attack_cues", []), list) else []
@@ -287,14 +442,24 @@ class APIPerceptionProjector:
         self._last_error: Optional[str] = None
         self._last_schema_valid: Optional[bool] = None
         self._api_key: str = ""
+        self._provider_client: ProviderClient = OpenAIProviderClient(projector=self)
         self._auth_headers: Dict[str, str] = {}
         self._responses_url: str = ""
         self._chat_url: str = ""
         self._prewarmed: bool = False
         self._transient_error_cache: Dict[str, Tuple[float, str]] = {}
         self._responses_degraded_until: float = 0.0
+        self._orchestrator: Optional[OrchestratorRuntime] = None
+        self._active_provider_id: Optional[str] = None
+        self._active_fallback_level: str = "none"
+        self._active_fallback_reason: Optional[str] = None
+        self._active_health_state: str = "healthy"
+        self._active_quota_signal: Optional[str] = None
+        self._active_llm_fallback: bool = False
 
         self._load_cache()
+        if bool(self.orchestrator_cfg.enabled):
+            self._orchestrator = OrchestratorRuntime(config=self.orchestrator_cfg, actor="projector")
         self._init_runtime()
         if self.enabled_mode == "true" and not self._active:
             raise RuntimeError(self._runtime_error or "api adapter inactive")
@@ -303,6 +468,17 @@ class APIPerceptionProjector:
         if self.enabled_mode == "false":
             self._runtime_error = "api_adapter_disabled"
             self._active = False
+            return
+        if self._orchestrator is not None:
+            self._api_key = ""
+            self._auth_headers = {}
+            self._responses_url = self.base_url + "/responses"
+            self._chat_url = self.base_url + "/chat/completions"
+            self._provider_client = self._build_provider_client()
+            self._runtime_error = None
+            self._active = True
+            if self.prewarm_on_init:
+                self._prewarm_runtime()
             return
         api_key = str(os.getenv(self.api_key_env, "")).strip()
         if not api_key:
@@ -313,17 +489,139 @@ class APIPerceptionProjector:
         self._auth_headers = {"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"}
         self._responses_url = self.base_url + "/responses"
         self._chat_url = self.base_url + "/chat/completions"
+        self._provider_client = self._build_provider_client()
         self._runtime_error = None
         self._active = True
         if self.prewarm_on_init:
             self._prewarm_runtime()
+
+    def _build_provider_client(self) -> ProviderClient:
+        provider = _normalize_provider(self.provider)
+        if provider == "anthropic":
+            return AnthropicProviderClient(projector=self)
+        if provider == "openai_compat":
+            return OpenAICompatProviderClient(projector=self)
+        return OpenAIProviderClient(projector=self)
+
+    def _status_patch_from_orchestrator(self, *, provider_id: Optional[str], fallback_level: str, fallback_reason: Optional[str], health_state: str, quota_signal: Optional[str]) -> None:
+        self._active_provider_id = str(provider_id) if provider_id else None
+        self._active_fallback_level = str(fallback_level or "none")
+        self._active_fallback_reason = str(fallback_reason) if fallback_reason else None
+        self._active_health_state = str(health_state or "healthy")
+        self._active_quota_signal = str(quota_signal) if quota_signal else None
+        self._active_llm_fallback = self._active_fallback_level in {"backup_provider", "rule_only", "fail_closed"}
+
+    def _call_candidate_scores(self, *, candidate: ProviderCandidate, api_key: str, text: str) -> Tuple[Dict[str, Any], str]:
+        prev_provider = self.provider
+        prev_base = self.base_url
+        prev_model = self.model
+        prev_key_env = self.api_key_env
+        prev_api_key = self._api_key
+        prev_headers = dict(self._auth_headers)
+        prev_responses = self._responses_url
+        prev_chat = self._chat_url
+        prev_client = self._provider_client
+        try:
+            self.provider = _normalize_provider(candidate.provider_type)
+            self.base_url = str(candidate.base_url).rstrip("/")
+            self.model = str(candidate.model)
+            self.api_key_env = f"orchestrator:{candidate.provider_id}:{candidate.key_slot}"
+            self._api_key = str(api_key)
+            self._auth_headers = {"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"}
+            self._responses_url = self.base_url + "/responses"
+            self._chat_url = self.base_url + "/chat/completions"
+            self._provider_client = self._build_provider_client()
+            return self._call_api_scores_legacy(text=text)
+        finally:
+            self.provider = prev_provider
+            self.base_url = prev_base
+            self.model = prev_model
+            self.api_key_env = prev_key_env
+            self._api_key = prev_api_key
+            self._auth_headers = prev_headers
+            self._responses_url = prev_responses
+            self._chat_url = prev_chat
+            self._provider_client = prev_client
+
+    def _call_api_scores_orchestrated(self, *, text: str) -> Tuple[Dict[str, Any], str]:
+        assert self._orchestrator is not None
+        self._active_quota_signal = None
+        route = list(self._orchestrator.resolve_route())
+        if not route:
+            raise RuntimeError("orchestrator_no_provider_route")
+        last_err: Optional[str] = None
+        for candidate in route:
+            key_raw = self._orchestrator.get_key_for_candidate(candidate=candidate)
+            if not key_raw:
+                last_err = "missing_provider_key"
+                self._orchestrator.mark_error(
+                    provider_id=str(candidate.provider_id),
+                    slot=str(candidate.key_slot),
+                    error=str(last_err),
+                    quota_signal="missing_key",
+                )
+                continue
+            # recovery probe gate: if provider is in exhausted/fallback state, do not hammer it until check window.
+            if str(candidate.key_slot) == "primary" and not self._orchestrator.should_probe_recovery(provider_id=str(candidate.provider_id)):
+                continue
+            try:
+                payload, response_id = self._call_candidate_scores(candidate=candidate, api_key=key_raw, text=text)
+                self._orchestrator.mark_success(provider_id=str(candidate.provider_id), slot=str(candidate.key_slot))
+                if str(self._active_quota_signal or "") == "low_remaining":
+                    self._orchestrator.mark_warning(
+                        provider_id=str(candidate.provider_id),
+                        slot=str(candidate.key_slot),
+                        reason="low_remaining",
+                    )
+                self._status_patch_from_orchestrator(
+                    provider_id=str(candidate.provider_id),
+                    fallback_level=("none" if str(candidate.key_slot) == "primary" else "backup_provider"),
+                    fallback_reason=None,
+                    health_state=("warning" if str(self._active_quota_signal or "") == "low_remaining" else "healthy"),
+                    quota_signal=(self._active_quota_signal if self._active_quota_signal else None),
+                )
+                return payload, response_id
+            except Exception as exc:  # noqa: BLE001
+                last_err = str(exc)
+                state = self._orchestrator.mark_error(
+                    provider_id=str(candidate.provider_id),
+                    slot=str(candidate.key_slot),
+                    error=str(last_err),
+                    quota_signal=None,
+                )
+                self._status_patch_from_orchestrator(
+                    provider_id=str(candidate.provider_id),
+                    fallback_level=str(state.get("fallback_level", "none") or "none"),
+                    fallback_reason=(str(state.get("fallback_reason")) if state.get("fallback_reason") else None),
+                    health_state=str(state.get("health_state", "warning") or "warning"),
+                    quota_signal=(str(state.get("quota_signal")) if state.get("quota_signal") else None),
+                )
+                continue
+        mode = str(self._orchestrator.effective_fallback_mode())
+        if mode == "fail_closed":
+            self._status_patch_from_orchestrator(
+                provider_id=self._active_provider_id,
+                fallback_level="fail_closed",
+                fallback_reason=(last_err or "llm_unavailable"),
+                health_state="fallback_active",
+                quota_signal=None,
+            )
+            raise RuntimeError(f"orchestrator_fail_closed:{last_err or 'llm_unavailable'}")
+        self._status_patch_from_orchestrator(
+            provider_id=self._active_provider_id,
+            fallback_level="rule_only",
+            fallback_reason=(last_err or "llm_unavailable"),
+            health_state="fallback_active",
+            quota_signal=None,
+        )
+        raise RuntimeError(f"orchestrator_rule_only:{last_err or 'llm_unavailable'}")
 
     def _prewarm_runtime(self) -> None:
         # Keep prewarm side-effect free (no network call).
         # We only materialize request primitives once at startup.
         if self._prewarmed:
             return
-        _ = (self._auth_headers, self._responses_url, self._chat_url)
+        _ = (self._auth_headers, self._responses_url, self._chat_url, self.provider)
         self._prewarmed = True
 
     def _load_cache(self) -> None:
@@ -352,6 +650,7 @@ class APIPerceptionProjector:
                     "confidence": float(payload["confidence"]),
                     "scores": dict(payload["scores"]),
                     "response_id": str(obj.get("response_id", "")),
+                    "provider": str(obj.get("provider", self.provider)),
                 }
         except Exception:  # noqa: BLE001
             self._cache = {}
@@ -372,6 +671,10 @@ class APIPerceptionProjector:
             "scores": scores,
             "response_id": str(response_id),
             "model": self.model,
+            "provider": self.provider,
+            "provider_id": (str(self._active_provider_id) if self._active_provider_id else self.provider),
+            "health_state": str(self._active_health_state),
+            "fallback_level": str(self._active_fallback_level),
             "prompt_version": self.prompt_version,
         }
         with self.cache_path.open("a", encoding="utf-8") as fh:
@@ -405,6 +708,10 @@ class APIPerceptionProjector:
             "confidence": float(payload.get("confidence", DEFAULT_CONFIDENCE)),
             "scores": scores,
             "model": self.model,
+            "provider": self.provider,
+            "provider_id": (str(self._active_provider_id) if self._active_provider_id else self.provider),
+            "health_state": str(self._active_health_state),
+            "fallback_level": str(self._active_fallback_level),
             "prompt_version": self.prompt_version,
         }
         with self.error_log_path.open("a", encoding="utf-8") as fh:
@@ -422,6 +729,13 @@ class APIPerceptionProjector:
             "api_adapter_error": err,
             "schema_valid": self._last_schema_valid,
             "model": self.model,
+            "provider": self.provider,
+            "provider_id": (str(self._active_provider_id) if self._active_provider_id else self.provider),
+            "health_state": str(self._active_health_state),
+            "llm_fallback_active": bool(self._active_llm_fallback),
+            "fallback_level": str(self._active_fallback_level),
+            "fallback_reason": self._active_fallback_reason,
+            "quota_signal": self._active_quota_signal,
             "cache_hit_rate": hit_rate,
             "cache_hits": int(self._cache_hits),
             "cache_misses": int(self._cache_misses),
@@ -447,6 +761,13 @@ class APIPerceptionProjector:
             "api_adapter_error": status["api_adapter_error"],
             "schema_valid": status["schema_valid"],
             "model": status["model"],
+            "provider": status["provider"],
+            "provider_id": status.get("provider_id"),
+            "health_state": status.get("health_state"),
+            "llm_fallback_active": bool(status.get("llm_fallback_active", False)),
+            "fallback_level": status.get("fallback_level"),
+            "fallback_reason": status.get("fallback_reason"),
+            "quota_signal": status.get("quota_signal"),
             "cache_hit_rate": float(status["cache_hit_rate"]),
         }
 
@@ -479,14 +800,24 @@ class APIPerceptionProjector:
         )
         return system_prompt, user_prompt
 
-    def _call_api_scores(self, *, text: str) -> Tuple[Dict[str, Any], str]:
-        if not self._api_key:
-            raise RuntimeError("missing_api_key")
-        system_prompt, user_prompt = self._build_messages(text=text)
+    def _call_openai_provider_scores(
+        self,
+        *,
+        text: str,
+        system_prompt: str,
+        user_prompt: str,
+        use_responses: bool,
+        metadata: Mapping[str, Any],
+    ) -> Tuple[Dict[str, Any], str]:
         headers = dict(self._auth_headers) if self._auth_headers else {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
         }
+        extra_headers = self.provider_options.get("extra_headers", {})
+        if isinstance(extra_headers, Mapping):
+            for key, value in extra_headers.items():
+                if str(key).strip():
+                    headers[str(key)] = str(value)
         responses_url = self._responses_url or (self.base_url + "/responses")
         chat_url = self._chat_url or (self.base_url + "/chat/completions")
         use_temperature = True
@@ -507,7 +838,7 @@ class APIPerceptionProjector:
                     {"role": "system", "content": [{"type": "input_text", "text": system_prompt}]},
                     {"role": "user", "content": [{"type": "input_text", "text": user_prompt}]},
                 ],
-                "metadata": {"prompt_version": self.prompt_version},
+                "metadata": dict(metadata),
             }
             chat_payload: Dict[str, Any] = {
                 "model": self.model,
@@ -516,7 +847,7 @@ class APIPerceptionProjector:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                "metadata": {"prompt_version": self.prompt_version},
+                "metadata": dict(metadata),
             }
             if use_temperature:
                 responses_payload["temperature"] = 0
@@ -543,6 +874,9 @@ class APIPerceptionProjector:
         def _call_with_timeout(*, url: str, payload: Mapping[str, Any]) -> Tuple[Dict[str, Any], str]:
             timeout_sec = _remaining_timeout_sec()
             resp = _post_json(url=url, payload=payload, headers=headers, timeout_sec=timeout_sec)
+            qsig = _quota_signal_from_headers(resp.get("_headers", {}) if isinstance(resp, Mapping) else {})
+            if qsig:
+                self._active_quota_signal = str(qsig)
             txt = _extract_output_text(resp)
             parsed = json.loads(txt) if txt else {}
             if not isinstance(parsed, Mapping):
@@ -553,7 +887,9 @@ class APIPerceptionProjector:
             responses_payload, chat_payload = _build_payloads()
             retryable = False
             try:
-                prefer_chat = short_force_chat or short_prefer_chat or (time.monotonic() < float(self._responses_degraded_until))
+                prefer_chat = (not bool(use_responses)) or short_force_chat or short_prefer_chat or (
+                    time.monotonic() < float(self._responses_degraded_until)
+                )
                 if not prefer_chat:
                     try:
                         return _call_with_timeout(url=responses_url, payload=responses_payload)
@@ -617,6 +953,99 @@ class APIPerceptionProjector:
                     time.sleep(sleep_sec)
         raise RuntimeError(f"api_call_failed: {last_exc}")
 
+    def _call_anthropic_provider_scores(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        metadata: Mapping[str, Any],
+    ) -> Tuple[Dict[str, Any], str]:
+        if not self._api_key:
+            raise RuntimeError("missing_api_key")
+        version = str(self.provider_options.get("anthropic_version", "2023-06-01"))
+        max_tokens = int(self.provider_options.get("max_tokens", 400))
+        endpoint = self.base_url.rstrip("/") + "/messages"
+        headers = {
+            "x-api-key": str(self._api_key),
+            "anthropic-version": version,
+            "content-type": "application/json",
+        }
+        extra_headers = self.provider_options.get("extra_headers", {})
+        if isinstance(extra_headers, Mapping):
+            for key, value in extra_headers.items():
+                if str(key).strip():
+                    headers[str(key)] = str(value)
+        payload: Dict[str, Any] = {
+            "model": self.model,
+            "max_tokens": max(1, max_tokens),
+            "temperature": 0,
+            "system": system_prompt,
+            "messages": [{"role": "user", "content": user_prompt}],
+            "metadata": dict(metadata),
+        }
+        started_at = time.monotonic()
+        last_exc: Optional[Exception] = None
+        for attempt in range(int(self.max_retries) + 1):
+            try:
+                timeout_sec = float(self.timeout_sec)
+                if self.request_deadline_sec > 0.0:
+                    remaining = float(self.request_deadline_sec) - float(time.monotonic() - started_at)
+                    if remaining <= 0.0:
+                        raise TimeoutError("request_deadline_exceeded")
+                    timeout_sec = min(timeout_sec, remaining)
+                resp = _post_json(url=endpoint, payload=payload, headers=headers, timeout_sec=timeout_sec)
+                qsig = _quota_signal_from_headers(resp.get("_headers", {}) if isinstance(resp, Mapping) else {})
+                if qsig:
+                    self._active_quota_signal = str(qsig)
+                content = resp.get("content")
+                text_out = ""
+                if isinstance(content, list):
+                    for block in content:
+                        if not isinstance(block, Mapping):
+                            continue
+                        if str(block.get("type", "")).strip().lower() == "text":
+                            maybe = block.get("text")
+                            if isinstance(maybe, str):
+                                text_out = maybe
+                                break
+                parsed = json.loads(str(text_out or "{}"))
+                if not isinstance(parsed, Mapping):
+                    raise ValueError("schema_error: top-level JSON object required")
+                return _normalize_api_payload(parsed), str(resp.get("id", ""))
+            except APIRequestError as exc:
+                last_exc = exc
+                retryable = int(exc.code) in {408, 409, 429} or int(exc.code) >= 500
+                if not retryable or attempt >= int(self.max_retries):
+                    break
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                if attempt >= int(self.max_retries):
+                    break
+            sleep_sec = min(float(self.retry_backoff_max_sec), float(self.backoff_sec) * float(2**attempt))
+            if sleep_sec > 0.0:
+                time.sleep(sleep_sec)
+        raise RuntimeError(f"api_call_failed: {last_exc}")
+
+    def _call_api_scores_legacy(self, *, text: str) -> Tuple[Dict[str, Any], str]:
+        if not self._api_key:
+            raise RuntimeError("missing_api_key")
+        system_prompt, user_prompt = self._build_messages(text=text)
+        metadata = {"prompt_version": self.prompt_version, "provider": self.provider}
+        return self._provider_client.score_text(
+            text=text,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model=self.model,
+            timeout_sec=self.timeout_sec,
+            retries=self.max_retries,
+            metadata=metadata,
+        )
+
+    def _call_api_scores(self, *, text: str) -> Tuple[Dict[str, Any], str]:
+        if self._orchestrator is not None:
+            return self._call_api_scores_orchestrated(text=text)
+        return self._call_api_scores_legacy(text=text)
+
     def project(self, item: ContentItem) -> ProjectionResult:
         if not self._active:
             if self.enabled_mode == "true" or self.strict:
@@ -624,7 +1053,7 @@ class APIPerceptionProjector:
             return _zero_projection(item, reason=self._runtime_error or "api_adapter_inactive")
 
         text = _normalize_text(item.text)
-        cache_key = _sha256_text(f"{text}|{self.model}|{self.prompt_version}")
+        cache_key = _sha256_text(f"{text}|{self.provider}|{self.base_url}|{self.model}|{self.prompt_version}")
         now_mono = time.monotonic()
         transient_cached = self._transient_error_cache.get(cache_key)
         if transient_cached is not None:
@@ -666,6 +1095,7 @@ class APIPerceptionProjector:
                     "confidence": float(payload["confidence"]),
                     "scores": dict(payload["scores"]),
                     "response_id": response_id,
+                    "provider": self.provider,
                 }
                 self._append_cache(key=cache_key, payload=payload, response_id=response_id)
                 self._last_error = None
@@ -706,6 +1136,13 @@ class APIPerceptionProjector:
                         "active": True,
                         "schema_valid": True,
                         "model": self.model,
+                        "provider": self.provider,
+                        "provider_id": (str(self._active_provider_id) if self._active_provider_id else self.provider),
+                        "health_state": str(self._active_health_state),
+                        "llm_fallback_active": bool(self._active_llm_fallback),
+                        "fallback_level": str(self._active_fallback_level),
+                        "fallback_reason": self._active_fallback_reason,
+                        "quota_signal": self._active_quota_signal,
                         "cache_hit": bool(cache_hit),
                         "cache_key": cache_key,
                         "response_id": response_id,
@@ -786,6 +1223,13 @@ class HybridAPIProjector:
         base["api_adapter_error"] = api_status.get("api_adapter_error")
         base["schema_valid"] = api_status.get("schema_valid")
         base["api_model"] = api_status.get("model")
+        base["api_provider"] = api_status.get("provider")
+        base["provider_id"] = api_status.get("provider_id")
+        base["health_state"] = api_status.get("health_state")
+        base["llm_fallback_active"] = bool(api_status.get("llm_fallback_active", False))
+        base["fallback_level"] = api_status.get("fallback_level")
+        base["fallback_reason"] = api_status.get("fallback_reason")
+        base["quota_signal"] = api_status.get("quota_signal")
         base["cache_hit_rate"] = api_status.get("cache_hit_rate", 0.0)
         return base
 

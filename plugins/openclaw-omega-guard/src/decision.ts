@@ -31,6 +31,14 @@ export function mapOmegaDecision(payload: OmegaScanResponse): GuardDecision {
   const decisionId = typeof policyTrace.decision_id === "string" ? policyTrace.decision_id : undefined;
   const incidentArtifactId =
     typeof payload.incident_artifact_id === "string" ? payload.incident_artifact_id : undefined;
+  const policyId =
+    typeof payload.policy_id === "string"
+      ? payload.policy_id
+      : (typeof (policyTrace as Record<string, unknown>).policy_id === "string"
+        ? String((policyTrace as Record<string, unknown>).policy_id)
+        : undefined);
+  const fallbackHint =
+    typeof payload.fallback_hint === "string" ? payload.fallback_hint : undefined;
   const reason = pickReason(payload);
 
   if (Boolean(payload.approval_required) || ESCALATE_OUTCOMES.has(controlOutcome)) {
@@ -40,6 +48,8 @@ export function mapOmegaDecision(payload: OmegaScanResponse): GuardDecision {
       traceId,
       decisionId,
       incidentArtifactId,
+      policyId,
+      fallbackHint,
       controlOutcome
     };
   }
@@ -51,6 +61,8 @@ export function mapOmegaDecision(payload: OmegaScanResponse): GuardDecision {
       traceId,
       decisionId,
       incidentArtifactId,
+      policyId,
+      fallbackHint,
       controlOutcome
     };
   }
@@ -61,6 +73,8 @@ export function mapOmegaDecision(payload: OmegaScanResponse): GuardDecision {
     traceId,
     decisionId,
     incidentArtifactId,
+    policyId,
+    fallbackHint,
     controlOutcome
   };
 }
@@ -73,6 +87,11 @@ export function toHookDecision(decision: GuardDecision): Record<string, unknown>
     return {
       block: true,
       reason: decision.reason ?? "omega_blocked",
+      action: decision.controlOutcome ?? "BLOCK",
+      controlOutcome: decision.controlOutcome ?? "BLOCK",
+      incidentArtifactId: decision.incidentArtifactId,
+      policyId: decision.policyId,
+      fallbackHint: decision.fallbackHint,
       traceId: decision.traceId,
       decisionId: decision.decisionId
     };
@@ -80,6 +99,11 @@ export function toHookDecision(decision: GuardDecision): Record<string, unknown>
   return {
     requireApproval: true,
     reason: decision.reason ?? "omega_requires_approval",
+    action: decision.controlOutcome ?? "REQUIRE_APPROVAL",
+    controlOutcome: decision.controlOutcome ?? "REQUIRE_APPROVAL",
+    incidentArtifactId: decision.incidentArtifactId,
+    policyId: decision.policyId,
+    fallbackHint: decision.fallbackHint,
     traceId: decision.traceId,
     decisionId: decision.decisionId
   };

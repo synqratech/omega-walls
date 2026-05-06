@@ -8,6 +8,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Mapping, Sequence
@@ -111,6 +112,33 @@ def _wait_for_healthz(*, base_url: str, timeout_sec: int) -> bool:
     return False
 
 
+def _resolve_tmp_root() -> Path:
+    env_candidates = [os.environ.get("OMEGA_TMP_ROOT"), os.environ.get("TMP"), os.environ.get("TEMP")]
+    for candidate in env_candidates:
+        if not candidate:
+            continue
+        path = Path(candidate).expanduser()
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            probe = path / ".omega_tmp_probe"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink(missing_ok=True)
+            return path
+        except Exception:
+            continue
+    if os.name == "nt":
+        win_tmp = Path("C:/tmp")
+        try:
+            win_tmp.mkdir(parents=True, exist_ok=True)
+            probe = win_tmp / ".omega_tmp_probe"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink(missing_ok=True)
+            return win_tmp
+        except Exception:
+            pass
+    return Path(tempfile.gettempdir())
+
+
 def _load_workflow_cases(path: Path) -> List[Dict[str, Any]]:
     payload = _read_json(path)
     if not isinstance(payload.get("cases"), list):
@@ -147,6 +175,8 @@ def _aggregate_framework_summary(payload: Mapping[str, Any]) -> Dict[str, Any]:
     blocked_tool_seen = bool(summary.get("blocked_tool_seen"))
     gateway = float(summary.get("gateway_coverage", 0.0))
     orphans = int(summary.get("orphan_executions", 999))
+    block_ok = bool(summary.get("structured_block_contract_ok", False))
+    secmeta_ok = bool(summary.get("security_metadata_present", False))
     return {
         "blocked_input_seen": blocked_input_seen,
         "blocked_tool_seen": blocked_tool_seen,
@@ -155,6 +185,8 @@ def _aggregate_framework_summary(payload: Mapping[str, Any]) -> Dict[str, Any]:
         "orphan_executions": orphans,
         "gateway_coverage_ok": gateway >= 1.0,
         "orphan_executions_zero": orphans == 0,
+        "structured_block_contract_ok": block_ok,
+        "security_metadata_present": secmeta_ok,
     }
 
 
@@ -167,6 +199,14 @@ def _run_contract_layer(
 ) -> Dict[str, Any]:
     run_dir.mkdir(parents=True, exist_ok=True)
     command_runs: List[Dict[str, Any]] = []
+    temp_root = _resolve_tmp_root()
+    child_env = dict(os.environ)
+    child_env["TMP"] = str(temp_root)
+    child_env["TEMP"] = str(temp_root)
+    preflight = {
+        "pytest_available": bool(shutil.which("pytest") is not None),
+        "temp_root": str(temp_root),
+    }
 
     framework_summary = _run_command(
         name="contract_framework_smokes",
@@ -181,6 +221,7 @@ def _run_contract_layer(
         ],
         cwd=ROOT,
         out_dir=run_dir,
+        env=child_env,
     )
     command_runs.append(framework_summary)
     framework_payload: Dict[str, Any] = {}
@@ -197,6 +238,7 @@ def _run_contract_layer(
         argv=[npm_bin, "run", "typecheck"],
         cwd=PLUGIN_ROOT,
         out_dir=run_dir,
+        env=child_env,
     )
     command_runs.append(plugin_typecheck)
     plugin_test = _run_command(
@@ -204,6 +246,7 @@ def _run_contract_layer(
         argv=[npm_bin, "run", "test"],
         cwd=PLUGIN_ROOT,
         out_dir=run_dir,
+        env=child_env,
     )
     command_runs.append(plugin_test)
 
@@ -224,6 +267,8 @@ def _run_contract_layer(
             "orphan_executions": int(row.get("orphan_executions", 999)),
             "blocked_input_seen": bool(agg["blocked_input_seen"]),
             "blocked_tool_seen": bool(agg["blocked_tool_seen"]),
+            "structured_block_contract_ok": bool(agg["structured_block_contract_ok"]),
+            "security_metadata_present": bool(agg["security_metadata_present"]),
         }
 
     targets["openclaw_mapper"] = {
@@ -232,12 +277,16 @@ def _run_contract_layer(
         "orphan_executions": 0,
         "blocked_input_seen": True,
         "blocked_tool_seen": True,
+        "structured_block_contract_ok": True,
+        "security_metadata_present": True,
     }
 
     min_gateway = min(float(v.get("gateway_coverage", 0.0)) for v in targets.values())
     total_orphans = sum(int(v.get("orphan_executions", 0)) for v in targets.values())
     blocked_input_seen = all(bool(v.get("blocked_input_seen")) for v in targets.values())
     blocked_tool_seen = all(bool(v.get("blocked_tool_seen")) for v in targets.values())
+    structured_contract_ok = all(bool(v.get("structured_block_contract_ok", False)) for v in targets.values() if v.get("status") == "ok")
+    security_metadata_ok = all(bool(v.get("security_metadata_present", False)) for v in targets.values() if v.get("status") == "ok")
     overall_ok = (
         int(framework_summary["exit_code"]) == 0
         and int(plugin_typecheck["exit_code"]) == 0
@@ -246,6 +295,8 @@ def _run_contract_layer(
         and total_orphans == 0
         and blocked_input_seen
         and blocked_tool_seen
+        and structured_contract_ok
+        and security_metadata_ok
     )
 
     report = {
@@ -257,11 +308,14 @@ def _run_contract_layer(
             "orphan_executions_zero": bool(total_orphans == 0),
             "blocked_input_seen": blocked_input_seen,
             "blocked_tool_seen": blocked_tool_seen,
+            "structured_block_contract_ok": bool(structured_contract_ok),
+            "security_metadata_ok": bool(security_metadata_ok),
         },
         "metrics": {
             "min_gateway_coverage": float(min_gateway),
             "total_orphans": int(total_orphans),
         },
+        "preflight": preflight,
         "command_runs": command_runs,
     }
     _write_json(run_dir / "report.json", report)

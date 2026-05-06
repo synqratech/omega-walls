@@ -269,7 +269,7 @@ def _build_md(
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate WAInjectBench text eval markdown + SVG charts from report.json")
     parser.add_argument("--report-json", required=True)
-    parser.add_argument("--out-doc", default="docs/implementation/33_wainjectbench_text_eval_2026-03-09.md")
+    parser.add_argument("--out-doc", default="internal_docs/implementation/33_wainjectbench_text_eval_2026-03-09.md")
     parser.add_argument("--assets-dir", default="docs/assets/wainjectbench_text_eval")
     args = parser.parse_args()
 

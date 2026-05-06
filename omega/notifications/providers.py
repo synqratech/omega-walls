@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -61,6 +61,30 @@ def _alert_text(event: RiskEvent) -> str:
     if kind.startswith("startup_"):
         return _startup_text(event)
     return _event_brief(event)
+
+
+def _webhook_payload(*, event: RiskEvent) -> Dict[str, Any]:
+    red = dict(event.payload_redacted or {})
+    return {
+        "event_id": str(event.event_id),
+        "event_kind": str(event.event_kind or "risk_event"),
+        "timestamp": str(event.timestamp),
+        "surface": str(event.surface),
+        "control_outcome": str(event.control_outcome),
+        "triggers": list(event.triggers),
+        "reasons": list(event.reasons),
+        "action_types": list(event.action_types),
+        "trace_id": str(event.trace_id),
+        "decision_id": str(event.decision_id),
+        "tenant_id": str(event.tenant_id or ""),
+        "session_id": str(event.session_id or ""),
+        "actor_id": str(event.actor_id or ""),
+        "step": int(event.step),
+        "severity": str(event.severity or ""),
+        "risk_score": event.risk_score,
+        "message": _alert_text(event),
+        "payload_redacted": red,
+    }
 
 
 class SlackNotifier(Notifier):
@@ -138,6 +162,50 @@ class TelegramNotifier(Notifier):
         out = await asyncio.to_thread(_http_post_json, url=f"{self._api_base}/sendMessage", payload=payload)
         msg = out.get("result", {}) if isinstance(out.get("result"), dict) else {}
         return str(msg.get("message_id", ""))
+
+
+class WebhookNotifier(Notifier):
+    def __init__(self, *, url: str, allowed_types: Sequence[str], max_retries: int = 3) -> None:
+        self.url = str(url).strip()
+        self.allowed_types = {str(x).strip() for x in list(allowed_types) if str(x).strip()}
+        self.max_retries = max(1, int(max_retries))
+        if not self.url:
+            raise ValueError("Webhook notifier requires url")
+
+    def _should_send(self, event: RiskEvent) -> bool:
+        if not self.allowed_types:
+            return True
+        kind = str(event.event_kind or "").strip()
+        return kind in self.allowed_types
+
+    async def send_alert(self, event: RiskEvent) -> str:
+        if not self._should_send(event):
+            return "filtered"
+        payload = _webhook_payload(event=event)
+        attempt = 0
+        last_exc: Optional[Exception] = None
+        while attempt < self.max_retries:
+            attempt += 1
+            try:
+                out = await asyncio.to_thread(_http_post_json, url=self.url, payload=payload)
+                return str(out.get("id", out.get("event_id", "ok")))
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                if attempt >= self.max_retries:
+                    break
+                await asyncio.sleep(0.2 * float(2 ** (attempt - 1)))
+        raise RuntimeError(f"webhook_delivery_failed:{last_exc}")
+
+    async def send_action_request(self, event: ActionRequestEvent) -> str:
+        payload = {
+            "event_type": "approval_request",
+            "approval_id": str(event.approval_id),
+            "required_action": str(event.required_action),
+            "timeout_sec": int(event.timeout_sec),
+            "risk_event": _webhook_payload(event=event.risk_event),
+        }
+        out = await asyncio.to_thread(_http_post_json, url=self.url, payload=payload)
+        return str(out.get("id", out.get("event_id", event.approval_id)))
 
     async def send_action_request(self, event: ActionRequestEvent) -> str:
         payload = {

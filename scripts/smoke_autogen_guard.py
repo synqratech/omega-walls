@@ -14,6 +14,8 @@ if str(ROOT) not in sys.path:
 from omega.adapters import OmegaBlockedError, OmegaToolBlockedError
 from omega.integrations.autogen_guard import OmegaAutoGenGuard
 
+_REQUIRED_BLOCK_FIELDS = {"action", "reason", "trace_id", "decision_id"}
+
 
 class _SmokeAgent:
     async def on_messages(self, messages: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
@@ -34,6 +36,7 @@ def main() -> int:
 
     failures: list[str] = []
     reports: list[dict[str, Any]] = []
+    structured_block_contract_ok = True
 
     # Scenario 1: benign conversation passes
     try:
@@ -60,6 +63,10 @@ def main() -> int:
         )
         failures.append("attack_conversation: expected OmegaBlockedError, got success")
     except OmegaBlockedError as exc:
+        contract = exc.to_structured_payload()
+        if not _REQUIRED_BLOCK_FIELDS.issubset(set(contract.keys())):
+            structured_block_contract_ok = False
+            failures.append("attack_conversation: missing required structured block fields")
         blocked_seen = True
         reports.append(
             {
@@ -67,6 +74,7 @@ def main() -> int:
                 "status": "blocked",
                 "control_outcome": exc.decision.control_outcome,
                 "reason_codes": list(exc.decision.reason_codes),
+                "block_contract": contract,
             }
         )
 
@@ -77,6 +85,10 @@ def main() -> int:
         blocked_tool("payload", thread_id="ag-smoke-tool-block")
         failures.append("blocked_tool: expected OmegaToolBlockedError, got success")
     except OmegaToolBlockedError as exc:
+        contract = exc.to_structured_payload()
+        if not _REQUIRED_BLOCK_FIELDS.issubset(set(contract.keys())):
+            structured_block_contract_ok = False
+            failures.append("blocked_tool: missing required structured block fields")
         blocked_tool_seen = True
         reports.append(
             {
@@ -85,6 +97,7 @@ def main() -> int:
                 "reason": exc.gate_decision.reason,
                 "gateway_coverage": exc.gate_decision.gateway_coverage,
                 "orphan_executions": exc.gate_decision.orphan_executions,
+                "block_contract": contract,
             }
         )
 
@@ -126,6 +139,10 @@ def main() -> int:
             "orphan_executions": allow_gate.orphan_executions,
         }
     )
+    security_metadata = guard.get_last_security_metadata()
+    security_metadata_present = bool(isinstance(security_metadata, dict) and security_metadata.get("trace_id"))
+    if not security_metadata_present:
+        failures.append("security_metadata: channel missing")
 
     summary = {
         "framework": "autogen_guard",
@@ -133,6 +150,8 @@ def main() -> int:
         "blocked_tool_seen": blocked_tool_seen,
         "gateway_coverage": allow_gate.gateway_coverage,
         "orphan_executions": allow_gate.orphan_executions,
+        "structured_block_contract_ok": bool(structured_block_contract_ok),
+        "security_metadata_present": bool(security_metadata_present),
     }
     payload = {"framework": "autogen_guard", "reports": reports, "summary": summary, "failures": failures}
 
@@ -150,4 +169,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

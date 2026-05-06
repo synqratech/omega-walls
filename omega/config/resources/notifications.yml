@@ -37,6 +37,9 @@ notifications:
     channel: ""
     signing_secret_env: SLACK_SIGNING_SECRET
     triggers:
+      - STARTUP_PREFLIGHT
+      - STARTUP_OUTREACH
+      - STARTUP_TELEMETRY
       - BLOCK
       - SOFT_BLOCK
       - SOURCE_QUARANTINE
@@ -57,6 +60,9 @@ notifications:
     chat_id: ""
     secret_token_env: TG_BOT_SECRET_TOKEN
     triggers:
+      - STARTUP_PREFLIGHT
+      - STARTUP_OUTREACH
+      - STARTUP_TELEMETRY
       - BLOCK
       - SOFT_BLOCK
       - SOURCE_QUARANTINE
@@ -68,3 +74,13 @@ notifications:
       WARN: 300
       BLOCK: 60
     min_risk_score: 0.7
+  webhook:
+    enabled: false
+    url: ""
+    types:
+      - quota_warning
+      - quota_exhausted
+      - fallback_activated
+      - fallback_recovered
+      - key_invalid
+      - provider_outage

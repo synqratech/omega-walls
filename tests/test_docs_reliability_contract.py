@@ -36,9 +36,10 @@ def _assert_local_links_exist(rel_path: str) -> None:
 def test_required_reliability_docs_exist() -> None:
     required = [
         "docs/quickstart.md",
-        "docs/debugging_workflow_failures.md",
-        "docs/policy_tuning.md",
-        "docs/workflow_continuity.md",
+        "docs/config.md",
+        "docs/framework_integrations_quickstart.md",
+        "docs/enterprise_pilot_guide.md",
+        "docs/pilot_operations_runbook.md",
         "examples/reliability_quickstart/monitor_quickstart_demo.py",
         "examples/reliability_quickstart/explain_timeline_demo.py",
         "examples/reliability_quickstart/workflow_continuity_demo.py",
@@ -50,17 +51,19 @@ def test_required_reliability_docs_exist() -> None:
 def test_readme_links_reliability_docs() -> None:
     text = _read("README.md")
     assert "(docs/quickstart.md)" in text
-    assert "(docs/debugging_workflow_failures.md)" in text
-    assert "(docs/policy_tuning.md)" in text
-    assert "(docs/workflow_continuity.md)" in text
+    assert "(docs/config.md)" in text
+    assert "(docs/framework_integrations_quickstart.md)" in text
+    assert "(docs/enterprise_pilot_guide.md)" in text
+    assert "(docs/pilot_operations_runbook.md)" in text
 
 
 def test_docs_index_links_reliability_docs() -> None:
     text = _read("docs/README.md")
     assert "(quickstart.md)" in text
-    assert "(debugging_workflow_failures.md)" in text
-    assert "(policy_tuning.md)" in text
-    assert "(workflow_continuity.md)" in text
+    assert "(config.md)" in text
+    assert "(framework_integrations_quickstart.md)" in text
+    assert "(enterprise_pilot_guide.md)" in text
+    assert "(pilot_operations_runbook.md)" in text
 
 
 def test_quickstart_contains_monitor_report_explain_and_enforce_transition() -> None:
@@ -77,8 +80,9 @@ def test_local_links_in_reliability_docs_are_valid() -> None:
         "README.md",
         "docs/README.md",
         "docs/quickstart.md",
-        "docs/debugging_workflow_failures.md",
-        "docs/policy_tuning.md",
-        "docs/workflow_continuity.md",
+        "docs/config.md",
+        "docs/framework_integrations_quickstart.md",
+        "docs/enterprise_pilot_guide.md",
+        "docs/pilot_operations_runbook.md",
     ]:
         _assert_local_links_exist(rel)

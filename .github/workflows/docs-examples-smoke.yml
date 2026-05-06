@@ -4,14 +4,22 @@ on:
   pull_request:
     paths:
       - "docs/**"
+      - "enterprise/docs/**"
+      - "integrations/**"
       - "examples/**"
       - "tests/test_docs_*"
+      - "tests/test_enterprise_docs_contract.py"
+      - "config/enterprise_docs_public_allowlist.json"
       - ".github/workflows/docs-examples-smoke.yml"
   push:
     paths:
       - "docs/**"
+      - "enterprise/docs/**"
+      - "integrations/**"
       - "examples/**"
       - "tests/test_docs_*"
+      - "tests/test_enterprise_docs_contract.py"
+      - "config/enterprise_docs_public_allowlist.json"
       - ".github/workflows/docs-examples-smoke.yml"
   workflow_dispatch:
 
@@ -39,4 +47,4 @@ jobs:
         run: python -m pip install --upgrade pip && python -m pip install -e .
 
       - name: Run docs reliability tests
-        run: python -m pytest tests/test_docs_examples.py tests/test_docs_reliability_contract.py -q
+        run: python -m pytest tests/test_docs_examples.py tests/test_docs_reliability_contract.py tests/test_docs_integrations_contract.py tests/test_docs_public_surface_contract.py tests/test_enterprise_docs_contract.py -q

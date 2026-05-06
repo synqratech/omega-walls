@@ -54,6 +54,18 @@ def _actions_to_dict(actions: List[OffAction]) -> List[Dict[str, Any]]:
             d["horizon_steps"] = action.horizon_steps
         if action.incident_packet is not None:
             d["incident_packet"] = action.incident_packet
+        if action.capability_class is not None:
+            d["capability_class"] = action.capability_class
+        if action.risk_level is not None:
+            d["risk_level"] = action.risk_level
+        if action.freeze_stage is not None:
+            d["freeze_stage"] = int(action.freeze_stage)
+        if action.stage_reason is not None:
+            d["stage_reason"] = action.stage_reason
+        if action.escalation_required is not None:
+            d["escalation_required"] = bool(action.escalation_required)
+        if action.approval_required is not None:
+            d["approval_required"] = bool(action.approval_required)
         result.append(d)
     return result
 
@@ -145,10 +157,15 @@ def build_tool_gateway_step_event(
             "control_outcome": str(control_outcome),
             "validation_status": str(decision.get("validation_status", "not_checked")),
             "validation_reason": decision.get("validation_reason"),
+            "capability_class": decision.get("capability_class"),
+            "risk_level": decision.get("risk_level"),
+            "approval_required": bool(decision.get("approval_required", False)),
         },
         "capability": {
             "mode": str(capability.get("mode", "unknown")),
             "requires_human_approval": bool(capability.get("requires_human_approval", False)),
+            "capability_class": str(capability.get("capability_class", "unknown")),
+            "risk_level": str(capability.get("risk_level", "unknown")),
         },
         "approval": {
             "human_approved": bool(human_approved),

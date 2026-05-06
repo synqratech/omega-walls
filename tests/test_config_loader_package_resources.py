@@ -25,6 +25,7 @@ def test_load_resolved_config_uses_bundled_resources_by_default() -> None:
     assert snapshot.resolved.get("profiles", {}).get("env") == "dev"
     assert "omega" in snapshot.resolved
     assert "off_policy" in snapshot.resolved
+    assert "telemetry" in snapshot.resolved
     assert snapshot.file_hashes
     assert all(str(key).startswith("pkg://omega.config/resources/") for key in snapshot.file_hashes.keys())
 

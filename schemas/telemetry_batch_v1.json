@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "telemetry_batch_v1.json",
+  "title": "telemetry_batch_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "batch_id",
+    "instance",
+    "window",
+    "product_metrics",
+    "security_analytics",
+    "attack_signatures"
+  ],
+  "properties": {
+    "schema_version": { "const": "telemetry_batch_v1" },
+    "batch_id": { "type": "string", "minLength": 8 },
+    "instance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instance_id",
+        "core_version",
+        "tier",
+        "deployment_mode",
+        "os_arch",
+        "python_version"
+      ],
+      "properties": {
+        "instance_id": { "type": "string" },
+        "core_version": { "type": "string" },
+        "tier": { "type": "string", "enum": ["oss", "enterprise"] },
+        "deployment_mode": { "type": "string", "enum": ["lib", "sidecar", "gateway", "unknown"] },
+        "os_arch": { "type": "string" },
+        "python_version": { "type": "string" }
+      }
+    },
+    "window": { "type": "string", "enum": ["24h"] },
+    "product_metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "uptime_bucket",
+        "modules_enabled",
+        "fallback_events_count",
+        "config_changes_count",
+        "last_sync_status"
+      ],
+      "properties": {
+        "uptime_bucket": { "type": "string", "enum": ["0-1", "1-6", "6-24", "24+"] },
+        "modules_enabled": { "type": "array", "items": { "type": "string" } },
+        "fallback_events_count": { "type": "integer", "minimum": 0 },
+        "config_changes_count": { "type": "integer", "minimum": 0 },
+        "last_sync_status": { "type": "string" }
+      }
+    },
+    "security_analytics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attack_type_counts",
+        "policy_triggers",
+        "tool_abuse_categories",
+        "risk_score_buckets",
+        "fp_reports_count",
+        "enforcement_actions"
+      ],
+      "properties": {
+        "attack_type_counts": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+        "policy_triggers": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+        "tool_abuse_categories": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+        "risk_score_buckets": { "type": "array", "items": { "type": "number" } },
+        "fp_reports_count": { "type": "integer", "minimum": 0 },
+        "enforcement_actions": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } }
+      }
+    },
+    "attack_signatures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["pattern_hash", "rule_id", "accumulation_steps", "provenance_type", "count"],
+        "properties": {
+          "pattern_hash": { "type": "string", "minLength": 32 },
+          "rule_id": { "type": "string" },
+          "accumulation_steps": { "type": "integer", "minimum": 0 },
+          "provenance_type": { "type": "string" },
+          "count": { "type": "integer", "minimum": 1 }
+        }
+      }
+    }
+  }
+}

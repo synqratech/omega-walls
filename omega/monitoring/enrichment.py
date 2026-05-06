@@ -16,6 +16,14 @@ _BLOCK_LIKE_ACTIONS = {
     "WARN",
 }
 
+_INJECTION_MARKERS = (
+    "ignore previous",
+    "ignore all previous",
+    "disregard previous",
+    "system override",
+    "jailbreak",
+)
+
 
 def build_redacted_fragments(
     *,
@@ -34,12 +42,16 @@ def build_redacted_fragments(
         contribution = float((row or {}).get("contribution", 0.0) or 0.0)
         text = str(item_text_by_doc.get(doc_id, ""))
         red = redact_text(text, max_chars=max_chars)
+        excerpt = str(red.redacted)
+        excerpt_l = excerpt.lower()
+        if any(marker in excerpt_l for marker in _INJECTION_MARKERS):
+            excerpt = "<REDACTED>"
         rows.append(
             {
                 "doc_id": doc_id,
                 "source_id": source_id,
                 "trust": trust,
-                "excerpt_redacted": str(red.redacted),
+                "excerpt_redacted": excerpt,
                 "excerpt_sha256": str(red.text_sha256),
                 "contribution": contribution,
             }

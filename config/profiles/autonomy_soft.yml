@@ -1,0 +1,143 @@
+profiles:
+  env: autonomy_soft
+
+runtime:
+  guard_mode: enforce
+
+off_policy:
+  policy_version: autonomy-soft-v1
+  control_outcome:
+    require_approval:
+      enabled: false
+  autonomy_soft:
+    progressive_freeze:
+      enabled: true
+      repeat_window_steps: 24
+      read_safe_allowlist:
+        - retrieval_readonly
+        - summarize
+        - echo
+      stage1:
+        mode: TOOLS_ALLOWLIST
+        allowlist:
+          - retrieval_readonly
+          - summarize
+          - echo
+        horizon_steps: 6
+      stage2:
+        mode: TOOLS_ALLOWLIST
+        allowlist:
+          - retrieval_readonly
+          - summarize
+          - echo
+        horizon_steps: 12
+      stage3:
+        mode: TOOLS_DISABLED
+        horizon_steps: 20
+
+tools:
+  autonomy_soft:
+    enabled: true
+    environment_tag: stage
+    prod_tags: [prod, production]
+    require_approval_classes_prod: [DESTRUCTIVE, EXEC_DEPLOY, PRIV_ESC]
+    require_approval_classes_non_prod: []
+    enforce_capability_requires_human_approval: false
+    tool_allowlist: []
+    tool_denylist: []
+    class_allowlist: []
+    class_denylist: []
+    env_overrides:
+      dev:
+        require_approval_classes: []
+      stage:
+        require_approval_classes: []
+      prod:
+        require_approval_classes: [DESTRUCTIVE, EXEC_DEPLOY, PRIV_ESC]
+    backup_safety:
+      enabled: true
+      require_immutable_backup_precondition: true
+      immutable_backup_ready: true
+      sensitive_classes: [DESTRUCTIVE, EXEC_DEPLOY]
+  capabilities:
+    retrieval_readonly:
+      mode: read_only
+      allowed_when: ["NO_OFF", "OFF"]
+      requires_human_approval: false
+      capability_class: READ_SAFE
+      risk_level: low
+    summarize:
+      mode: read_only
+      allowed_when: ["NO_OFF", "OFF"]
+      requires_human_approval: false
+      capability_class: READ_SAFE
+      risk_level: low
+    echo:
+      mode: read_only
+      allowed_when: ["NO_OFF", "OFF"]
+      requires_human_approval: false
+      capability_class: READ_SAFE
+      risk_level: low
+    write_file:
+      mode: write
+      allowed_when: ["NO_OFF"]
+      requires_human_approval: false
+      capability_class: WRITE_LOW_RISK
+      risk_level: medium
+    network_post:
+      mode: dangerous
+      allowed_when: ["NO_OFF"]
+      requires_human_approval: false
+      capability_class: EXEC_DEPLOY
+      risk_level: high
+    shell_exec:
+      mode: dangerous
+      allowed_when: ["NO_OFF"]
+      requires_human_approval: false
+      capability_class: EXEC_DEPLOY
+      risk_level: high
+    bash_exec:
+      mode: dangerous
+      allowed_when: ["NO_OFF"]
+      requires_human_approval: false
+      capability_class: EXEC_DEPLOY
+      risk_level: high
+    powershell_exec:
+      mode: dangerous
+      allowed_when: ["NO_OFF"]
+      requires_human_approval: false
+      capability_class: EXEC_DEPLOY
+      risk_level: high
+    terminal_exec:
+      mode: dangerous
+      allowed_when: ["NO_OFF"]
+      requires_human_approval: false
+      capability_class: EXEC_DEPLOY
+      risk_level: high
+    cmd_exec:
+      mode: dangerous
+      allowed_when: ["NO_OFF"]
+      requires_human_approval: false
+      capability_class: EXEC_DEPLOY
+      risk_level: high
+    git_exec:
+      mode: dangerous
+      allowed_when: ["NO_OFF"]
+      requires_human_approval: false
+      capability_class: EXEC_DEPLOY
+      risk_level: high
+    deploy_exec:
+      mode: dangerous
+      allowed_when: ["NO_OFF"]
+      requires_human_approval: false
+      capability_class: EXEC_DEPLOY
+      risk_level: high
+
+notifications:
+  enabled: true
+  approvals:
+    timeout_sec: 900
+  escalation:
+    primary_channel: slack
+    fallback_channel: telegram
+    fallback_timeout_sec: 120

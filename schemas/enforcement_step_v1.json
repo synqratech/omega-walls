@@ -27,7 +27,10 @@
         "mode": {"type": "string"},
         "allowlist": {"type": "array", "items": {"type": "string"}},
         "freeze_until_step": {"type": ["integer", "null"]},
-        "remaining_horizon": {"type": "integer", "minimum": 0}
+        "remaining_horizon": {"type": "integer", "minimum": 0},
+        "freeze_stage": {"type": ["integer", "null"]},
+        "stage_reason": {"type": ["string", "null"]},
+        "escalation_required": {"type": "boolean"}
       }
     },
     "quarantine": {

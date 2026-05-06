@@ -34,6 +34,7 @@ from omega.telemetry.events import (
 )
 from omega.telemetry.ids import build_decision_id, build_trace_id_runtime
 from omega.telemetry.incident_artifact import build_incident_artifact, should_emit_incident_artifact
+from omega.telemetry.anonymous import AnonymousTelemetryService, build_telemetry_event
 from omega.structured_logging import build_structured_emitter_from_config, engine_version
 from omega.tools.adapters import ToolExecution, build_default_tool_registry
 
@@ -89,6 +90,12 @@ class OmegaRAGHarness:
             force_enable=(self.guard_mode == GuardMode.MONITOR),
         )
         self.notification_dispatcher = build_dispatcher_from_config(config=self.config)
+        self.telemetry_service = AnonymousTelemetryService(
+            config=self.config,
+            dispatcher=self.notification_dispatcher,
+            surface="runtime",
+            start_worker=False,
+        )
         self.structured_emitter = build_structured_emitter_from_config(config=self.config, logger_name="omega.runtime")
         profile_name = str(((self.config.get("profiles", {}) or {}).get("env", "") or (self.config.get("runtime", {}) or {}).get("mode", "custom")))
         self.startup_summary = run_startup_notifications(
@@ -100,6 +107,8 @@ class OmegaRAGHarness:
         )
 
     def close(self) -> None:
+        if getattr(self, "telemetry_service", None) is not None:
+            self.telemetry_service.close()
         if self.notification_dispatcher is not None:
             self.notification_dispatcher.close()
 
@@ -178,7 +187,10 @@ class OmegaRAGHarness:
         risk_score: float,
     ) -> RiskEvent:
         semantic_active = bool(getattr(self.projector, "semantic_active", True))
-        fallback_active = not semantic_active
+        api_status_fn = getattr(self.projector, "api_perception_status", None)
+        api_status = api_status_fn() if callable(api_status_fn) else {}
+        api_fallback = bool((api_status or {}).get("llm_fallback_active", False))
+        fallback_active = (not semantic_active) or api_fallback
         triggers = infer_major_triggers(
             control_outcome=str(control_outcome),
             action_types=action_types,
@@ -589,6 +601,8 @@ class OmegaRAGHarness:
             capability = {
                 "mode": capability_obj.mode if capability_obj is not None else "unknown",
                 "requires_human_approval": capability_obj.requires_human_approval if capability_obj is not None else False,
+                "capability_class": capability_obj.capability_class if capability_obj is not None else "unknown",
+                "risk_level": capability_obj.risk_level if capability_obj is not None else "unknown",
             }
             adapter_present = bool(self.tool_registry.has(request.tool_name))
             human_approved = bool(request.args.get("human_approved", False))
@@ -618,6 +632,9 @@ class OmegaRAGHarness:
                             "freeze_active": freeze_active,
                             "validation_status": decision_out.validation_status,
                             "validation_reason": decision_out.validation_reason,
+                            "capability_class": decision_out.capability_class,
+                            "risk_level": decision_out.risk_level,
+                            "approval_required": decision_out.approval_required,
                         },
                         capability=capability,
                         human_approved=human_approved,
@@ -658,6 +675,9 @@ class OmegaRAGHarness:
                             "freeze_active": freeze_active,
                             "validation_status": decision_out.validation_status,
                             "validation_reason": decision_out.validation_reason,
+                            "capability_class": decision_out.capability_class,
+                            "risk_level": decision_out.risk_level,
+                            "approval_required": decision_out.approval_required,
                         },
                         capability=capability,
                         human_approved=human_approved,
@@ -698,6 +718,9 @@ class OmegaRAGHarness:
                             "freeze_active": freeze_active,
                             "validation_status": decision_out.validation_status,
                             "validation_reason": decision_out.validation_reason,
+                            "capability_class": decision_out.capability_class,
+                            "risk_level": decision_out.risk_level,
+                            "approval_required": decision_out.approval_required,
                         },
                         capability=capability,
                         human_approved=human_approved,
@@ -758,6 +781,9 @@ class OmegaRAGHarness:
                         "freeze_active": freeze_active,
                         "validation_status": decision_out.validation_status,
                         "validation_reason": decision_out.validation_reason,
+                        "capability_class": decision_out.capability_class,
+                        "risk_level": decision_out.risk_level,
+                        "approval_required": decision_out.approval_required,
                     },
                     capability=capability,
                     human_approved=human_approved,
@@ -771,6 +797,22 @@ class OmegaRAGHarness:
                     decision_id=decision_id,
                 )
             )
+
+        freeze_block = cross_snapshot.get("freeze", {})
+        if isinstance(freeze_block, dict):
+            freeze_action = next((a for a in enforcement_actions if str(a.type) == "TOOL_FREEZE"), None)
+            if freeze_action is not None:
+                freeze_block["freeze_stage"] = (
+                    int(freeze_action.freeze_stage) if freeze_action.freeze_stage is not None else None
+                )
+                freeze_block["stage_reason"] = (
+                    str(freeze_action.stage_reason) if freeze_action.stage_reason is not None else None
+                )
+                freeze_block["escalation_required"] = bool(freeze_action.escalation_required)
+            else:
+                freeze_block.setdefault("freeze_stage", None)
+                freeze_block.setdefault("stage_reason", None)
+                freeze_block.setdefault("escalation_required", False)
 
         step_event = build_step_event(step_result, trace_id=trace_id, decision_id=decision_id)
         enforcement_event = build_enforcement_step_event(
@@ -1048,16 +1090,53 @@ class OmegaRAGHarness:
             reason_flags=list(reason_flags),
             risk_score=risk_score,
         )
+        api_status_fn = getattr(self.projector, "api_perception_status", None)
+        api_status = api_status_fn() if callable(api_status_fn) else {}
+        fallback_active = (not bool(getattr(self.projector, "semantic_active", True))) or bool(
+            (api_status or {}).get("llm_fallback_active", False)
+        )
+        fallback_level = str((api_status or {}).get("fallback_level", "none") or "none")
+        provenance_type = (
+            str(packet_items[0].source_type)
+            if len(packet_items) == 1
+            else ("mixed" if len(packet_items) > 1 else "unknown")
+        )
+        orchestrator_cfg = ((((self.config.get("projector", {}) or {}).get("api_perception", {}) or {}).get("orchestrator", {}) or {}))
+        module_flags = {
+            "orchestrator": bool(orchestrator_cfg.get("enabled", False)),
+            "monitoring": bool(((self.config.get("monitoring", {}) or {}).get("enabled", False))),
+            "notifications": bool(((self.config.get("notifications", {}) or {}).get("enabled", False))),
+        }
+        self.telemetry_service.emit_event(
+            build_telemetry_event(
+                surface="runtime",
+                control_outcome=str(decision.control_outcome),
+                severity=str(decision.severity),
+                walls_triggered=list(walls_triggered),
+                reason_codes=list(reason_flags),
+                action_types=list(action_types),
+                risk_score=float(risk_score),
+                fallback_active=bool(fallback_active),
+                fallback_level=str(fallback_level),
+                accumulation_steps=int(step_result.step),
+                provenance_type=str(provenance_type),
+                module_flags=module_flags,
+                fp_reported=False,
+            )
+        )
         self.notification_dispatcher.emit_risk_event(risk_event)
-        approval_required = ("HUMAN_ESCALATE" in action_types) or ("REQUIRE_APPROVAL" in action_types)
+        policy_approval_required = ("HUMAN_ESCALATE" in action_types) or ("REQUIRE_APPROVAL" in action_types)
+        gateway_approval_required = any((not td.allowed) and bool(td.approval_required) for td in tool_decisions)
+        approval_required = bool(policy_approval_required or gateway_approval_required)
         approval_id: Optional[str] = None
         if approval_required:
             timeout_sec = int(
                 ((self.config.get("notifications", {}) or {}).get("approvals", {}) or {}).get("timeout_sec", 900)
             )
+            required_action = "HUMAN_ESCALATE" if "HUMAN_ESCALATE" in action_types else "REQUIRE_APPROVAL"
             approval = self.notification_dispatcher.create_action_request(
                 risk_event=risk_event,
-                required_action="HUMAN_ESCALATE" if "HUMAN_ESCALATE" in action_types else "REQUIRE_APPROVAL",
+                required_action=required_action,
                 timeout_sec=max(10, timeout_sec),
             )
             approval_id = str(approval.approval_id)

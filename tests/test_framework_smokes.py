@@ -110,3 +110,5 @@ def test_run_framework_smokes_strict():
     }
     assert float(payload["metrics"]["min_gateway_coverage"]) >= 1.0
     assert int(payload["metrics"]["total_orphans"]) == 0
+    assert bool(payload["metrics"]["structured_block_contract_ok"]) is True
+    assert bool(payload["metrics"]["security_metadata_ok"]) is True
