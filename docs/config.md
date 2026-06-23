@@ -12,6 +12,22 @@ Reproducibility rule: **every run must record the exact config snapshot** (hash 
 
 ## 1) Configuration files and locations
 
+Packaged profile files are loaded from `omega/config/resources/profiles/*.yml`.
+Repository-level `config/profiles/*.yml` mirrors the same public profile surface for development and release validation.
+
+Current public production-facing profiles:
+
+| Profile | Primary use | Key posture |
+|---|---|---|
+| `quickstart` | first local smoke | monitor mode, local `pi0`, no API key required |
+| `prod` | local/text production | enforce mode, `pi0`, visual/OCR disabled |
+| `prod_api` | text production with cloud semantic support | enforce mode, `hybrid_api`, requires `OPENAI_API_KEY` |
+| `prod_vision` | visual/image production path | external image-capable API, visual enabled, OCR disabled |
+| `prod_vision_local_ocr` | explicit local OCR enhancement | local OCR/vision, opt-in only |
+| `sensitive_rules_only` | sensitive/no-outbound semantic continuity | enforce mode, rules-only posture |
+
+Development and benchmark profiles such as `dev`, `local_dev`, `pilot`, `pilot_canonical`, `autonomy_soft`, `devops_minimal`, and `deepset_tune` are not the main public production recommendation.
+
 Recommended repository layout:
 
 ```
@@ -573,18 +589,114 @@ projector:
   mode: hybrid_api
   api_perception:
     enabled: true
+    semantic_mode: hybrid_cloud   # rules_only | hybrid_cloud | hybrid_redacted | local_semantic
+    semantic_failure_policy: degrade  # degrade | escalate | fail_closed
     provider: openai          # openai | anthropic | openai_compat
     model: gpt-5.4-mini
     base_url: https://api.openai.com/v1
     api_key_env: OPENAI_API_KEY
-    provider_options: {}      # optional provider-specific knobs
+    provider_options:
+      capabilities:
+        text: true
+        image: true          # phase 1: supported only for openai
+        supported_image_mime_types: [image/png, image/jpeg, image/webp, image/gif]
+        max_image_bytes: 20971520
+        max_images: 8
+      blob_ttl_sec: 120       # request-scoped opaque BlobRef storage
+      blob_max_total_bytes: 134217728
+      blob_max_records: 256
+      hybrid_redacted_allow_raw_image_outbound: false
+      allow_legacy_inline_image_meta: false
 ```
 
 Defaults and compatibility:
 - default provider is `openai`;
 - legacy keys (`model`, `base_url`, `api_key_env`) remain valid;
 - `openai_compat` is intended for OpenAI-compatible gateways (for example DeepSeek/Kimi-compatible endpoints);
+- image semantic support is provider-agnostic in the runtime contract, but phase 1 production image support is implemented only for `openai`;
+- if `provider_options.capabilities.image=false` or the selected provider has no image adapter, image inputs surface explicit `vision_unsupported` semantic status rather than silent semantic allow;
+- capabilities are evaluated for every orchestrator candidate; a text-only primary may be skipped in favor of an image-capable OpenAI fallback, and every attempt is recorded in `provider_route`;
+- raw image bytes are stored only in a request-scoped TTL BlobRef store. `ContentItem.meta`, `SemanticInput.source_meta`, traces, caches, and logs contain only opaque handles and integrity metadata;
+- `allow_legacy_inline_image_meta` is disabled in shipped profiles and exists only as an explicit compatibility bridge for old in-process callers;
 - if you switch provider/model family, run a dedicated smoke/eval before production rollout.
+
+Data-boundary tradeoff (explicit):
+- `hybrid_api` semantic enrichment can send text to an external provider endpoint.
+- This is a deliberate quality vs boundary tradeoff in cloud semantic mode.
+- For sensitive environments that cannot allow external transfer, use local-only projector mode (for example `pi0`) and keep fallback policy explicit (`rule_only` or `fail_closed` by requirement).
+- Do not treat cloud semantic mode as "data never leaves environment"; that claim is not valid when external providers are enabled.
+
+Semantic failure policy (independent from `strict`):
+- `strict=true` controls schema/config contract strictness.
+- `semantic_failure_policy` controls runtime behavior when semantic projection fails:
+  - `degrade`: continue in rule-based-only continuity with explicit `semantic_failed` markers.
+  - `escalate`: force escalation path (`HUMAN_ESCALATE`) for sensitive flows.
+  - `fail_closed`: hard-fail request when semantic projection is unavailable.
+- `semantic_failure_policy` is active only for outbound semantic modes (`hybrid_cloud`, `hybrid_redacted`).
+  In non-outbound modes (`rules_only`, `local_semantic`), it is recorded as configured but runtime-effective state is `inactive_non_outbound_mode`.
+
+Semantic mode mapping (additive, backward compatible):
+- if `projector.api_perception.semantic_mode` is not set, behavior remains legacy-compatible (`hybrid_cloud` path as today).
+- `rules_only`: disable outbound semantic provider calls; deterministic/rule path only.
+- `hybrid_cloud`: current cloud semantic provider behavior. For image inputs, the original image bytes leave the runtime boundary and are sent to the configured external provider.
+- `hybrid_redacted`: cloud semantic provider + deterministic pre-redaction/minimization before send.
+- in `hybrid_redacted`, raw outbound image send is blocked by default; enable only with explicit `provider_options.hybrid_redacted_allow_raw_image_outbound: true`.
+- `local_semantic`: disable outbound provider calls and rely on local semantic path under `pi0.semantic.*`.
+- current pilot/production image release gate is `vision_single` with `image_region_pass_enabled: false`;
+- `image_region_pass_enabled` remains experimental until it demonstrates recall uplift on a cache-isolated repeated gate without breaking latency/cost expectations.
+
+Image operations:
+- `vision_single` production/pilot posture: `projector.api_perception.semantic_mode: hybrid_cloud`, `projector.api_perception.image_region_pass_enabled: false`, `retriever.sqlite_fts.attachments.ocr.enabled: false`.
+- Disable image semantic entirely: use `semantic_mode: rules_only` or disable `projector.api_perception.provider_options.capabilities.image`.
+- Privacy modes:
+  - `hybrid_cloud`: image bytes go to the external provider.
+  - `hybrid_redacted`: text is redacted/minimized and raw image send is blocked unless explicitly allowed.
+  - `local_semantic`: no outbound semantic provider calls.
+- Experimental OCR: enable only with `retriever.sqlite_fts.attachments.ocr.enabled: true`.
+- Smoke command: `python scripts/eval_wainject_image_ocr_slice.py --profile pilot --modes vision_single --max-samples 10`.
+- Release benchmark command: `python scripts/eval_wainject_image_ocr_slice.py --profile pilot --modes vision_single --max-samples 50 --repeats 3 --concurrency-grid 1,5,10`.
+- Expected trace fields: `vision_attempted`, `vision_provider_supported`, `vision_failure_policy`, `vision_fallback_used`, `vision_semantic_status`, `semantic_input_kind`, `provider_capabilities`, `provider_route`, `ocr_adjudication_status`, `ocr_adjudication_result`.
+- Deterministic Phase 1 gate: `python scripts/check_vision_phase1_gate.py`. Rebuild it with `python scripts/eval_vision_phase1_frozen.py`. The frozen gate validates contracts/routing/isolation and does not replace a live provider quality benchmark.
+- The complete JSON and multipart contract is published by OpenAPI at `/openapi.json`; image inputs use the same `/v1/scan/attachment` path.
+- Provider failure behavior: image semantic unavailability surfaces explicit statuses such as `vision_unsupported`, `vision_redaction_blocked`, or `semantic_failed`; it must not become silent allow.
+
+Optional OCR side-path for image attachments:
+
+```yaml
+retriever:
+  sqlite_fts:
+      attachments:
+        ocr:
+          enabled: false      # false production-default; true only for explicit experimental opt-in
+          provider: rapidocr  # rapidocr | paddleocr
+          lang: en
+          use_angle_cls: true
+          max_text_chars: 200000
+```
+
+OCR behavior:
+- OCR is additive to vision, not a replacement for it.
+- Production default is `enabled: false`; current OCR path is experimental opt-in, not enterprise-default.
+- Base install stays lightweight; install OCR dependencies explicitly with `pip install -e .[ocr]` when needed.
+- `rapidocr` is the recommended default local baseline for Windows/Linux image attachments.
+- `paddleocr` remains available, but native Windows should be treated as an experimental/heavier path.
+- If OCR is unavailable in `auto` mode, runtime continues and records explicit `ocr_unavailable` status.
+- OCR-derived text is marked as OCR provenance (`modality=ocr`, `derived_from=image`) rather than treated as first-party page text.
+- OCR provenance now carries bounded layout metadata for image-derived text: `span_count`, polygon/confidence availability, provider-order presence, and a small hash/redacted preview of OCR spans. Public trace must not include raw OCR text; it uses `span_id`, `text_sha256`, `redacted_excerpt`, geometry, and ordering metadata instead.
+- OCR-only pressure is not allowed to hard-block on its own; without confirming image-semantic agreement it is downgraded into the adjudication branch.
+- Vision-only positive pressure keeps its normal verdict; the mere presence of OCR text does not soften a positive image-semantic hit.
+- OCR plus vision agreement can strengthen the final decision, but modality agreement is tracked explicitly in trace rather than double-counted as a generic single-source cap.
+
+Local semantic prerequisites:
+- enable local semantic encoder in `pi0.semantic.enabled: true`;
+- provide a valid local model path (`pi0.semantic.model_path`);
+- verify semantic status on startup (`active=true`) before production rollout.
+- `pi0.semantic.enabled: auto` is not the same as "off"; if the model path exists, runtime may activate the local encoder on first request.
+- On Windows, `CPU` local semantic startup can be slow enough to look like a hang during cold start.
+- Treat `rule-only` and `local semantic` as separate operational modes:
+  - `rule-only`: set `pi0.semantic.enabled: false`;
+  - `local semantic`: keep it enabled and prefer CUDA-capable `torch` for repeated runs.
+- If you intentionally want fast deterministic local runs without encoder startup cost, disable local semantic instead of relying on `auto`.
 
 Orchestrator quota fallback (optional, additive):
 
@@ -617,6 +729,28 @@ projector:
 
 When orchestrator is enabled, runtime emits explicit degraded status fields:
 `provider_id`, `health_state`, `llm_fallback_active`, `fallback_level`, `fallback_reason`, `quota_signal`.
+
+Official sensitive deployment variant (opt-in, not default):
+
+```yaml
+# config/profiles/sensitive_rules_only.yml
+runtime:
+  guard_mode: enforce
+
+projector:
+  mode: hybrid_api
+  api_perception:
+    strict: true
+    orchestrator:
+      enabled: true
+      fallback:
+        mode: rule_only
+```
+
+Why this is not the default:
+- `rule_only` continuity keeps protection running during provider outages/quota events.
+- It does not keep full semantic parity with healthy hybrid operation.
+- Keeping it opt-in avoids silent expectations mismatch for teams that prioritize semantic depth over continuity behavior.
 
 ---
 
@@ -651,3 +785,33 @@ CLI:
 Privacy guarantees:
 - only anonymous aggregates and structural pattern hashes;
 - no raw prompts/documents/tool payloads, keys/tokens/passwords, or host/network identifiers.
+
+## Production Safety Baseline (P0)
+
+The shipped runtime treats `TOOLS_DISABLED` as an absolute deny state. Read-only
+exceptions are not permitted; use `TOOLS_ALLOWLIST` for explicit, audited exceptions.
+
+The legacy built-in side-effect adapters `write_file` and `network_post` are not
+part of the executable default registry and must remain `enabled: false`. Their
+argument validators are retained only for compatibility testing and for separately
+reviewed external adapters.
+
+The `prod` API profile requires credentials from environment variables:
+
+```bash
+export OMEGA_API_KEYS="<strong-production-api-key>"
+export OMEGA_API_HMAC_SECRET="<separate-strong-hmac-secret>"
+```
+
+Both values must be at least 32 characters, must not use known development
+placeholders, and must not be identical. Production startup fails closed otherwise.
+
+Release archives must be generated with:
+
+```bash
+python scripts/secret_scan.py .
+python scripts/build_clean_source_archive.py --output dist/OmegaWalls-source.zip
+```
+
+The archive builder excludes local environment files, caches and generated artifacts,
+then performs a blocking secret scan over the staged archive content.

@@ -3,18 +3,24 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 from omega.interfaces.contracts_v1 import OffAction, ToolDecision, ToolRequest
 from omega.tools.arg_validation import ToolArgValidationConfig, validate_tool_args
+from omega.tools.approval import tool_args_sha256, tool_intent_id
+from omega.notifications.models import utc_now_iso
+
+
+_BUILTIN_DISABLED_TOOLS = frozenset({"write_file", "network_post"})
 
 
 _DEFAULT_CAPABILITIES = {
-    "retrieval_readonly": {"mode": "read_only", "allowed_when": ["NO_OFF", "OFF"], "requires_human_approval": False},
-    "summarize": {"mode": "read_only", "allowed_when": ["NO_OFF", "OFF"], "requires_human_approval": False},
-    "echo": {"mode": "read_only", "allowed_when": ["NO_OFF", "OFF"], "requires_human_approval": False},
-    "write_file": {"mode": "write", "allowed_when": ["NO_OFF"], "requires_human_approval": True},
-    "network_post": {"mode": "dangerous", "allowed_when": ["NO_OFF"], "requires_human_approval": True},
+    "retrieval_readonly": {"enabled": True, "mode": "read_only", "allowed_when": ["NO_OFF", "OFF"], "requires_human_approval": False},
+    "summarize": {"enabled": True, "mode": "read_only", "allowed_when": ["NO_OFF", "OFF"], "requires_human_approval": False},
+    "echo": {"enabled": True, "mode": "read_only", "allowed_when": ["NO_OFF", "OFF"], "requires_human_approval": False},
+    # Built-in side-effecting adapters are intentionally unavailable in v1.
+    "write_file": {"enabled": False, "mode": "write", "allowed_when": ["NO_OFF"], "requires_human_approval": True},
+    "network_post": {"enabled": False, "mode": "dangerous", "allowed_when": ["NO_OFF"], "requires_human_approval": True},
 }
 _VALID_CAPABILITY_CLASSES = {"READ_SAFE", "WRITE_LOW_RISK", "DESTRUCTIVE", "EXEC_DEPLOY", "PRIV_ESC"}
 _DEFAULT_RISK_BY_CLASS = {
@@ -28,6 +34,7 @@ _DEFAULT_RISK_BY_CLASS = {
 
 @dataclass(frozen=True)
 class ToolCapability:
+    enabled: bool
     mode: str
     allowed_when: Set[str]
     requires_human_approval: bool
@@ -87,13 +94,16 @@ def _as_lower_set(values: List[str] | None) -> Set[str]:
 @dataclass
 class ToolGatewayV1:
     config: Optional[Dict] = None
+    approval_store: Optional[Any] = None
 
     def __post_init__(self) -> None:
         tools_cfg = (self.config or {}).get("tools", {})
         self.unknown_tool_policy = str(tools_cfg.get("unknown_tool_policy", "DENY")).upper()
         if self.unknown_tool_policy != "DENY":
             raise ValueError("tools.unknown_tool_policy must be DENY in v1")
-        self.freeze_read_only_exception = bool(tools_cfg.get("freeze", {}).get("read_only_exception", True))
+        self.freeze_read_only_exception = bool(tools_cfg.get("freeze", {}).get("read_only_exception", False))
+        if self.freeze_read_only_exception:
+            raise ValueError("tools.freeze.read_only_exception must be false; use TOOLS_ALLOWLIST for explicit exceptions")
         self.arg_validation = ToolArgValidationConfig.from_tools_config(tools_cfg.get("arg_validation", {}))
         autonomy_cfg = tools_cfg.get("autonomy_soft", {}) or {}
         self.autonomy_soft_enabled = bool(autonomy_cfg.get("enabled", False))
@@ -146,6 +156,10 @@ class ToolGatewayV1:
         self.capabilities: Dict[str, ToolCapability] = {}
         for tool_name, cap in raw_caps.items():
             cap_dict = cap or {}
+            normalized_tool_name = str(tool_name).strip().lower()
+            # These legacy built-ins are removed from the executable registry and
+            # cannot be re-enabled through profile/env/request configuration.
+            enabled = bool(cap_dict.get("enabled", True)) and normalized_tool_name not in _BUILTIN_DISABLED_TOOLS
             mode = _normalize_tool_mode(cap_dict.get("mode", "dangerous"))
             requires_human_approval = bool(cap_dict.get("requires_human_approval", False))
             capability_class = _normalize_capability_class(cap_dict.get("capability_class", ""), mode)
@@ -156,7 +170,8 @@ class ToolGatewayV1:
                 and self.enforce_capability_requires_human_approval
             ):
                 raise ValueError(f"Tool capability '{tool_name}' mode={mode} must require human approval")
-            self.capabilities[str(tool_name)] = ToolCapability(
+            self.capabilities[normalized_tool_name] = ToolCapability(
+                enabled=enabled,
                 mode=mode,
                 allowed_when=_normalize_allowed_when(cap_dict.get("allowed_when")),
                 requires_human_approval=requires_human_approval,
@@ -235,237 +250,193 @@ class ToolGatewayV1:
         if missing:
             raise ValueError(f"Missing capability profiles for tools: {', '.join(sorted(missing))}")
 
+    def bind_approval_store(self, store: Any) -> None:
+        self.approval_store = store
+
+    def _approval_decision(
+        self,
+        *,
+        request: ToolRequest,
+        mode: str,
+        capability_class: Optional[str],
+        risk_level: Optional[str],
+        validation_status: str,
+        missing_reason: str,
+    ) -> Optional[ToolDecision]:
+        try:
+            expected_intent = tool_intent_id(request)
+            args_hash = tool_args_sha256(request.args)
+        except ValueError as exc:
+            return ToolDecision(
+                allowed=False,
+                mode=mode,
+                reason="INVALID_TOOL_INTENT",
+                logged=True,
+                validation_status=validation_status,
+                validation_reason=str(exc),
+                capability_class=capability_class,
+                risk_level=risk_level,
+                approval_required=True,
+            )
+        request.intent_id = expected_intent
+        approval_id = str(request.approval_id or "").strip()
+        if not approval_id:
+            return ToolDecision(
+                allowed=False,
+                mode=mode,
+                reason=str(missing_reason),
+                logged=True,
+                validation_status=validation_status,
+                validation_reason=None,
+                capability_class=capability_class,
+                risk_level=risk_level,
+                approval_required=True,
+                intent_id=expected_intent,
+            )
+        if self.approval_store is None:
+            return ToolDecision(
+                allowed=False,
+                mode=mode,
+                reason="APPROVAL_STORE_UNAVAILABLE",
+                logged=True,
+                validation_status=validation_status,
+                validation_reason=None,
+                capability_class=capability_class,
+                risk_level=risk_level,
+                approval_required=True,
+                intent_id=expected_intent,
+                approval_id=approval_id,
+            )
+        record = self.approval_store.consume_tool_approval(
+            approval_id=approval_id,
+            tenant_id=str(request.tenant_id or ""),
+            session_id=str(request.session_id or ""),
+            tool_name=str(request.tool_name or "").strip().lower(),
+            tool_args_sha256=args_hash,
+            tool_intent_id=expected_intent,
+            step=int(request.step),
+            now_iso=utc_now_iso(),
+        )
+        if record is None:
+            return ToolDecision(
+                allowed=False,
+                mode=mode,
+                reason="APPROVAL_INVALID_EXPIRED_OR_CONSUMED",
+                logged=True,
+                validation_status=validation_status,
+                validation_reason=None,
+                capability_class=capability_class,
+                risk_level=risk_level,
+                approval_required=True,
+                intent_id=expected_intent,
+                approval_id=approval_id,
+            )
+        return None
+
     def enforce(self, request: ToolRequest, current_actions: List[OffAction]) -> ToolDecision:
         freeze_action = self._find_freeze(current_actions)
         require_approval_action = self._find_require_approval(current_actions)
         off_state = self._is_off_state(current_actions)
-        capability = self.capabilities.get(request.tool_name)
+        tool_name = str(request.tool_name or "").strip().lower()
+        request.tool_name = tool_name
+        capability = self.capabilities.get(tool_name)
         capability_class = capability.capability_class if capability is not None else None
         risk_level = capability.risk_level if capability is not None else None
+        mode = freeze_action.tool_mode if freeze_action is not None else "TOOLS_ENABLED"
 
-        if capability is None and self.unknown_tool_policy == "DENY":
+        def deny(reason: str, *, validation_status: str = "skipped", validation_reason: Optional[str] = None, approval_required: bool = False) -> ToolDecision:
             return ToolDecision(
                 allowed=False,
-                mode="TOOLS_DISABLED",
-                reason="UNKNOWN_TOOL",
+                mode=str(mode or "TOOLS_DISABLED"),
+                reason=reason,
                 logged=True,
-                validation_status="skipped",
-                validation_reason=None,
-                capability_class=None,
-                risk_level=None,
-                approval_required=False,
+                validation_status=validation_status,
+                validation_reason=validation_reason,
+                capability_class=capability_class,
+                risk_level=risk_level,
+                approval_required=approval_required,
+                intent_id=request.intent_id,
+                approval_id=request.approval_id,
             )
 
-        mode = freeze_action.tool_mode if freeze_action is not None else "TOOLS_DISABLED"
-        cap_mode = capability.mode if capability is not None else "dangerous"
+        if capability is None:
+            return deny("UNKNOWN_TOOL")
+        if not capability.enabled:
+            return deny("TOOL_DISABLED_BY_CONFIG")
 
         if self.autonomy_soft_enabled:
-            tool_name_norm = str(request.tool_name).strip().lower()
             effective_tool_denylist = self._effective_tool_denylist()
             effective_tool_allowlist = self._effective_tool_allowlist()
             effective_class_denylist = self._effective_class_denylist()
             effective_class_allowlist = self._effective_class_allowlist()
-
-            if tool_name_norm in effective_tool_denylist:
-                return ToolDecision(
-                    allowed=False,
-                    mode=mode,
-                    reason="AUTONOMY_TOOL_DENYLIST",
-                    logged=True,
-                    validation_status="skipped",
-                    validation_reason=None,
-                    capability_class=capability_class,
-                    risk_level=risk_level,
-                    approval_required=False,
-                )
-            if effective_tool_allowlist and tool_name_norm not in effective_tool_allowlist:
-                return ToolDecision(
-                    allowed=False,
-                    mode=mode,
-                    reason="AUTONOMY_TOOL_NOT_ALLOWLISTED",
-                    logged=True,
-                    validation_status="skipped",
-                    validation_reason=None,
-                    capability_class=capability_class,
-                    risk_level=risk_level,
-                    approval_required=False,
-                )
-            if capability is not None:
-                if capability.capability_class in effective_class_denylist:
-                    return ToolDecision(
-                        allowed=False,
-                        mode=mode,
-                        reason="AUTONOMY_CLASS_DENYLIST",
-                        logged=True,
-                        validation_status="skipped",
-                        validation_reason=None,
-                        capability_class=capability_class,
-                        risk_level=risk_level,
-                        approval_required=False,
-                    )
-                if effective_class_allowlist and capability.capability_class not in effective_class_allowlist:
-                    return ToolDecision(
-                        allowed=False,
-                        mode=mode,
-                        reason="AUTONOMY_CLASS_NOT_ALLOWLISTED",
-                        logged=True,
-                        validation_status="skipped",
-                        validation_reason=None,
-                        capability_class=capability_class,
-                        risk_level=risk_level,
-                        approval_required=False,
-                    )
+            if tool_name in effective_tool_denylist:
+                return deny("AUTONOMY_TOOL_DENYLIST")
+            if effective_tool_allowlist and tool_name not in effective_tool_allowlist:
+                return deny("AUTONOMY_TOOL_NOT_ALLOWLISTED")
+            if capability.capability_class in effective_class_denylist:
+                return deny("AUTONOMY_CLASS_DENYLIST")
+            if effective_class_allowlist and capability.capability_class not in effective_class_allowlist:
+                return deny("AUTONOMY_CLASS_NOT_ALLOWLISTED")
 
         if freeze_action is not None:
             mode = freeze_action.tool_mode or "TOOLS_DISABLED"
             if mode == "TOOLS_DISABLED":
-                if self.freeze_read_only_exception and cap_mode != "read_only":
-                    return ToolDecision(
-                        allowed=False,
-                        mode=mode,
-                        reason="TOOL_FREEZE_ACTIVE",
-                        logged=True,
-                        validation_status="skipped",
-                        validation_reason=None,
-                        capability_class=capability_class,
-                        risk_level=risk_level,
-                        approval_required=False,
-                    )
-                if not (self.freeze_read_only_exception and cap_mode == "read_only"):
-                    return ToolDecision(
-                        allowed=False,
-                        mode=mode,
-                        reason="TOOL_FREEZE_ACTIVE",
-                        logged=True,
-                        validation_status="skipped",
-                        validation_reason=None,
-                        capability_class=capability_class,
-                        risk_level=risk_level,
-                        approval_required=False,
-                    )
-            elif mode == "TOOLS_ALLOWLIST":
-                allowlist = freeze_action.allowlist or []
-                if request.tool_name not in allowlist:
-                    return ToolDecision(
-                        allowed=False,
-                        mode=mode,
-                        reason="NOT_IN_ALLOWLIST",
-                        logged=True,
-                        validation_status="skipped",
-                        validation_reason=None,
-                        capability_class=capability_class,
-                        risk_level=risk_level,
-                        approval_required=False,
-                    )
-                if self.freeze_read_only_exception and cap_mode != "read_only":
-                    return ToolDecision(
-                        allowed=False,
-                        mode=mode,
-                        reason="TOOL_FREEZE_ACTIVE",
-                        logged=True,
-                        validation_status="skipped",
-                        validation_reason=None,
-                        capability_class=capability_class,
-                        risk_level=risk_level,
-                        approval_required=False,
-                    )
+                return deny("TOOL_FREEZE_ACTIVE")
+            if mode == "TOOLS_ALLOWLIST":
+                allowlist = {str(name).strip().lower() for name in (freeze_action.allowlist or [])}
+                if tool_name not in allowlist:
+                    return deny("NOT_IN_ALLOWLIST")
             else:
-                return ToolDecision(
-                    allowed=False,
-                    mode=mode,
-                    reason="POLICY_BLOCK",
-                    logged=True,
-                    validation_status="skipped",
-                    validation_reason=None,
-                    capability_class=capability_class,
-                    risk_level=risk_level,
-                    approval_required=False,
-                )
+                return deny("POLICY_BLOCK")
 
-        # REQUIRE_APPROVAL is weaker than TOOL_FREEZE and applied in chokepoint before execution.
-        if require_approval_action is not None:
-            allowlist = [str(x) for x in (require_approval_action.allowlist or []) if str(x).strip()]
-            applies = True if not allowlist else (request.tool_name in allowlist)
-            if applies and not bool(request.args.get("human_approved", False)):
-                return ToolDecision(
-                    allowed=False,
-                    mode=mode,
-                    reason="REQUIRE_APPROVAL_PENDING",
-                    logged=True,
-                    validation_status="skipped",
-                    validation_reason=None,
-                    capability_class=capability_class,
-                    risk_level=risk_level,
-                    approval_required=True,
-                )
+        if (
+            self.autonomy_soft_enabled
+            and self.backup_safety_enabled
+            and self.backup_precondition_required
+            and not self.backup_precondition_ready
+            and capability.capability_class in self.backup_sensitive_classes
+        ):
+            return deny("BACKUP_POLICY_PRECONDITION", validation_reason="immutable_backup_precondition_not_ready")
+        if off_state and "OFF" not in capability.allowed_when:
+            return deny("OFF_STATE_BLOCK")
 
-        if capability is not None:
-            if (
-                self.autonomy_soft_enabled
-                and self.backup_safety_enabled
-                and self.backup_precondition_required
-                and (not self.backup_precondition_ready)
-                and capability.capability_class in self.backup_sensitive_classes
-            ):
-                return ToolDecision(
-                    allowed=False,
-                    mode=mode,
-                    reason="BACKUP_POLICY_PRECONDITION",
-                    logged=True,
-                    validation_status="skipped",
-                    validation_reason="immutable_backup_precondition_not_ready",
-                    capability_class=capability_class,
-                    risk_level=risk_level,
-                    approval_required=False,
-                )
-            if off_state and "OFF" not in capability.allowed_when:
-                return ToolDecision(
-                    allowed=False,
-                    mode=mode,
-                    reason="OFF_STATE_BLOCK",
-                    logged=True,
-                    validation_status="skipped",
-                    validation_reason=None,
-                    capability_class=capability_class,
-                    risk_level=risk_level,
-                    approval_required=False,
-                )
-            approval_required = self._approval_required_for_capability(capability)
-            if approval_required and not bool(request.args.get("human_approved", False)):
-                return ToolDecision(
-                    allowed=False,
-                    mode=mode,
-                    reason="HUMAN_APPROVAL_REQUIRED",
-                    logged=True,
-                    validation_status="skipped",
-                    validation_reason=None,
-                    capability_class=capability_class,
-                    risk_level=risk_level,
-                    approval_required=True,
-                )
-
-        validation = validate_tool_args(request.tool_name, request.args, self.arg_validation)
+        # Validate the exact arguments before asking for or consuming an approval.
+        validation = validate_tool_args(tool_name, request.args, self.arg_validation)
         if validation.checked and not validation.allowed:
-            return ToolDecision(
-                allowed=False,
-                mode=mode,
-                reason=str(validation.reason_code or "INVALID_TOOL_ARGS_SCHEMA"),
-                logged=True,
+            return deny(
+                str(validation.reason_code or "INVALID_TOOL_ARGS_SCHEMA"),
                 validation_status="failed",
                 validation_reason=validation.reason,
+            )
+        validation_status = "passed" if validation.checked else "not_checked"
+
+        approval_required = self._approval_required_for_capability(capability)
+        if require_approval_action is not None:
+            allowlist = {str(x).strip().lower() for x in (require_approval_action.allowlist or []) if str(x).strip()}
+            if not allowlist or tool_name in allowlist:
+                approval_required = True
+        if approval_required:
+            blocked = self._approval_decision(
+                request=request,
+                mode=str(mode or "TOOLS_ENABLED"),
                 capability_class=capability_class,
                 risk_level=risk_level,
-                approval_required=False,
+                validation_status=validation_status,
+                missing_reason=("REQUIRE_APPROVAL_PENDING" if require_approval_action is not None else "HUMAN_APPROVAL_REQUIRED"),
             )
-        status = "passed" if validation.checked else "not_checked"
+            if blocked is not None:
+                return blocked
+
         return ToolDecision(
             allowed=True,
-            mode=mode,
+            mode=str(mode or "TOOLS_ENABLED"),
             reason="OK",
             logged=True,
-            validation_status=status,
+            validation_status=validation_status,
             validation_reason=None,
             capability_class=capability_class,
             risk_level=risk_level,
             approval_required=False,
+            intent_id=request.intent_id,
+            approval_id=request.approval_id,
         )

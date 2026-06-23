@@ -6,7 +6,14 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 import random
+import sys
 from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from scripts.session_pack_leakage import build_opaque_maps
 
 
 FAMILY_COCKTAIL = "cocktail"
@@ -131,6 +138,36 @@ def _load_local_contour_pools(repo_root: Path) -> Dict[str, List[TextSample]]:
     return pools
 
 
+
+
+def _load_builtin_fixture_pools(repo_root: Path) -> Dict[str, List[TextSample]]:
+    """Load source-controlled fallback pools shipped with the clean source archive.
+
+    External benchmark corpora are intentionally not required for deterministic
+    unit/build validation.  The fallback is explicit, versioned, and only fills
+    families that may be absent from an OSS/source distribution.
+    """
+    path = (
+        repo_root
+        / "tests"
+        / "data"
+        / "session_benchmark"
+        / "session_builder_fallback_v1.jsonl"
+    )
+    pools: Dict[str, List[TextSample]] = defaultdict(list)
+    for row in _load_jsonl(path):
+        family = str(row.get("family", "")).strip()
+        text = str(row.get("text", "")).strip()
+        if family not in ALL_FAMILIES or not text:
+            continue
+        rid = str(row.get("id", "unknown"))
+        if bool(row.get("context_required", False)):
+            source_ref = f"builtin:EIA_wo_EI.jsonl:{rid}"
+        else:
+            source_ref = f"builtin:session_builder_fallback_v1:{rid}"
+        pools[family].append(TextSample(text=text, source_ref=source_ref))
+    return pools
+
 def _merge_pools(*blocks: Mapping[str, Sequence[TextSample]]) -> Dict[str, List[TextSample]]:
     out: Dict[str, List[TextSample]] = defaultdict(list)
     for block in blocks:
@@ -183,7 +220,8 @@ def build_session_pack(*, repo_root: Path, seed: int = 41) -> List[Dict[str, Any
     wa = _load_wainject_pools(repo_root)
     strict = _load_strict_holdout_pools(repo_root)
     local = _load_local_contour_pools(repo_root)
-    pools = _merge_pools(wa, strict, local)
+    builtin = _load_builtin_fixture_pools(repo_root)
+    pools = _merge_pools(wa, strict, local, builtin)
 
     for fam in ALL_FAMILIES:
         if not pools.get(fam):
@@ -333,16 +371,68 @@ def _summary(rows: Sequence[Mapping[str, Any]], seed: int) -> Dict[str, Any]:
     }
 
 
-def write_session_pack(rows: Sequence[Mapping[str, Any]], *, out_jsonl: Path, seed: int) -> Dict[str, Any]:
-    out_jsonl.parent.mkdir(parents=True, exist_ok=True)
-    with out_jsonl.open("w", encoding="utf-8") as fh:
-        for row in rows:
+def _to_dual_rows(rows: Sequence[Mapping[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    s_map, a_map, src_map = build_opaque_maps(rows=rows, session_key="session_id", actor_key="actor_id", source_key="source_ref")
+    runtime_rows: List[Dict[str, Any]] = []
+    label_rows: List[Dict[str, Any]] = []
+    for row in rows:
+        old_sid = str(row.get("session_id", "")).strip()
+        old_aid = str(row.get("actor_id", "")).strip()
+        old_src = str(row.get("source_ref", "")).strip()
+        sid = s_map[old_sid]
+        aid = a_map[old_aid]
+        src = src_map[old_src]
+        turn_id = int(row.get("turn_id", 0))
+        runtime_rows.append(
+            {
+                "session_id": sid,
+                "turn_id": turn_id,
+                "text": str(row.get("text", "")),
+                "source_type": "external_untrusted",
+                "source_id": src,
+            }
+        )
+        label_rows.append(
+            {
+                "session_id": sid,
+                "turn_id": turn_id,
+                "label_turn": str(row.get("label_turn", "")),
+                "label_session": str(row.get("label_session", "")),
+                "family": str(row.get("family", "")),
+                "bucket": str(row.get("bucket", "core")),
+                "eval_slice": str(row.get("eval_slice", "text_intrinsic")),
+                "source_ref": old_src,
+                "actor_id": aid,
+            }
+        )
+    runtime_rows = sorted(runtime_rows, key=lambda r: (str(r["session_id"]), int(r["turn_id"])))
+    label_rows = sorted(label_rows, key=lambda r: (str(r["session_id"]), int(r["turn_id"])))
+    return runtime_rows, label_rows
+
+
+def write_session_pack(rows: Sequence[Mapping[str, Any]], *, out_root: Path, seed: int) -> Dict[str, Any]:
+    runtime_rows, label_rows = _to_dual_rows(rows)
+    runtime_dir = out_root / "runtime"
+    labels_dir = out_root / "labels"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    runtime_jsonl = runtime_dir / "session_pack.jsonl"
+    labels_jsonl = labels_dir / "session_pack_labels.jsonl"
+    with runtime_jsonl.open("w", encoding="utf-8") as fh:
+        for row in runtime_rows:
+            fh.write(json.dumps(dict(row), ensure_ascii=False) + "\n")
+    with labels_jsonl.open("w", encoding="utf-8") as fh:
+        for row in label_rows:
             fh.write(json.dumps(dict(row), ensure_ascii=False) + "\n")
     summary = _summary(rows, seed=seed)
-    meta = out_jsonl.with_suffix(".meta.json")
-    meta.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    meta = out_root / "session_pack.meta.json"
+    meta_payload = dict(summary)
+    meta_payload["runtime_pack_path"] = str(runtime_jsonl)
+    meta_payload["labels_pack_path"] = str(labels_jsonl)
+    meta.write_text(json.dumps(meta_payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return {
-        "jsonl": str(out_jsonl),
+        "runtime_jsonl": str(runtime_jsonl),
+        "labels_jsonl": str(labels_jsonl),
         "meta_json": str(meta),
         "summary": summary,
     }
@@ -351,12 +441,11 @@ def write_session_pack(rows: Sequence[Mapping[str, Any]], *, out_jsonl: Path, se
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build fixed session-based PI benchmark pack (seeded deterministic).")
     parser.add_argument("--seed", type=int, default=41)
-    parser.add_argument("--out", default="tests/data/session_benchmark/session_pack_seed41_v1.jsonl")
+    parser.add_argument("--out-root", default="tests/data/session_benchmark")
     args = parser.parse_args()
 
-    root = Path(__file__).resolve().parent.parent
-    rows = build_session_pack(repo_root=root, seed=int(args.seed))
-    result = write_session_pack(rows, out_jsonl=(root / str(args.out)).resolve(), seed=int(args.seed))
+    rows = build_session_pack(repo_root=ROOT, seed=int(args.seed))
+    result = write_session_pack(rows, out_root=(ROOT / str(args.out_root)).resolve(), seed=int(args.seed))
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 

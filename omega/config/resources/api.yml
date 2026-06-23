@@ -13,9 +13,11 @@ api:
   security:
     transport_mode: proxy_tls
     require_https: true
+    trusted_proxy_cidrs: ["127.0.0.1/32", "::1/128"]
   auth:
     api_keys:
       - dev-api-key
+    api_key_env: OMEGA_API_KEYS
     require_hmac: true
     hmac_secret_env: OMEGA_API_HMAC_SECRET
     hmac_headers:
@@ -29,6 +31,10 @@ api:
     max_file_bytes: 20971520
     max_extracted_text_chars: 200000
     request_timeout_sec: 15
+    max_request_body_bytes: 25165824
+    max_multipart_files: 1
+    max_multipart_fields: 16
+    max_multipart_part_bytes: 20971520
   logging:
     enabled: true
     include_policy_trace: true

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.omegawalls.io/release/release_keyring_v1.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "keys"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "keys": {"type": "array", "items": {
+      "type": "object", "additionalProperties": false,
+      "required": ["key_id", "algorithm", "public_key", "status", "usage"],
+      "properties": {
+        "key_id": {"type": "string", "minLength": 1}, "algorithm": {"const": "Ed25519"},
+        "public_key": {"type": "string", "minLength": 40}, "status": {"enum": ["active", "revoked", "retired"]},
+        "usage": {"enum": ["production", "test"]}
+      }
+    }}
+  }
+}

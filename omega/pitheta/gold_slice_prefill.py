@@ -9,10 +9,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Sequence, Tuple
 
+from omega.eval.attack_corpus import generate
 from omega.eval.deepset_adapter import build_deepset_samples
 from omega.interfaces.contracts_v1 import ContentItem, WALLS_V1
 from omega.projector.pi0_intent_v2 import Pi0IntentAwareV2
-from redteam.generator import generate
 
 WALLS = list(WALLS_V1)
 SOURCE_DEFAULTS = {

@@ -1,0 +1,15 @@
+runtime_integrity:
+  enabled: false
+  mode: shadow
+  emit_artifact_trace: true
+  hard_invariants:
+    skill_source_mismatch: true
+    untrusted_skill_install_without_approval: true
+    quarantined_source_memory_write: true
+    missing_reentry_scan: true
+  resource_limits:
+    require_budget: true
+    max_resource_units: 1000
+  approval_policy:
+    privileged_requires_approval: true
+    resource_heavy_requires_approval: true

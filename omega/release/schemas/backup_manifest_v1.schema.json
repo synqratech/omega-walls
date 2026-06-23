@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.omegawalls.io/release/backup_manifest_v1.schema.json",
+  "title": "Omega Walls Customer Data Backup Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "backup_id", "created_utc", "engine_version", "contracts", "excluded_top_level", "entries"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "backup_id": {"type": "string", "minLength": 1},
+    "created_utc": {"type": "string", "format": "date-time"},
+    "engine_version": {"type": "string"},
+    "contracts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["config_schema", "runtime_state_schema", "control_plane_schema"],
+      "properties": {
+        "config_schema": {"type": "integer", "minimum": 1},
+        "runtime_state_schema": {"type": "integer", "minimum": 1},
+        "control_plane_schema": {"type": "integer", "minimum": 1}
+      }
+    },
+    "excluded_top_level": {"type": "array", "items": {"type": "string"}},
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256", "size_bytes", "mode", "copy_method"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "size_bytes": {"type": "integer", "minimum": 0},
+          "mode": {"type": "string"},
+          "copy_method": {"enum": ["sqlite_backup_api", "file_copy", "file_copy_non_sqlite_content"]}
+        }
+      }
+    }
+  }
+}

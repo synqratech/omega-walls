@@ -39,3 +39,21 @@ def test_load_resolved_config_still_supports_explicit_config_dir() -> None:
     assert snapshot.file_hashes
     # Explicit config_dir path should be reflected in file_hashes keys.
     assert any(str(config_dir).replace("\\", "/") in str(key) for key in snapshot.file_hashes.keys())
+
+
+def test_prod_profile_defaults_to_no_incident_text_capture() -> None:
+    snapshot = load_resolved_config(profile="prod")
+    cfg = snapshot.resolved
+    assert cfg.get("profiles", {}).get("env") == "prod"
+    incident_cfg = (cfg.get("off_policy", {}) or {}).get("incident_artifact", {}) or {}
+    assert bool(incident_cfg.get("capture_incident_text", True)) is False
+
+
+def test_unknown_profile_raises_stable_error_for_explicit_config_dir() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    config_dir = repo_root / "config"
+    try:
+        load_resolved_config(config_dir=str(config_dir), profile="sensitve_rules_only_typo")
+        assert False, "expected unknown profile failure"
+    except ValueError as exc:
+        assert str(exc) == "profile not found: sensitve_rules_only_typo"

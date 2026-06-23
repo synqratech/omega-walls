@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.omegawalls.io/release/behavior_thresholds_v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "promotion_defaults", "review_required_for"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "promotion_defaults": {
+      "type": "object", "additionalProperties": false,
+      "required": ["allow_to_block_max", "block_to_allow_max", "tool_freeze_removed_max", "missing_records_max", "latency_p95_regression_pct_max"],
+      "properties": {
+        "allow_to_block_max": {"type": "integer", "minimum": 0},
+        "block_to_allow_max": {"type": "integer", "minimum": 0},
+        "tool_freeze_removed_max": {"type": "integer", "minimum": 0},
+        "missing_records_max": {"type": "integer", "minimum": 0},
+        "latency_p95_regression_pct_max": {"type": "number", "minimum": 0}
+      }
+    },
+    "review_required_for": {"type": "array", "uniqueItems": true, "items": {"enum": ["verdict_transition", "severity_change", "action_change", "latency_regression"]}}
+  }
+}

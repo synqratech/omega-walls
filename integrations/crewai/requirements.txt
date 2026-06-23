@@ -1,0 +1,2 @@
+﻿omega-walls==0.1.4
+crewai==0.80.0

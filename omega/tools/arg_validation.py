@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 from urllib.parse import urlparse
 
+from omega.security.network import OutboundURLPolicy, validate_outbound_url
+
 
 _META_KEYS = {"human_approved", "intent_id", "request_origin"}
 _DEFAULT_SHELL_NAME_PATTERNS = ["shell", "bash", "cmd", "exec", "execute", "powershell", "terminal", "sh"]
@@ -36,6 +38,11 @@ class ToolArgValidationConfig:
     max_header_count: int
     max_header_key_chars: int
     max_header_value_chars: int
+    network_allowed_hosts: List[str]
+    network_allowed_ports: List[int]
+    network_allowed_schemes: List[str]
+    network_allow_ip_literals: bool
+    network_resolve_dns: bool
     max_filename_chars: int
     max_content_bytes: int
     shell_like_name_patterns: List[str]
@@ -74,6 +81,11 @@ class ToolArgValidationConfig:
             max_header_count=int(net.get("max_headers", 16)),
             max_header_key_chars=int(net.get("max_header_key_chars", 64)),
             max_header_value_chars=int(net.get("max_header_value_chars", 256)),
+            network_allowed_hosts=[str(x).strip().lower() for x in list(net.get("allowed_hosts", [])) if str(x).strip()],
+            network_allowed_ports=[int(x) for x in list(net.get("allowed_ports", [443]))],
+            network_allowed_schemes=[str(x).strip().lower() for x in list(net.get("allowed_schemes", ["https"])) if str(x).strip()],
+            network_allow_ip_literals=bool(net.get("allow_ip_literals", False)),
+            network_resolve_dns=bool(net.get("resolve_dns", True)),
             max_filename_chars=int(wr.get("max_filename_chars", 120)),
             max_content_bytes=int(wr.get("max_content_bytes", 8192)),
             shell_like_name_patterns=shell_name_patterns,
@@ -85,6 +97,8 @@ class ToolArgValidationConfig:
             or instance.max_header_count <= 0
             or instance.max_header_key_chars <= 0
             or instance.max_header_value_chars <= 0
+            or not instance.network_allowed_ports
+            or not instance.network_allowed_schemes
             or instance.max_filename_chars <= 0
             or instance.max_content_bytes <= 0
             or instance.max_shell_command_chars <= 0
@@ -167,10 +181,6 @@ def _validate_network_post(args: Dict[str, Any], cfg: ToolArgValidationConfig) -
             return _deny_schema("network_post requires non-empty url")
         url = maybe
 
-    parsed = urlparse(str(url).strip())
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        return _deny_security("network_post url must be absolute http/https")
-
     payload = args.get("payload")
     if payload is None:
         payload = args.get("body")
@@ -181,6 +191,23 @@ def _validate_network_post(args: Dict[str, Any], cfg: ToolArgValidationConfig) -
     payload_bytes = len(str(payload).encode("utf-8"))
     if payload_bytes > cfg.max_payload_bytes:
         return _deny_security("network_post payload exceeds max_payload_bytes")
+
+    parsed = urlparse(str(url).strip())
+    if not parsed.scheme or not parsed.netloc:
+        return _deny_security("network_post url must be absolute")
+    try:
+        validate_outbound_url(
+            str(url).strip(),
+            policy=OutboundURLPolicy(
+                allowed_schemes=tuple(cfg.network_allowed_schemes),
+                allowed_hosts=tuple(cfg.network_allowed_hosts),
+                allowed_ports=tuple(cfg.network_allowed_ports),
+                allow_ip_literals=bool(cfg.network_allow_ip_literals),
+                resolve_dns=bool(cfg.network_resolve_dns),
+            ),
+        )
+    except ValueError as exc:
+        return _deny_security(str(exc))
 
     headers = args.get("headers")
     if headers is not None:

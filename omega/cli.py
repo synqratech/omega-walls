@@ -17,18 +17,25 @@ from omega.core.params import omega_params_from_config
 from omega.interfaces.contracts_v1 import ContentItem
 from omega.monitoring.explain import build_session_explain, explain_as_csv
 from omega.monitoring.report import build_monitor_report
-from omega.orchestrator.provider_runtime import OrchestratorConfig, OrchestratorRuntime
 from omega.policy.off_policy_v1 import OffPolicyV1
 from omega.projector.factory import build_projector
 from omega.rag.harness import MockLLM, OmegaRAGHarness
 from omega.rag.llm_backends import LocalTransformersLLM, OllamaLLM
 from omega.telemetry.anonymous import AnonymousTelemetryService
 from omega.tools.tool_gateway import ToolGatewayV1
+from omega.release import get_release_info
+from omega.edition import EnterpriseFeatureUnavailable, import_enterprise_module, verify_runtime_license_if_available
+
+
+
+def _verify_runtime_license_if_available(cfg: Dict[str, Any]) -> None:
+    verify_runtime_license_if_available(cfg)
 
 
 def _run_analyze(args: argparse.Namespace) -> Dict[str, Any]:
     snapshot = load_resolved_config(profile=args.profile)
     cfg = snapshot.resolved
+    _verify_runtime_license_if_available(cfg)
 
     projector = build_projector(cfg)
     core = OmegaCoreV1(omega_params_from_config(cfg))
@@ -233,6 +240,31 @@ def _build_telemetry_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _build_version_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Show runtime and contract versions")
+    parser.add_argument("--json", action="store_true", dest="as_json")
+    return parser
+
+
+def _run_version(args: argparse.Namespace) -> str:
+    info = get_release_info().to_dict()
+    if bool(args.as_json):
+        return json.dumps(info, ensure_ascii=False, indent=2)
+    return " ".join(f"{key}={value}" for key, value in info.items())
+
+
+def _build_root_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="omega-walls",
+        description="Omega Walls CLI (analyze, reporting, telemetry, replay, and orchestrator ops).",
+    )
+    parser.epilog = (
+        "Subcommands: analyze, version, license, report, explain, telemetry, alerts, fallback, orchestrator, replay, keys.\n"
+        "Legacy analyze invocation remains supported: omega-walls --profile quickstart --text \"...\""
+    )
+    return parser
+
+
 def _manifest_to_replay_input(manifest: Dict[str, Any]) -> Dict[str, Any]:
     incident_id = str(manifest.get("incident_id", "")).strip() or "incident:unknown"
     replay_id = str(manifest.get("replay_id", "")).strip() or f"replay_{incident_id.replace('-', '')[:12]}"
@@ -384,7 +416,13 @@ def _run_keys(args: argparse.Namespace) -> str:
     return json.dumps({"status": "ok", "action": "list", "keys": store.list_keys()}, ensure_ascii=False, indent=2)
 
 
-def _orchestrator_runtime_from_profile(profile: str) -> OrchestratorRuntime:
+def _orchestrator_runtime_from_profile(profile: str) -> Any:
+    provider_runtime = import_enterprise_module(
+        "omega_walls_enterprise.orchestrator.provider_runtime",
+        feature="orchestrator commands",
+    )
+    OrchestratorConfig = provider_runtime.OrchestratorConfig
+    OrchestratorRuntime = provider_runtime.OrchestratorRuntime
     snapshot = load_resolved_config(profile=str(profile))
     projector_cfg = snapshot.resolved.get("projector", {}) if isinstance(snapshot.resolved.get("projector", {}), dict) else {}
     api_cfg = projector_cfg.get("api_perception", {}) if isinstance(projector_cfg.get("api_perception", {}), dict) else {}
@@ -522,75 +560,54 @@ def _run_telemetry(args: argparse.Namespace) -> str:
 
 
 def main() -> None:
+    try:
+        _license_cli = import_enterprise_module("omega_walls_enterprise.licensing.cli", feature="license commands")
+        build_license_parser = _license_cli.build_parser
+        run_license = _license_cli.run
+    except EnterpriseFeatureUnavailable:
+        def build_license_parser() -> argparse.ArgumentParser:
+            parser = argparse.ArgumentParser(description="Omega Walls Enterprise license commands")
+            parser.add_argument("action", nargs="?", default="status")
+            return parser
+
+        def run_license(args: argparse.Namespace) -> str:
+            raise EnterpriseFeatureUnavailable("license commands require omega-walls-enterprise")
+
+    command_handlers = {
+
+        "version": (_build_version_parser, _run_version),
+        "license": (build_license_parser, run_license),
+        "replay": (_build_replay_parser, _run_replay),
+        "keys": (_build_keys_parser, _run_keys),
+        "orchestrator": (_build_orchestrator_parser, _run_orchestrator),
+        "alerts": (_build_alerts_parser, _run_alerts),
+        "fallback": (_build_fallback_parser, _run_fallback),
+        "telemetry": (_build_telemetry_parser, _run_telemetry),
+        "report": (_build_report_parser, _run_report),
+        "explain": (_build_explain_parser, _run_explain),
+    }
+
     argv = list(sys.argv[1:])
-    if argv and argv[0] == "replay":
-        parser = _build_replay_parser()
-        args = parser.parse_args(argv[1:])
-        try:
-            print(_run_replay(args))
-        except Exception as exc:  # noqa: BLE001
-            print(str(exc), file=sys.stderr)
-            raise SystemExit(2) from exc
+    if not argv or argv[0] in {"-h", "--help", "help"}:
+        print(_build_root_parser().format_help().rstrip())
         return
-    if argv and argv[0] == "keys":
-        parser = _build_keys_parser()
+
+    if argv[0] in {"analyze"}:
+        parser = _build_analyze_parser()
         args = parser.parse_args(argv[1:])
-        try:
-            print(_run_keys(args))
-        except Exception as exc:  # noqa: BLE001
-            print(str(exc), file=sys.stderr)
-            raise SystemExit(2) from exc
+        print(json.dumps(_run_analyze(args), indent=2))
         return
-    if argv and argv[0] == "orchestrator":
-        parser = _build_orchestrator_parser()
+
+    handler = command_handlers.get(str(argv[0]))
+    if handler is not None:
+        parser_builder, runner = handler
+        parser = parser_builder()
         args = parser.parse_args(argv[1:])
         try:
-            print(_run_orchestrator(args))
-        except Exception as exc:  # noqa: BLE001
-            print(str(exc), file=sys.stderr)
+            print(runner(args))
+        except EnterpriseFeatureUnavailable as exc:
+            print(json.dumps({"status": "error", "code": "enterprise_feature_unavailable", "detail": str(exc)}, ensure_ascii=False), file=sys.stderr)
             raise SystemExit(2) from exc
-        return
-    if argv and argv[0] == "alerts":
-        parser = _build_alerts_parser()
-        args = parser.parse_args(argv[1:])
-        try:
-            print(_run_alerts(args))
-        except Exception as exc:  # noqa: BLE001
-            print(str(exc), file=sys.stderr)
-            raise SystemExit(2) from exc
-        return
-    if argv and argv[0] == "fallback":
-        parser = _build_fallback_parser()
-        args = parser.parse_args(argv[1:])
-        try:
-            print(_run_fallback(args))
-        except Exception as exc:  # noqa: BLE001
-            print(str(exc), file=sys.stderr)
-            raise SystemExit(2) from exc
-        return
-    if argv and argv[0] == "telemetry":
-        parser = _build_telemetry_parser()
-        args = parser.parse_args(argv[1:])
-        try:
-            print(_run_telemetry(args))
-        except Exception as exc:  # noqa: BLE001
-            print(str(exc), file=sys.stderr)
-            raise SystemExit(2) from exc
-        return
-    if argv and argv[0] == "report":
-        parser = _build_report_parser()
-        args = parser.parse_args(argv[1:])
-        try:
-            print(_run_report(args))
-        except Exception as exc:  # noqa: BLE001
-            print(str(exc), file=sys.stderr)
-            raise SystemExit(2) from exc
-        return
-    if argv and argv[0] == "explain":
-        parser = _build_explain_parser()
-        args = parser.parse_args(argv[1:])
-        try:
-            print(_run_explain(args))
         except Exception as exc:  # noqa: BLE001
             print(str(exc), file=sys.stderr)
             raise SystemExit(2) from exc

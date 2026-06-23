@@ -1,0 +1,10 @@
+tests/test_refactor_behavior_lock.py
+tests/test_refactor_characterization_snapshots.py
+tests/test_config_loader_package_resources.py
+tests/test_quickstart_profile.py
+tests/test_profile_surface_parity.py
+tests/test_config_loader_negative_cases.py
+tests/test_integration_harness.py
+tests/test_api_attachment_security.py
+tests/test_api_hybrid_projector.py
+

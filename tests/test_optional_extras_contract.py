@@ -21,7 +21,7 @@ def test_required_optional_extras_declared() -> None:
     data = _load_pyproject()
     opt = _optional_deps(data)
 
-    for name in ("api", "integrations", "attachments"):
+    for name in ("api", "integrations", "attachments", "ocr"):
         assert name in opt
         assert isinstance(opt[name], list)
         assert len(opt[name]) > 0
@@ -38,6 +38,8 @@ def test_base_install_stays_lightweight_and_extras_are_explicit() -> None:
         "langchain",
         "llama-index",
         "pypdf",
+        "rapidocr",
+        "paddleocr",
         "python-docx",
     )
     for marker in must_be_optional:
@@ -50,8 +52,7 @@ def test_optional_extras_do_not_duplicate_base_dependencies() -> None:
     base_names = {dep.split(">=")[0].split("==")[0].split("[")[0].strip().lower() for dep in base}
 
     opt = _optional_deps(data)
-    for extra_name in ("api", "integrations", "attachments"):
+    for extra_name in ("api", "integrations", "attachments", "ocr"):
         for dep in opt.get(extra_name, []):
             dep_name = dep.split(">=")[0].split("==")[0].split("[")[0].strip().lower()
             assert dep_name not in base_names
-

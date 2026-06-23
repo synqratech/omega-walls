@@ -4,47 +4,29 @@ on:
   pull_request:
     paths:
       - "docs/**"
-      - "enterprise/docs/**"
-      - "integrations/**"
       - "examples/**"
-      - "tests/test_docs_*"
-      - "tests/test_enterprise_docs_contract.py"
-      - "config/enterprise_docs_public_allowlist.json"
+      - "integrations/**"
+      - "README*.md"
       - ".github/workflows/docs-examples-smoke.yml"
   push:
-    paths:
-      - "docs/**"
-      - "enterprise/docs/**"
-      - "integrations/**"
-      - "examples/**"
-      - "tests/test_docs_*"
-      - "tests/test_enterprise_docs_contract.py"
-      - "config/enterprise_docs_public_allowlist.json"
-      - ".github/workflows/docs-examples-smoke.yml"
+    branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  docs-smoke:
-    name: Docs executable examples (py${{ matrix.python-version }}, ${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-        python-version: ["3.13"]
-    env:
-      PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+  docs-contract:
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install package
-        run: python -m pip install --upgrade pip && python -m pip install -e .
-
-      - name: Run docs reliability tests
-        run: python -m pytest tests/test_docs_examples.py tests/test_docs_reliability_contract.py tests/test_docs_integrations_contract.py tests/test_docs_public_surface_contract.py tests/test_enterprise_docs_contract.py -q
+          python-version: "3.13"
+      - run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]"
+      - name: Validate public and integration documentation
+        run: >-
+          python -m pytest -q
+          tests/test_docs_integrations_contract.py
+          tests/test_docs_public_surface_contract.py
+          tests/test_docs_examples.py

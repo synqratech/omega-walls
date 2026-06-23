@@ -1,0 +1,15 @@
+skillbox:
+  enabled: false
+  mode: shadow
+  ledger_backend: memory
+  require_ledger_for_skill_run: true
+  require_hash_match: true
+  require_manifest: false
+  enforcement:
+    source_mismatch: false
+  dangerous_capabilities:
+    - shell_exec
+    - filesystem_write
+    - network_egress
+    - credential_access
+    - memory_write

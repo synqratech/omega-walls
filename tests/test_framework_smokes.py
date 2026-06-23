@@ -112,3 +112,33 @@ def test_run_framework_smokes_strict():
     assert int(payload["metrics"]["total_orphans"]) == 0
     assert bool(payload["metrics"]["structured_block_contract_ok"]) is True
     assert bool(payload["metrics"]["security_metadata_ok"]) is True
+
+
+def test_run_framework_smokes_single_framework_selector():
+    pytest.importorskip("langchain_core")
+    pytest.importorskip("langchain_community")
+
+    root = Path(__file__).resolve().parent.parent
+    output_dir = _mk_tmp("framework-smokes-single")
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "scripts/run_framework_smokes.py",
+            "--framework",
+            "langchain",
+            "--strict",
+            "--output-dir",
+            str(output_dir.as_posix()),
+        ],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    payload = _extract_json_blob(proc.stdout)
+    assert payload["status"] == "ok"
+    assert int(payload["framework_count"]) == 1
+    assert payload["selected_frameworks"] == ["langchain_guard"]
+    assert set(payload["frameworks"].keys()) == {"langchain_guard"}

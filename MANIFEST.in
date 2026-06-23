@@ -2,8 +2,13 @@ include LICENSE
 include README.md
 include README_PYPI.md
 include pyproject.toml
+recursive-include packaging *.yml *.yaml *.json *.md Caddyfile .env.example
 
-recursive-include omega *.py *.yml
+recursive-include omega *.py *.yml *.json
+prune omega/enterprise
+prune omega/orchestrator
+prune omega_walls_enterprise
+recursive-include release *.md *.yml *.json
 
 prune .venv
 prune .venv-linux
@@ -34,6 +39,21 @@ exclude merges.txt
 exclude config.json
 exclude generation_config.json
 
+exclude pyproject.enterprise.toml
+exclude Dockerfile.enterprise
+exclude Dockerfile.enterprise.vision
+exclude omega/config/resources/profiles/prod_enterprise.yml
+exclude omega/config/resources/profiles/prod_vision_enterprise.yml
 global-exclude *.py[cod]
+exclude pyproject.enterprise.toml
+exclude Dockerfile.enterprise
+exclude Dockerfile.enterprise.vision
+exclude omega/config/resources/profiles/prod_enterprise.yml
+exclude omega/config/resources/profiles/prod_vision_enterprise.yml
 global-exclude __pycache__
+exclude pyproject.enterprise.toml
+exclude Dockerfile.enterprise
+exclude Dockerfile.enterprise.vision
+exclude omega/config/resources/profiles/prod_enterprise.yml
+exclude omega/config/resources/profiles/prod_vision_enterprise.yml
 global-exclude .DS_Store

@@ -20,10 +20,16 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from omega.config.loader import load_resolved_config
+from omega.env_file import load_repo_env_file
 
 
 VARIANT_STATEFUL = "stateful_target"
 VARIANT_BASELINE_D = "baseline_d_bare_llm_detector"
+SESSION_PACK_DATASET_IDS = {
+    "session_pack_seed41_v1",
+    "session_pack_stateful_focus_v1",
+    "agent3sigma_stage_advance_v1",
+}
 
 EXIT_OK = 0
 EXIT_FAILED = 1
@@ -222,7 +228,7 @@ def _prepare_support_eval_packs(
         if not isinstance(row, Mapping):
             continue
         dsid = str(row.get("dataset_id", "")).strip()
-        if dsid in {"session_pack_seed41_v1", "session_pack_stateful_focus_v1"}:
+        if dsid in SESSION_PACK_DATASET_IDS:
             selected.append((dsid, Path(str(row.get("path", ""))).resolve()))
     if not selected:
         raise ValueError("session packs are missing in dataset manifest")
@@ -232,9 +238,18 @@ def _prepare_support_eval_packs(
         pack_id = f"core_{dsid}"
         pack_root = root / pack_id
         runtime_dir = pack_root / "runtime"
+        labels_dir = pack_root / "labels"
         runtime_dir.mkdir(parents=True, exist_ok=True)
+        labels_dir.mkdir(parents=True, exist_ok=True)
         target_pack = runtime_dir / "session_pack.jsonl"
         shutil.copyfile(source_path, target_pack)
+        source_labels: Optional[Path] = None
+        if source_path.parent.name == "runtime":
+            candidate = source_path.parent.parent / "labels" / "session_pack_labels.jsonl"
+            if candidate.exists():
+                source_labels = candidate.resolve()
+        if source_labels is not None:
+            shutil.copyfile(source_labels, labels_dir / "session_pack_labels.jsonl")
         line_count = 0
         session_ids: set[str] = set()
         for raw in target_pack.read_text(encoding="utf-8").splitlines():
@@ -270,6 +285,7 @@ def _prepare_support_eval_packs(
                 "pack_id": pack_id,
                 "pack_root": str(pack_root.resolve()),
                 "runtime_pack_path": str(target_pack.resolve()),
+                "labels_pack_path": str((labels_dir / "session_pack_labels.jsonl").resolve()) if (labels_dir / "session_pack_labels.jsonl").exists() else None,
                 "manifest_path": str((pack_root / "manifest.json").resolve()),
                 "readme_path": str((pack_root / "README.md").resolve()),
                 "stats": {"sessions": int(len(session_ids)), "turns": int(line_count)},
@@ -732,6 +748,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--seed", type=int, default=41)
     parser.add_argument("--dataset-registry", default="config/benchmark_datasets.yml")
     args = parser.parse_args(list(argv) if argv is not None else None)
+    load_repo_env_file()
 
     baseline_d_effective = bool(args.baseline_d_enable)
     if bool(args.baseline_d_enable) and not os.getenv("OPENAI_API_KEY"):

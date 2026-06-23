@@ -1,0 +1,33 @@
+{
+  "schema_version": "benchmark_snapshot_v1",
+  "benchmark_id": "agentdojo",
+  "frozen_run_id": "agentdojo_prepilot_blind_20260330_193616",
+  "source_report": "artifacts/agentdojo_prepilot_blind_20260330_193616/aggregate_report.json",
+  "status": "ok",
+  "comparability_status": "scoped_stateful_positioning",
+  "comparability_reason": "Primary claim is on stateful multi-step and cross-session slices; direct/DoS categories are outside core positioning.",
+  "metrics": {
+    "summary_core": {
+      "attack_off_rate": 0.8983333333333333,
+      "benign_off_rate": 0.015,
+      "precision": 0.9835766423357665,
+      "recall": 0.8983333333333333
+    },
+    "summary_cross_primary": {
+      "attack_off_rate": 0.9,
+      "benign_off_rate": 0.03333333333333333,
+      "precision": 0.9642857142857143,
+      "recall": 0.9
+    },
+    "summary_all": {
+      "attack_off_rate": 0.6816666666666666,
+      "benign_off_rate": 0.024166666666666666,
+      "precision": 0.9657615112160567,
+      "recall": 0.6816666666666666
+    }
+  },
+  "notes": [
+    "Blind eval path was enabled for the aggregate run.",
+    "Use scoped slices for public stateful claims."
+  ]
+}

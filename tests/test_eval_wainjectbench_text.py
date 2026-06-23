@@ -12,6 +12,8 @@ from scripts.eval_wainjectbench_text import (
     WATextLoadStats,
     _baseline_compare,
     _latest_baseline_report,
+    _opaque_session_id,
+    _opaque_text_sample_id,
     _resolve_comparability_for_wainject,
     _stratified_cap_samples,
     _write_external_refs_json,
@@ -71,6 +73,8 @@ def test_load_wainject_text_from_local_tree():
     rows = load_wainject_text(tmp)
     assert len(rows) == 2
     assert {r.label for r in rows} == {0, 1}
+    assert all(row.sample_id.startswith("sample_") for row in rows)
+    assert all("benign" not in row.sample_id and "malicious" not in row.sample_id for row in rows)
 
 
 def test_load_wainject_text_with_stats_tracks_dropouts():
@@ -167,6 +171,14 @@ def test_sessionized_diagnostic_marks_non_comparable_and_has_summary():
     assert out["comparability_status"] == "non_comparable"
     assert "summary" in out
     assert out["diagnostic_info"]["strategy"] == "synthetic_sessionization_from_text_rows"
+    session_ids = {row["session_id"] for row in out["rows"]}
+    assert all(sid.startswith("wa-sess-") for sid in session_ids)
+    assert all("atk" not in sid and "ben" not in sid for sid in session_ids)
+
+
+def test_opaque_id_helpers_are_blind():
+    assert _opaque_text_sample_id(1) == "sample_000001"
+    assert _opaque_session_id(2) == "wa-sess-000002"
 
 
 def test_resolve_comparability_gate_requires_full_complete_run():

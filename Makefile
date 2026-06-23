@@ -1,4 +1,4 @@
-.PHONY: test eval check smoke-real demo
+.PHONY: test eval check smoke-real demo bench bench-full secret-scan source-archive
 
 test:
 	python -m pytest
@@ -14,3 +14,15 @@ smoke-real:
 
 demo:
 	python scripts/quick_demo.py --mode pi0
+
+bench:
+	python scripts/check_benchmarks_contract.py --smoke-exec
+
+bench-full:
+	python scripts/run_benchmarks_full.py
+
+secret-scan:
+	python scripts/secret_scan.py .
+
+source-archive: secret-scan
+	python scripts/build_clean_source_archive.py

@@ -19,9 +19,22 @@ class OffPolicyV1:
 
     def _participating_walls(self, step_result: OmegaStepResult) -> List[str]:
         walls = self.config["omega"]["walls"]
+        cfg = ((self.config.get("off_policy", {}) or {}).get("wall_participation", {}) or {})
+        current_p_gte = max(0.0, float(cfg.get("current_p_gte", 0.01)))
+        current_v_gte = max(0.0, float(cfg.get("current_v_gte", 0.10)))
+        scar_m_gte = max(0.0, float(cfg.get("scar_m_gte", 0.05)))
+        multi_theta = float(((self.config.get("omega", {}) or {}).get("off_thresholds", {}) or {}).get("theta", 0.4))
+        scar_fraction = max(0.0, float(cfg.get("scar_fraction_of_multi_threshold", 0.25)))
+        effective_scar_gte = max(scar_m_gte, scar_fraction * max(0.0, multi_theta))
+
         out: List[str] = []
         for idx, wall in enumerate(walls):
-            if step_result.p[idx] > 0.0 or step_result.m_next[idx] > 0.0:
+            current_active = bool(
+                float(step_result.p[idx]) >= current_p_gte
+                or float(step_result.v_total[idx]) >= current_v_gte
+            )
+            scar_active = bool(float(step_result.m_next[idx]) >= effective_scar_gte)
+            if current_active or scar_active:
                 out.append(wall)
         return out
 
@@ -167,15 +180,23 @@ class OffPolicyV1:
             actions.append(warn_action)
 
         if step_result.off:
-            actions.append(
-                OffAction(
-                    type="SOFT_BLOCK",
-                    target=cfg["block"].get("target", "DOC"),
-                    doc_ids=list(step_result.top_docs),
+            if step_result.top_docs:
+                actions.append(
+                    OffAction(
+                        type="SOFT_BLOCK",
+                        target=cfg["block"].get("target", "DOC"),
+                        doc_ids=list(step_result.top_docs),
+                    )
                 )
-            )
+            else:
+                actions.append(
+                    OffAction(
+                        type="SOFT_BLOCK",
+                        target="SESSION",
+                        incident_packet={"attribution_mode": str(step_result.attribution_mode)},
+                    )
+                )
 
-            tool_wall = "tool_or_action_abuse"
             exfil_wall = "secret_exfiltration"
 
             tool_freeze_action = self._tool_freeze_action(step_result=step_result, walls=walls, severity=severity)
@@ -199,6 +220,7 @@ class OffPolicyV1:
                                 "session_id": step_result.session_id,
                                 "step": step_result.step,
                                 "top_docs": step_result.top_docs,
+                                "attribution_mode": str(step_result.attribution_mode),
                             },
                         )
                     )

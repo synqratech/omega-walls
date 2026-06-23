@@ -1,0 +1,38 @@
+{
+  "schema_version": "agent3sigma_stage_advance_pack_v1",
+  "generated_at_utc": "2026-06-19T08:46:20.453447+00:00",
+  "source_dir": "D:\\Omega_Walls\\walls_main\\data\\Agent3Sigma-Stage\\data\\advance",
+  "source_files": {
+    "seeds": {
+      "path": "D:\\Omega_Walls\\walls_main\\data\\Agent3Sigma-Stage\\data\\advance\\seeds.json",
+      "sha256": "f5c1d87c16818eb28036a18b2c4aefeb3b8f00bb31796f9c287f5e2f1d7c6d72",
+      "records": 424
+    },
+    "injected": {
+      "path": "D:\\Omega_Walls\\walls_main\\data\\Agent3Sigma-Stage\\data\\advance\\injected.json",
+      "sha256": "aa6c0fa68d8ed09658a991585f229241b9861d5762662c13662312da25a5d1fb",
+      "records": 726
+    }
+  },
+  "runtime_pack_path": "D:\\Omega_Walls\\walls_main\\tests\\data\\session_benchmark\\agent3sigma_stage_advance_v1\\runtime\\session_pack.jsonl",
+  "labels_pack_path": "D:\\Omega_Walls\\walls_main\\tests\\data\\session_benchmark\\agent3sigma_stage_advance_v1\\labels\\session_pack_labels.jsonl",
+  "summary": {
+    "sessions_total": 1150,
+    "attack_sessions": 726,
+    "benign_sessions": 424,
+    "rows_total": 4051,
+    "label_rows_total": 4051,
+    "by_family_turns": {
+      "configuration_tampering": 302,
+      "dangerous_command_execution": 934,
+      "data_exfiltration": 124,
+      "information_leakage": 540,
+      "jailbreak_attack": 183,
+      "malicious_skill": 738,
+      "memory_tampering": 875,
+      "privilege_escalation": 111,
+      "resource_exhaustion": 106,
+      "sandbox_escape": 138
+    }
+  }
+}

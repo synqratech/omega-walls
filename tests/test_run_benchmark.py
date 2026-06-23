@@ -98,6 +98,66 @@ def test_build_dataset_manifest_core_profile():
         assert Path(row["path"]).exists()
 
 
+def test_build_dataset_manifest_a3s_profile():
+    manifest = bench.build_dataset_manifest(
+        registry_path=Path("config/benchmark_datasets.yml"),
+        dataset_profile="agent3sigma_stage_advance_v1",
+        seed=41,
+        runtime_mode="pi0",
+        config_snapshot_sha256="abc123",
+    )
+    assert manifest["dataset_profile"] == "agent3sigma_stage_advance_v1"
+    assert manifest["dataset_count"] == 1
+    row = manifest["datasets"][0]
+    assert row["dataset_id"] == "agent3sigma_stage_advance_v1"
+    assert row["source_url"].endswith("agent3sigma_stage_advance_v1/runtime/session_pack.jsonl")
+    assert Path(row["path"]).exists()
+    assert row["stats"]["row_count"] > 0
+
+
+def test_prepare_support_eval_packs_copies_labels_sidecar():
+    tmp = _workspace_tmp("support_packs")
+    source_root = tmp / "source"
+    runtime = source_root / "runtime" / "session_pack.jsonl"
+    labels = source_root / "labels" / "session_pack_labels.jsonl"
+    runtime.parent.mkdir(parents=True, exist_ok=True)
+    labels.parent.mkdir(parents=True, exist_ok=True)
+    runtime.write_text(
+        '\n'.join(
+            [
+                '{"session_id":"s_000001","turn_id":1,"text":"hello","source_type":"external_untrusted","source_id":"src_000001"}',
+                '{"session_id":"s_000001","turn_id":2,"text":"world","source_type":"external_untrusted","source_id":"src_000002"}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    labels.write_text(
+        '\n'.join(
+            [
+                '{"session_id":"s_000001","turn_id":1,"label_turn":"benign","label_session":"attack","family":"demo","bucket":"core","eval_slice":"text_intrinsic","source_ref":"a3s:1:1","actor_id":"a_000001"}',
+                '{"session_id":"s_000001","turn_id":2,"label_turn":"attack","label_session":"attack","family":"demo","bucket":"core","eval_slice":"text_intrinsic","source_ref":"a3s:1:2","actor_id":"a_000001"}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    manifest = {
+        "datasets": [
+            {
+                "dataset_id": "agent3sigma_stage_advance_v1",
+                "path": str(runtime.resolve()),
+                "source_type": "repo_internal",
+                "source_url": "repo://tests/data/session_benchmark/agent3sigma_stage_advance_v1/runtime/session_pack.jsonl",
+            }
+        ]
+    }
+    out = bench._prepare_support_eval_packs(run_dir=tmp / "run", dataset_manifest=manifest)  # noqa: SLF001
+    copied = out / "core_agent3sigma_stage_advance_v1"
+    assert (copied / "runtime" / "session_pack.jsonl").exists()
+    assert (copied / "labels" / "session_pack_labels.jsonl").exists()
+
+
 def test_scorecard_writer_is_deterministic():
     tmp = _workspace_tmp("scorecard")
     rows = [

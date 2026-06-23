@@ -21,12 +21,11 @@ from omega.config.loader import config_refs_from_snapshot, load_resolved_config
 from omega.core.omega_core import OmegaCoreV1
 from omega.core.params import omega_params_from_config
 from omega.eval.deepset_adapter import DeepsetSample, build_deepset_samples
+from omega.eval.attack_corpus import generate, load_jsonl
+from omega.eval.whitebox_eval import evaluate_whitebox, whitebox_metrics_to_dict
 from omega.interfaces.contracts_v1 import ContentItem, OmegaState, WALLS_V1
 from omega.policy.off_policy_v1 import OffPolicyV1
 from omega.projector.pi0_intent_v2 import Pi0IntentAwareV2
-from redteam.generator import generate
-from redteam.runner import load_jsonl
-from redteam.whitebox_optimizer import evaluate_whitebox, whitebox_metrics_to_dict
 
 
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:

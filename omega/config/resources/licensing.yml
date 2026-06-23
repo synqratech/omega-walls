@@ -1,0 +1,9 @@
+licensing:
+  required: false
+  license_path_env: OMEGA_LICENSE_FILE
+  keyring_path_env: OMEGA_LICENSE_KEYRING
+  license_path: ""
+  keyring_path: ""
+  required_features: []
+  allow_test_keys: false
+  enforce_release_entitlement: false

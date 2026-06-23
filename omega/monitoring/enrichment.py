@@ -29,6 +29,7 @@ def build_redacted_fragments(
     *,
     attribution_rows: Sequence[Mapping[str, Any]],
     item_text_by_doc: Mapping[str, str],
+    item_meta_by_doc: Mapping[str, Mapping[str, Any]] | None = None,
     max_fragments: int = 4,
     max_chars: int = 240,
 ) -> list[Dict[str, Any]]:
@@ -41,11 +42,17 @@ def build_redacted_fragments(
         trust = str((row or {}).get("trust", "untrusted")).strip() or "untrusted"
         contribution = float((row or {}).get("contribution", 0.0) or 0.0)
         text = str(item_text_by_doc.get(doc_id, ""))
-        red = redact_text(text, max_chars=max_chars)
-        excerpt = str(red.redacted)
-        excerpt_l = excerpt.lower()
-        if any(marker in excerpt_l for marker in _INJECTION_MARKERS):
-            excerpt = "<REDACTED>"
+        meta = (item_meta_by_doc or {}).get(doc_id, {}) if isinstance(item_meta_by_doc, Mapping) else {}
+        chunk_kind = str((meta or {}).get("attachment_chunk_kind", "")).strip().lower()
+        if chunk_kind == "ocr":
+            red = redact_text("", max_chars=max_chars)
+            excerpt = "[redacted_ocr_text]" if text.strip() else ""
+        else:
+            red = redact_text(text, max_chars=max_chars)
+            excerpt = str(red.redacted)
+            excerpt_l = excerpt.lower()
+            if any(marker in excerpt_l for marker in _INJECTION_MARKERS):
+                excerpt = "<REDACTED>"
         rows.append(
             {
                 "doc_id": doc_id,

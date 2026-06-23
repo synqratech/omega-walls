@@ -1,0 +1,38 @@
+{
+  "schema_version": "benchmark_public_index_v1",
+  "updated_utc": "2026-06-22T00:00:00Z",
+  "policy": {
+    "mode": "frozen_run_ids_only",
+    "raw_publication": "curated_snapshots_only",
+    "drift_note": "Exact values can vary by provider/model/runtime version. Reproduce protocol and trend, not bit-identical numbers."
+  },
+  "benchmarks": [
+    {
+      "benchmark_id": "agentdojo",
+      "frozen_run_id": "agentdojo_prepilot_blind_20260330_193616",
+      "comparability_status": "scoped_stateful_positioning",
+      "snapshot_json": "benchmarks/results/agentdojo_frozen_20260330.json"
+    },
+    {
+      "benchmark_id": "agent3sigma_stage",
+      "frozen_run_id": "session_eval_20260620T075139Z",
+      "comparability_status": "scoped_stateful_family_mix",
+      "snapshot_json": "benchmarks/results/agent3sigma_frozen_20260622.json"
+    },
+    {
+      "benchmark_id": "wainjectbench_text",
+      "frozen_run_id": "wainject_eval_w202613_20260324T125013Z",
+      "comparability_status": "partial_comparison",
+      "snapshot_json": "benchmarks/results/wainject_frozen_20260324.json"
+    },
+    {
+      "benchmark_id": "promptshield_text",
+      "frozen_run_id": "promptshield_eval_w202613_20260324T164314Z",
+      "comparability_status": "non_comparable",
+      "snapshot_json": "benchmarks/results/promptshield_frozen_20260324.json"
+    }
+  ],
+  "scorecards": [
+    "benchmarks/results/frozen_scorecard_top3.csv"
+  ]
+}

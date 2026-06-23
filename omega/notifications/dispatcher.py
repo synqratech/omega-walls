@@ -9,7 +9,7 @@ import logging
 import os
 import queue
 import threading
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 from omega.notifications.interfaces import ApprovalStore, Notifier
 from omega.notifications.models import (
@@ -22,6 +22,8 @@ from omega.notifications.models import (
 )
 from omega.notifications.providers import SlackNotifier, TelegramNotifier, WebhookNotifier
 from omega.notifications.store import InMemoryApprovalStore, SQLiteApprovalStore
+from omega.interfaces.contracts_v1 import ToolRequest
+from omega.tools.approval import tool_args_sha256, tool_intent_id
 
 LOGGER = logging.getLogger(__name__)
 
@@ -128,6 +130,7 @@ class NotificationDispatcher:
             trace_id=str(risk_event.trace_id or ""),
             decision_id=str(risk_event.decision_id or ""),
             control_outcome=str(risk_event.control_outcome or "ALLOW"),
+            approval_scope="policy",
             channels=[],
             callback_ids={},
             resolution=None,
@@ -142,6 +145,71 @@ class NotificationDispatcher:
             risk_event=risk_event,
             required_action=str(required_action),
             timeout_sec=max(10, int(timeout_sec)),
+            approval_scope="policy",
+        )
+        self._enqueue_event(kind="action_request", event=action_event)
+        return approval
+
+    def create_tool_action_request(
+        self,
+        *,
+        risk_event: RiskEvent,
+        tool_request: ToolRequest,
+        timeout_sec: int,
+    ) -> ApprovalRecord:
+        tenant_id = str(tool_request.tenant_id or risk_event.tenant_id or "").strip()
+        session_id = str(tool_request.session_id or risk_event.session_id or "").strip()
+        if not tenant_id or not session_id:
+            raise ValueError("tool approval requires tenant_id and session_id")
+        tool_request.tenant_id = tenant_id
+        if not str(tool_request.actor_id or "").strip():
+            tool_request.actor_id = str(risk_event.actor_id or "").strip()
+        intent = tool_intent_id(tool_request)
+        args_hash = tool_args_sha256(tool_request.args)
+        latest = self.store.get_latest_for_intent(
+            tenant_id=tenant_id,
+            session_id=session_id,
+            tool_intent_id=intent,
+        )
+        if latest is not None and str(latest.status) in {"pending", "approved"} and not str(latest.consumed_at or ""):
+            return latest
+        now = _parse_iso(utc_now_iso())
+        expires_at = now + timedelta(seconds=max(10, int(timeout_sec)))
+        approval = ApprovalRecord(
+            approval_id=new_approval_id(),
+            status="pending",
+            created_at=utc_now_iso(),
+            updated_at=utc_now_iso(),
+            expires_at=expires_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            required_action="EXECUTE_TOOL",
+            tenant_id=tenant_id,
+            session_id=session_id,
+            actor_id=str(tool_request.actor_id or risk_event.actor_id or ""),
+            trace_id=str(risk_event.trace_id or ""),
+            decision_id=str(risk_event.decision_id or ""),
+            control_outcome=str(risk_event.control_outcome or "REQUIRE_APPROVAL"),
+            approval_scope="tool_intent",
+            tool_name=str(tool_request.tool_name).strip().lower(),
+            tool_args_sha256=args_hash,
+            tool_intent_id=intent,
+            single_use=True,
+            channels=[],
+            callback_ids={},
+            resolution=None,
+        )
+        self.store.create(approval)
+        with self._metrics_lock:
+            self._metrics["approvals_pending"] += 1
+            self._metrics["tool_action_requests_created"] += 1
+        action_event = ActionRequestEvent(
+            approval_id=approval.approval_id,
+            risk_event=risk_event,
+            required_action="EXECUTE_TOOL",
+            timeout_sec=max(10, int(timeout_sec)),
+            approval_scope="tool_intent",
+            tool_name=approval.tool_name,
+            tool_args_sha256=approval.tool_args_sha256,
+            tool_intent_id=approval.tool_intent_id,
         )
         self._enqueue_event(kind="action_request", event=action_event)
         return approval

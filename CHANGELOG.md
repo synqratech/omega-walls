@@ -1,12 +1,187 @@
-﻿# Changelog
+# Changelog
 
 All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Enterprise release foundation
+
+- Added canonical release, compatibility, deployment, upgrade, rollback, security-update and support policies.
+- Added independent runtime/API/config/state/license/policy/vision version metadata and machine-readable version surfaces.
+- Added strict release-manifest, compatibility and offline-license schemas plus manifest generation and verification tooling.
+- Added local Ed25519 enterprise license verification, feature and major-version entitlements, test-key rejection, key rotation semantics and fail-closed enterprise production profiles.
+- Extended the release gate with policy, version, schema, licensing cryptographic self-test and private-key hygiene checks.
+
+### Fixed
+
+- Closed the forwarded-header HTTPS bypass: production CLI disables Uvicorn proxy rewriting, wildcard proxy trust is rejected, and `proxy_tls` accepts forwarded TLS only from configured proxy CIDRs.
+- The API CLI now resolves profile selection as explicit `--profile` > `OMEGA_PROFILE` > `prod`; the official API image starts in enforce-mode `prod` rather than `quickstart`.
+- Split production profiles: `prod` is stateful text-only enforcement; `prod_vision` is explicit opt-in, local-only, dependency-checked and fail-closed for visual/OCR failures.
+- Production startup validates required attachment/vision modules instead of silently degrading when an image is missing dependencies.
+- Removed duplicate OCR in the local visual semantic adapter when attachment ingestion already supplied OCR text.
+- Bounded RapidOCR/ONNX native thread counts so OCR cannot starve the parent watchdog; fixed-fixture local OCR p95 is now below one second on the release environment.
+- Corrected attachment sandbox CPU accounting so the configured CPU budget excludes trusted cold-start/import CPU and remains deterministic.
+- Restored the complete release surface: OpenClaw plugin package, public benchmark artifacts, session benchmark fallback fixtures and current characterization/frozen hashes.
+
 ### Added
 
-- _No unreleased entries yet._
+- Separate `Dockerfile.vision` for the opt-in `[vision]` production image.
+- Production-profile drift tests, spoofed-forwarded-header regression tests and duplicate-OCR regression coverage.
+
+## [0.2.0] - 2026-06-14
+
+### Added
+
+- Completed Vision Wave C / full multimodal trust boundary:
+  - bounded visual PDF page rendering and embedded image extraction for DOCX and data-URI HTML; remote HTML image fetches remain forbidden;
+  - ordered multi-image semantic packets through request-scoped BlobRefs;
+  - multimodal attachment support in the public SDK and RAG harness;
+  - image-capable OpenAI, Anthropic, opt-in OpenAI-compatible and local vision adapters with candidate-level capabilities;
+  - local `ocr_pi0` vision plus loopback-only OpenAI-compatible VLM backend;
+  - tenant-scoped visual egress policy, provider processing regions and data-residency enforcement before bytes are resolved;
+  - frozen architecture gate, real local multiformat quality gate and an explicit credentialed cloud-live benchmark runner.
+- Added a persistent, secret-free attachment parser broker that starts before native OCR and launches one-shot resource-bounded parser sandboxes.
+
+### Changed
+
+- Pilot and production profiles now use `projector.mode: hybrid_api`, so configured multimodal semantics participate in actual SDK/API decisions.
+- Local visual OCR applies the same security token-boundary repair and confidence filtering as the primary OCR boundary.
+- Production parser wall timeout is 20 seconds while CPU, memory, output-size and file-descriptor limits remain bounded.
+
+### Security
+
+- PDF pages and embedded document images cannot bypass visual inspection merely because no extractable text exists.
+- Identical media cannot reuse semantic cache entries across tenants or data regions.
+- Cloud visual egress is deny-by-default in production; the default production route is local-only.
+- Parser and OCR workers receive sanitized environments, no application credentials, no network access and explicit lifecycle/restart controls.
+
+## [0.1.9] - 2026-06-14
+
+### Added
+
+- Completed Vision Wave B / OCR and spatial analysis release contour:
+  - strict OCR quality policy for confidence, finite values, geometry, span count, span length and total text;
+  - additive `ocr_quality` provenance and API policy-trace fields;
+  - uncertainty-aware bounded regional vision policy (`zero|uncertain|always`) with deterministic tile limits;
+  - enabled pilot/prod release profiles using local RapidOCR `auto` mode and `uncertain` spatial fallback;
+  - deterministic comparative frozen corpus across vision-only, OCR-only, vision+OCR adjudication and region+OCR;
+  - fail-closed implementation/data hashes, CI workflow and release-gate configuration.
+  - prewarmed persistent RapidOCR worker pool with bounded admission, overload status, deadline, RSS watchdog and deterministic recycling;
+  - fixed-fixture live RapidOCR release gate through the production attachment path;
+  - request-scoped BlobRef registration for OCR adjudication crops, preserving the Wave A raw-media boundary.
+
+### Changed
+
+- The default `ocr` extra now installs the production RapidOCR/ONNX Runtime path; PaddleOCR is available separately through `ocr-paddle`.
+- OCR-only pressure remains provisional until exact span attribution and targeted visual adjudication confirm the same wall.
+
+### Security
+
+- Low-confidence, malformed, out-of-image and unbounded OCR spans cannot become security evidence.
+- Spatial re-analysis is bounded and non-recursive; benign UI and quoted/defensive image text are explicitly adjudicated instead of blindly accumulating pressure.
+- OCR worker concurrency and pending requests are bounded; overload is explicit and cannot grow an unbounded in-process queue.
+- Targeted OCR crops enter the semantic path only as opaque BlobRefs; serialized core metadata is checked for raw-media leakage.
+
+## [0.1.8] - 2026-06-14
+
+### Added
+
+- Completed Vision Wave A / provider-agnostic image semantic boundary:
+  - request-scoped opaque BlobRef media storage;
+  - candidate-level provider capabilities and explicit unsupported-image semantics;
+  - immutable per-request semantic execution traces;
+  - strict multimodal contracts, typed attachment OpenAPI and frozen Phase 1 gate.
+
+
+## [0.1.7] - 2026-06-14
+
+### Fixed
+
+- P1 production security hardening:
+  - tool approvals are server-side, exact-intent bound (`tenant/session/actor/tool/args hash/intent`), expiring and atomically single-use; request-provided approval flags are ignored.
+  - all future filesystem adapters use canonical path containment and reject traversal, absolute paths and symlink escapes.
+  - state-only `Off` events no longer attribute zero-contribution current documents; stale wall traces participate only above explicit decay thresholds.
+  - webhook notifier dispatch and runtime tenant binding are corrected; approval retrieval and resolution enforce tenant ownership.
+  - outbound HTTP validation is fail-closed against SSRF using HTTPS, host/port allowlists and public DNS/IP resolution.
+  - API request bodies are limited while streaming, multipart parsing has bounded files/fields/part size, and requests have a server-side deadline.
+  - attachment parsing verifies magic bytes, preflights PDF/DOCX/image/HTML limits and executes structured parsers in a resource-bounded child process.
+  - forwarded HTTPS headers are accepted only from explicitly configured trusted proxy CIDRs.
+  - projector inputs require one-to-one, duplicate-free, identical-order `doc_id` alignment.
+
+- P0 production security hardening:
+  - audit redaction patterns now match real Bearer tokens, secret assignments, private keys, common provider tokens, email addresses and phone numbers; redaction occurs before truncation.
+  - projector vectors, Omega parameters/state, semantic-provider payloads and SQLite state reject NaN/Inf, negative values and invalid wall shapes fail-closed.
+  - legacy built-ins `write_file` and `network_post` are removed from the default adapter registry and cannot be re-enabled by config or request flags.
+  - `TOOLS_DISABLED` is now an absolute deny state; read-only bypasses are forbidden in configuration.
+  - production API startup requires strong, separate environment-provided API and HMAC secrets and refuses development credentials.
+  - deterministic source archives are built from a clean staging tree and blocked by a secret scanner before publication.
+
+- Enterprise reliability and operator-truthfulness hardening:
+  - runtime config sync no longer reports false-green after failed apply; applied hash/version now advance only on successful apply.
+  - runtime registry now stores drift diagnostics (`desired_hash`, `desired_version`, `sync_error_at`, `last_applied_sync`).
+  - control-plane `sync_state` now separates `last_applied_version` from attempted/desired versions, so failed apply no longer misreports applied version in SQLite state.
+  - incident export/replay enterprise docs are now executable end-to-end with explicit required flags and `OMEGA_REPLAY_ENCRYPTION_KEY`.
+  - enterprise docs now use source-run CLI as canonical install path (`python scripts/omega_walls_enterprise.py ...`), with `omega-walls-enterprise` marked as future/private alias.
+  - rollback path is hardened to managed backups only (`--to-version` filename token under managed `backups_dir`), with arbitrary path rejection.
+  - implicit latest-backup rollback now goes through the same managed-backup validator as explicit `--to-version`, including filename regex, link-like rejection, and managed-root boundary checks.
+  - Python <3.12 rollback extraction fallback now validates archive members against traversal and link escapes before extraction.
+- Hybrid API safety hardening:
+  - provider semantic failure no longer suppresses soft-only PI0 signals in degrade mode; hybrid keeps rule pressure when API confirmation is unavailable.
+  - `hybrid_redacted` now scrubs additional common secret classes before outbound semantic calls (`AKIA`/`ASIA`, GitHub tokens, Slack tokens, JWT-like blobs, phone numbers).
+  - default hybrid config now disables the PI0-clean short fast-path skip (`short_fast_path_skip_on_pi0_clean: false`) for a safer enterprise posture.
+- Config safety hardening:
+  - unknown `projector.api_perception.semantic_mode` values now fail validation instead of falling back to legacy hybrid cloud behavior.
+  - unknown profile names now raise a stable `profile not found: ...` error for both bundled and explicit `config_dir` loading.
+  - public root `config/` and packaged `omega/config/resources/` config surfaces are now aligned for shipped layers and public profiles.
+- Session/support eval privacy hardening:
+  - blind runtime runner boundary now receives a dedicated `RuntimeTurnPayload` without evaluator labels/family/source metadata.
+  - `eval_agentdojo_stateful_mini.py` no longer defaults to the legacy single-file pack; explicit `--pack` is required, and the legacy built-in pack now requires explicit `--allow-legacy-runtime-leakage`.
+
+### Added
+
+- Enterprise regression and safety tests for:
+  - sync false-green prevention after failed runtime apply.
+  - truthful sync-state persistence for failed apply (`applied` vs `attempted`/`desired` version split).
+  - rollback path safety (managed backup resolution + archive safety checks).
+  - executable enterprise docs contract for incident export/replay and source-run installation path.
+- P0 No Label Leakage hardening for session/support eval pipeline:
+  - dual-file pack contract (`runtime/session_pack.jsonl` + `labels/session_pack_labels.jsonl`) for session/support builders.
+  - strict runtime leakage audit (forbidden keys, non-opaque IDs, label/family ID hints) with fail-closed default.
+  - opaque deterministic IDs introduced for runtime payloads (`s_000001`, `a_000001`, `src_000001`).
+  - runtime payload hardening across stateful target, stateless baseline A, prefix baseline C, and bare detector baseline D.
+- Hybrid API regression coverage for:
+  - provider outage parity (`semantic_failed` must not zero-out soft PI0 in degrade mode).
+  - expanded outbound redaction patterns in `hybrid_redacted`.
+  - hybrid hard-negative corpus parity with benign API-zero composition.
+  - explicit short-fast-path safety contract for PI0-clean requests.
+- Config loader regression coverage for:
+  - invalid `semantic_mode` fail-closed validation.
+  - unknown profile fail-fast behavior.
+  - root-vs-packaged public config parity and explicit internal-only profile exclusions.
+- Eval privacy regression coverage for:
+  - runtime-only payload handoff between evaluator and runner.
+  - explicit-pack requirement and legacy-pack opt-in contract for AgentDojo session eval.
+
+## [0.1.6] - 2026-05-19
+
+### Fixed
+
+- Release blocker cleanup and launch UX hardening:
+  - `omega-walls` no longer crashes on no-arg invocation; root help is shown safely.
+  - root `config/profiles/quickstart.yml` now matches packaged quickstart (`guard_mode: monitor`).
+  - packaged `sensitive_rules_only` now explicitly sets `projector.api_perception.semantic_mode: rules_only`.
+  - OSS GitHub export now excludes internal-only profiles:
+    - `config/profiles/sensitive_hybrid_redacted.yml`
+    - `config/profiles/sensitive_local_semantic.yml`
+- OSS docs contract validator hardened:
+  - writable temp-dir probe with fallback, instead of existence-only `C:/tmp` selection.
+  - fast default manifest/link validation path; full export check is now optional.
+
+### Added
+
+- New release prepublish artifact guard:
+  - `scripts/prepublish_artifact_check.py`
+  - validates wheel/sdist contain required launch-fix markers before upload.
 
 ## [0.1.5] - 2026-05-06
 

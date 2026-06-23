@@ -260,8 +260,14 @@ class OmegaCrewAIGuard:
         if callable(runtime_builder):
             return dict(runtime_builder(gate_decision))
         decision = gate_decision.decision_ref
+        resolve_action = getattr(self._runtime, "resolve_tool_block_action", None)
+        if callable(resolve_action):
+            action = str(resolve_action(gate_decision))
+        else:
+            outcome = str(getattr(decision, "control_outcome", "") or "").strip().upper()
+            action = (outcome if outcome and outcome not in {"ALLOW", "WARN"} else "TOOL_FREEZE")
         return {
-            "action": str(getattr(decision, "control_outcome", "TOOL_FREEZE")),
+            "action": str(action),
             "reason": str(getattr(gate_decision, "reason", "TOOL_BLOCKED")),
             "policy_id": None,
             "fallback_hint": None,

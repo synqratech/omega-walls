@@ -13,9 +13,11 @@ api:
   security:
     transport_mode: proxy_tls
     require_https: true
+    trusted_proxy_cidrs: ["127.0.0.1/32", "::1/128"]
   auth:
     api_keys:
       - dev-api-key
+    api_key_env: OMEGA_API_KEYS
     require_hmac: true
     hmac_secret_env: OMEGA_API_HMAC_SECRET
     hmac_headers:
@@ -29,6 +31,10 @@ api:
     max_file_bytes: 20971520
     max_extracted_text_chars: 200000
     request_timeout_sec: 15
+    max_request_body_bytes: 25165824
+    max_multipart_files: 1
+    max_multipart_fields: 16
+    max_multipart_part_bytes: 20971520
   logging:
     enabled: true
     include_policy_trace: true
@@ -75,3 +81,36 @@ api:
     kid: omega-attestation-v1
     private_key_pem_env: OMEGA_API_ATTESTATION_PRIVATE_KEY
     exp_sec: 300
+  incident_export:
+    enabled: false
+    contract_version: "1.0"
+    default_environment: staging
+    retention_days: 30
+    store:
+      sqlite_path: artifacts/state/incident_export.db
+    auth:
+      key_store_path: artifacts/state/incident_export_keys.db
+      required_scope: incidents:read
+    rate_limit:
+      rpm: 60
+      burst: 10
+    cors:
+      allowed_origins: []
+  incident_replay:
+    enabled: false
+    contract_version: "1.0.0"
+    download_ttl_hours: 24
+    job_ttl_hours: 72
+    max_steps: 50
+    redact_by_default: true
+    store:
+      sqlite_path: artifacts/state/incident_replay.db
+    package_storage:
+      path: artifacts/replay/packages
+      encryption_key_env: OMEGA_REPLAY_ENCRYPTION_KEY
+    worker:
+      max_concurrent_jobs: 4
+    auth:
+      required_scopes:
+        read: incidents:replay:read
+        raw: incidents:replay:raw

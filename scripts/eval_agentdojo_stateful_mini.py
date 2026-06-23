@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Mapping, Optional
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
+LEGACY_DEFAULT_PACK = "tests/data/session_benchmark/agentdojo_cocktail_mini_v1.jsonl"
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -124,18 +125,31 @@ def _collapse_cross_session_by_actor(outcomes: List[SessionOutcome]) -> List[Ses
     return collapsed
 
 
-def main() -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description="Evaluate AgentDojo mini stateful cocktail/distributed pack with Omega session runner."
     )
     parser.add_argument("--profile", default="dev")
     parser.add_argument("--mode", choices=["pi0", "hybrid", "hybrid_api"], default="pi0")
-    parser.add_argument("--pack", default="tests/data/session_benchmark/agentdojo_cocktail_mini_v1.jsonl")
+    parser.add_argument(
+        "--pack",
+        default=None,
+        help=(
+            "Path to runtime pack JSONL. "
+            "Dual-file contract is preferred: <pack_root>/runtime/session_pack.jsonl "
+            "+ <pack_root>/labels/session_pack_labels.jsonl."
+        ),
+    )
     parser.add_argument("--seed", type=int, default=41)
     parser.add_argument("--artifacts-root", default="artifacts/agentdojo_stateful_mini_eval")
     parser.add_argument("--weekly-regression", action="store_true")
     parser.add_argument("--baseline-report", default=None)
     parser.add_argument("--strict-projector", action="store_true")
+    parser.add_argument(
+        "--allow-legacy-runtime-leakage",
+        action="store_true",
+        help="Allow legacy single-file packs that still contain label-side metadata in runtime rows.",
+    )
     parser.add_argument("--allow-api-fallback", action="store_true")
     parser.add_argument("--api-model", default=None)
     parser.add_argument("--api-provider", default=None)
@@ -146,10 +160,37 @@ def main() -> int:
     parser.add_argument("--api-cache-path", default=None)
     parser.add_argument("--api-error-log-path", default=None)
     parser.add_argument("--blind-eval", action="store_true")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+
+    if not args.pack:
+        payload = {
+            "status": "pack_required",
+            "reason": (
+                "explicit --pack is required. Provide a dual-file runtime pack path "
+                "(preferred) or pass a legacy single-file pack together with "
+                "--allow-legacy-runtime-leakage."
+            ),
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 2
 
     pack_path = (ROOT / str(args.pack)).resolve()
-    rows = load_pack_rows(pack_path)
+    if pack_path == (ROOT / LEGACY_DEFAULT_PACK).resolve() and not bool(args.allow_legacy_runtime_leakage):
+        payload = {
+            "status": "legacy_pack_requires_opt_in",
+            "pack": str(pack_path),
+            "reason": (
+                "legacy single-file pack detected. Pass --allow-legacy-runtime-leakage "
+                "for this path, or switch to a dual-file runtime pack."
+            ),
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 2
+
+    rows = load_pack_rows(
+        pack_path,
+        allow_legacy_runtime_leakage=bool(args.allow_legacy_runtime_leakage),
+    )
     if not rows:
         payload = {
             "status": "dataset_not_ready",

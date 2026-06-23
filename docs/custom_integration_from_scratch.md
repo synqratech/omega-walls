@@ -30,6 +30,9 @@ runtime = OmegaAdapterRuntime(
     max_chars=8000,
 )
 
+# Optional: inspect integration policy presets
+print(runtime.policy_presets(profile="quickstart"))
+
 
 def resolve_ctx(payload: dict) -> AdapterSessionContext:
     session_id = (
@@ -58,6 +61,10 @@ def guard_model_input(payload: dict) -> None:
     block_outcomes = {"OFF", "BLOCK", "TOOL_FREEZE", "ESCALATE"}
     if decision.off or str(decision.control_outcome).upper() in block_outcomes:
         raise OmegaBlockedError("Omega blocked model/input step", decision=decision)
+
+    # Optional: SIEM-ready boundary event payload
+    boundary_event = runtime.build_siem_boundary_event(decision, phase="model_input")
+    print(boundary_event)  # replace with your logger/transport
 
 
 def guard_tool_call(payload: dict, tool_name: str, tool_args: dict) -> None:
@@ -121,3 +128,4 @@ omega-walls explain --session <session_id> --format json
 - Memory record includes `source_id`, `source_type`, `source_trust`.
 - On blocked tool decision, downstream tool execution does not happen.
 - In strict smoke, `orphan_executions == 0` and `gateway_coverage >= 1.0`.
+- Use `runtime.get_boundary_coverage_report(session_id=...)` to verify boundary coverage (`full|partial|minimal`).

@@ -12,9 +12,8 @@ Pipeline:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Sequence, Tuple
 
-import numpy as np
 
 from omega.interfaces.contracts_v1 import ContentItem, ProjectionResult
 
@@ -260,3 +259,94 @@ def score_chunks(
         triggered_chunk_ids=sorted(triggered_chunk_ids),
         reasons=sorted(set(reasons)),
     )
+
+
+def aggregate_semantic_execution_trace(projections: Sequence[ProjectionResult]) -> Dict[str, Any]:
+    """Build a self-contained request-scoped semantic trace snapshot from projection evidence.
+
+    This deliberately avoids projector-global ``last request`` state, which is unsafe
+    under concurrent API requests.
+    """
+
+    traces: List[Dict[str, Any]] = []
+    for projection in projections:
+        matches = projection.evidence.matches if isinstance(projection.evidence.matches, dict) else {}
+        api_match = matches.get("api_perception", {}) if isinstance(matches, dict) else {}
+        if not isinstance(api_match, Mapping):
+            continue
+        trace = api_match.get("execution_trace", {})
+        if isinstance(trace, Mapping) and trace:
+            row = dict(trace)
+        else:
+            row = {
+                "semantic_input_kind": str(
+                    api_match.get(
+                        "semantic_input_kind",
+                        "image_only" if bool(api_match.get("vision_attempted", False)) else "text_only",
+                    )
+                ),
+                "vision_attempted": bool(api_match.get("vision_attempted", False)),
+                "vision_provider_supported": bool(api_match.get("vision_provider_supported", False)),
+                "vision_failure_policy": str(api_match.get("vision_failure_policy", "none")),
+                "vision_fallback_used": bool(api_match.get("vision_fallback_used", False)),
+                "vision_semantic_status": str(api_match.get("vision_semantic_status", "none")),
+                "provider_call_count": int(api_match.get("provider_call_count", 0) or 0),
+                "retry_count": int(api_match.get("retry_count", 0) or 0),
+                "cache_hit": bool(api_match.get("cache_hit_last_request", api_match.get("cache_hit", False))),
+                "semantic_latency_ms": api_match.get("semantic_latency_ms"),
+                "first_pass_latency_ms": api_match.get("first_pass_latency_ms"),
+                "second_pass_latency_ms": api_match.get("second_pass_latency_ms"),
+                "second_pass_attempted": bool(api_match.get("second_pass_attempted", False)),
+                "second_pass_result": str(api_match.get("second_pass_result", "not_attempted")),
+                "token_usage": dict(api_match.get("token_usage", {}) or {}),
+                "semantic_status": str(api_match.get("semantic_status", "unknown")),
+                "provider": str(api_match.get("provider", "")),
+                "provider_id": str(api_match.get("provider_id", "")),
+                "provider_capabilities": dict(api_match.get("provider_capabilities", {}) or {}),
+                "provider_route": list(api_match.get("provider_route", []) or []),
+                "fallback_level": str(api_match.get("fallback_level", "none")),
+                "fallback_reason": api_match.get("fallback_reason"),
+                "llm_fallback_active": bool(api_match.get("llm_fallback_active", False)),
+                "health_state": str(api_match.get("health_state", "healthy")),
+                "quota_signal": api_match.get("quota_signal"),
+            }
+        traces.append(row)
+
+    if not traces:
+        return {}
+    vision_rows = [row for row in traces if bool(row.get("vision_attempted", False))]
+    selected = dict((vision_rows or traces)[-1])
+    selected["provider_call_count"] = sum(int(row.get("provider_call_count", 0) or 0) for row in traces)
+    selected["retry_count"] = sum(int(row.get("retry_count", 0) or 0) for row in traces)
+    selected["cache_hit_last_request"] = bool(selected.get("cache_hit", False))
+    selected["llm_fallback_active"] = any(bool(row.get("llm_fallback_active", False)) for row in traces)
+    selected["vision_fallback_used"] = any(bool(row.get("vision_fallback_used", False)) for row in vision_rows)
+
+    def _sum_optional(name: str) -> float | None:
+        vals = [float(row[name]) for row in traces if isinstance(row.get(name), (int, float))]
+        return sum(vals) if vals else None
+
+    selected["semantic_latency_ms"] = _sum_optional("semantic_latency_ms")
+    selected["first_pass_latency_ms"] = _sum_optional("first_pass_latency_ms")
+    selected["second_pass_latency_ms"] = _sum_optional("second_pass_latency_ms")
+    selected["second_pass_attempted"] = any(bool(row.get("second_pass_attempted", False)) for row in traces)
+
+    token_usage: Dict[str, Any] = {}
+    for row in traces:
+        for key, value in dict(row.get("token_usage", {}) or {}).items():
+            if isinstance(value, (int, float)):
+                token_usage[str(key)] = float(token_usage.get(str(key), 0.0)) + float(value)
+            elif isinstance(value, Mapping):
+                nested = dict(token_usage.get(str(key), {}) or {})
+                for nkey, nvalue in value.items():
+                    if isinstance(nvalue, (int, float)):
+                        nested[str(nkey)] = float(nested.get(str(nkey), 0.0)) + float(nvalue)
+                    else:
+                        nested[str(nkey)] = nvalue
+                token_usage[str(key)] = nested
+            else:
+                token_usage[str(key)] = value
+    selected["token_usage"] = token_usage
+    selected["trace_source"] = "projection_evidence"
+    selected["projection_trace_count"] = len(traces)
+    return selected

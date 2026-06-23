@@ -3,7 +3,7 @@ tools:
   execution_mode: ENFORCE
   unknown_tool_policy: DENY
   freeze:
-    read_only_exception: true
+    read_only_exception: false
   arg_validation:
     enabled: true
     fail_mode: deny
@@ -12,6 +12,11 @@ tools:
       max_headers: 16
       max_header_key_chars: 64
       max_header_value_chars: 256
+      allowed_schemes: [https]
+      allowed_hosts: []
+      allowed_ports: [443]
+      allow_ip_literals: false
+      resolve_dns: true
     write_file:
       max_filename_chars: 120
       max_content_bytes: 8192
@@ -35,22 +40,27 @@ tools:
         - "\\bshutdown\\s+(-s|/s)\\b"
   capabilities:
     retrieval_readonly:
+      enabled: true
       mode: read_only
       allowed_when: ["NO_OFF", "OFF"]
       requires_human_approval: false
     summarize:
+      enabled: true
       mode: read_only
       allowed_when: ["NO_OFF", "OFF"]
       requires_human_approval: false
     echo:
+      enabled: true
       mode: read_only
       allowed_when: ["NO_OFF", "OFF"]
       requires_human_approval: false
     write_file:
+      enabled: false
       mode: write
       allowed_when: ["NO_OFF"]
       requires_human_approval: true
     network_post:
+      enabled: false
       mode: dangerous
       allowed_when: ["NO_OFF"]
       requires_human_approval: true

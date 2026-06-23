@@ -13,6 +13,15 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 
+ALL_SMOKE_SPECS: list[tuple[str, str]] = [
+    ("langchain_guard", "scripts/smoke_langchain_guard.py"),
+    ("langgraph_guard", "scripts/smoke_langgraph_guard.py"),
+    ("llamaindex_guard", "scripts/smoke_llamaindex_guard.py"),
+    ("haystack_guard", "scripts/smoke_haystack_guard.py"),
+    ("autogen_guard", "scripts/smoke_autogen_guard.py"),
+    ("crewai_guard", "scripts/smoke_crewai_guard.py"),
+]
+
 
 def _now_utc_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -75,10 +84,48 @@ def _run_smoke(name: str, argv: list[str], out_dir: Path, *, temp_root: Path) ->
     }
 
 
+def _resolve_smoke_specs(frameworks: list[str] | None) -> list[tuple[str, str]]:
+    if not frameworks:
+        return list(ALL_SMOKE_SPECS)
+
+    by_key = {key: (key, script) for key, script in ALL_SMOKE_SPECS}
+    by_alias = {key.replace("_guard", ""): (key, script) for key, script in ALL_SMOKE_SPECS}
+    selected: list[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    for raw in frameworks:
+        token = str(raw or "").strip().lower()
+        if not token:
+            continue
+        match = by_key.get(token) or by_alias.get(token)
+        if match is None:
+            valid = ", ".join(sorted(set(list(by_key.keys()) + list(by_alias.keys()))))
+            raise ValueError(f"unknown framework '{raw}'. valid values: {valid}")
+        key = match[0]
+        if key in seen:
+            continue
+        selected.append(match)
+        seen.add(key)
+
+    if not selected:
+        raise ValueError("no frameworks selected")
+    return selected
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run framework guard smokes (LangChain/LangGraph/LlamaIndex/Haystack/AutoGen/CrewAI)")
     parser.add_argument("--profile", default="dev")
     parser.add_argument("--strict", action="store_true")
+    parser.add_argument(
+        "--framework",
+        action="append",
+        default=[],
+        help=(
+            "Run only selected framework(s). Repeatable. "
+            "Accepted values: langchain, langgraph, llamaindex, haystack, autogen, crewai "
+            "(or *_guard variants)."
+        ),
+    )
     parser.add_argument("--require-pytest", action="store_true")
     parser.add_argument("--output-dir", default=None)
     args = parser.parse_args()
@@ -94,14 +141,11 @@ def main() -> int:
         "pytest_available": bool(importlib.util.find_spec("pytest") is not None),
         "temp_root": str(temp_root),
     }
-    smoke_specs = [
-        ("langchain_guard", "scripts/smoke_langchain_guard.py"),
-        ("langgraph_guard", "scripts/smoke_langgraph_guard.py"),
-        ("llamaindex_guard", "scripts/smoke_llamaindex_guard.py"),
-        ("haystack_guard", "scripts/smoke_haystack_guard.py"),
-        ("autogen_guard", "scripts/smoke_autogen_guard.py"),
-        ("crewai_guard", "scripts/smoke_crewai_guard.py"),
-    ]
+    try:
+        smoke_specs = _resolve_smoke_specs(list(args.framework or []))
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
 
     command_runs = []
     report_paths: dict[str, Path] = {}
@@ -180,6 +224,7 @@ def main() -> int:
         "profile": args.profile,
         "strict": bool(args.strict),
         "run_dir": str(run_dir),
+        "selected_frameworks": [key for key, _ in smoke_specs],
         "framework_count": len(smoke_specs),
         "frameworks": frameworks_summary,
         "preflight": preflight,

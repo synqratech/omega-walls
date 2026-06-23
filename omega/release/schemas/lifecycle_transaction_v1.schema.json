@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.omegawalls.io/release/lifecycle_transaction_v1.schema.json",
+  "title": "Omega Walls Lifecycle Transaction v1",
+  "type": "object",
+  "required": ["schema_version", "transaction_id", "status", "from_release", "to_release", "backup"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "transaction_id": {"type": "string", "minLength": 1},
+    "status": {"type": "string", "minLength": 1},
+    "from_release": {"type": "string"},
+    "to_release": {"type": "string"},
+    "backup": {"type": "string", "minLength": 1}
+  }
+}

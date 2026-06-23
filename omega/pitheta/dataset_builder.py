@@ -17,11 +17,10 @@ from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional,
 import yaml
 
 from omega.config.loader import load_resolved_config
+from omega.eval.attack_corpus import generate, load_jsonl
 from omega.eval.deepset_adapter import build_deepset_samples
 from omega.interfaces.contracts_v1 import ContentItem, WALLS_V1
 from omega.projector.pi0_intent_v2 import Pi0IntentAwareV2
-from redteam.generator import generate
-from redteam.runner import load_jsonl
 
 PI_THETA_SCHEMA_VERSION = "pitheta_dataset_v2"
 WALL_ORDER = list(WALLS_V1)

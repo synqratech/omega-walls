@@ -1,0 +1,2 @@
+﻿# Pin framework and omega-walls versions for reproducible integration validation.
+omega-walls>=0.1.4

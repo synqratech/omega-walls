@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.omegawalls.io/release/compatibility_v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["compatibility_contract_version", "runtime", "upgrade", "rollback"],
+  "properties": {
+    "compatibility_contract_version": {"const": 1},
+    "runtime": {
+      "type": "object",
+      "required": ["current_engine_version", "api_versions", "config_schema_versions_readable", "runtime_state_schema_versions_readable", "control_plane_schema_versions_readable", "license_schema_versions_readable"],
+      "properties": {
+        "current_engine_version": {"type": "string"},
+        "api_versions": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "config_schema_versions_readable": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 1}},
+        "runtime_state_schema_versions_readable": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 1}},
+        "control_plane_schema_versions_readable": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 1}},
+        "license_schema_versions_readable": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 1}},
+        "policy_pack_versions_supported": {"type": "array", "items": {"type": "string"}},
+        "vision_pack_versions_supported": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "upgrade": {
+      "type": "object",
+      "required": ["supported_from"],
+      "properties": {"supported_from": {"type": "array", "minItems": 1, "items": {"type": "string"}}},
+      "additionalProperties": false
+    },
+    "rollback": {
+      "type": "object",
+      "required": ["supported_to", "irreversible_state_migrations"],
+      "properties": {
+        "supported_to": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "irreversible_state_migrations": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

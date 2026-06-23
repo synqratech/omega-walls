@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.omegawalls.io/release/artifact_signature_v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "algorithm", "key_id", "signed_at", "subject", "signature"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "algorithm": {"const": "Ed25519"},
+    "key_id": {"type": "string", "minLength": 1},
+    "signed_at": {"type": "string", "format": "date-time"},
+    "subject": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "name", "sha256", "size_bytes"],
+          "properties": {
+            "type": {"const": "file"}, "name": {"type": "string", "minLength": 1},
+            "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "size_bytes": {"type": "integer", "minimum": 0}
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "reference", "digest"],
+          "properties": {
+            "type": {"const": "oci_image"},
+            "reference": {"type": "string", "minLength": 1, "not": {"pattern": ":latest(?:$|@)"}},
+            "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+          }
+        }
+      ]
+    },
+    "signature": {"type": "string", "minLength": 40}
+  }
+}

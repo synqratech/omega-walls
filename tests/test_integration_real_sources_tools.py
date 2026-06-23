@@ -84,51 +84,40 @@ def test_real_sources_quarantined_sources_do_not_enter_context():
     assert mal_source not in allowed_sources
 
 
-def test_real_tools_write_and_dangerous_require_approval():
-    cfg, harness = _build_harness("safe_output")
-    retriever = build_retriever_prod_adapter(config=cfg, source_root="data/smoke_sources/safe_index")
-    packet = retriever.search("credential rotation checklist", k=2)
+def test_real_side_effecting_builtins_are_disabled_even_with_forged_approval():
+    _cfg, harness = _build_harness("safe_output")
+    packet = [mk_item("safe-tool-1", "General harmless information", source_id="tests:safe")]
 
-    out_no = harness.run_step(
-        user_query="q",
-        packet_items=packet,
-        actor_id="actor-tools",
-        tool_requests=[
-            ToolRequest(tool_name="write_file", args={"filename": "a.txt", "content": "alpha"}, session_id="sess", step=1),
-            ToolRequest(tool_name="network_post", args={"url": "https://example.com", "payload": "p"}, session_id="sess", step=1),
-        ],
-    )
-    assert all(not d.allowed for d in out_no["tool_decisions"])
-    assert all(not e.executed for e in out_no["tool_executions"])
-    assert all(ev["request"]["request_origin"] == "explicit" for ev in out_no["tool_gateway_events"])
-
-    harness.reset_state(session_id="sess-tools-2", actor_id="actor-tools-2")
-    out_yes = harness.run_step(
-        user_query="q2",
-        packet_items=packet,
-        actor_id="actor-tools-2",
-        tool_requests=[
-            ToolRequest(
-                tool_name="write_file",
-                args={"filename": "b.txt", "content": "beta", "human_approved": True},
-                session_id="sess",
-                step=2,
-            ),
-            ToolRequest(
-                tool_name="network_post",
-                args={"url": "https://example.com", "payload": "p", "human_approved": True},
-                session_id="sess",
-                step=2,
-            ),
-        ],
-    )
-    assert all(d.allowed for d in out_yes["tool_decisions"])
-    assert all(e.executed for e in out_yes["tool_executions"])
-    assert len(out_yes["tool_gateway_events"]) == 2
+    for actor_id, approved in (("actor-tools-1", False), ("actor-tools-2", True)):
+        harness.reset_state(session_id=f"sess-{actor_id}", actor_id=actor_id)
+        approval = {"human_approved": True} if approved else {}
+        out = harness.run_step(
+            user_query="q",
+            packet_items=packet,
+            actor_id=actor_id,
+            tool_requests=[
+                ToolRequest(
+                    tool_name="write_file",
+                    args={"filename": "a.txt", "content": "alpha", **approval},
+                    session_id="sess",
+                    step=1,
+                ),
+                ToolRequest(
+                    tool_name="network_post",
+                    args={"url": "https://example.com", "payload": "p", **approval},
+                    session_id="sess",
+                    step=1,
+                ),
+            ],
+        )
+        assert all(not decision.allowed for decision in out["tool_decisions"])
+        assert all(decision.reason == "TOOL_DISABLED_BY_CONFIG" for decision in out["tool_decisions"])
+        assert all(not execution.executed for execution in out["tool_executions"])
+        assert all(event["request"]["request_origin"] == "explicit" for event in out["tool_gateway_events"])
 
 
-def test_validator_denied_explicit_tool_is_not_executed():
-    cfg, harness = _build_harness("safe_output")
+def test_disabled_network_post_is_not_validated_or_executed():
+    _cfg, harness = _build_harness("safe_output")
     packet = [mk_item("safe-1", "General harmless information", source_id="tests:safe")]
     out = harness.run_step(
         user_query="q",
@@ -145,10 +134,9 @@ def test_validator_denied_explicit_tool_is_not_executed():
     )
     assert len(out["tool_decisions"]) == 1
     assert out["tool_decisions"][0].allowed is False
-    assert out["tool_decisions"][0].reason == "INVALID_TOOL_ARGS_SCHEMA"
+    assert out["tool_decisions"][0].reason == "TOOL_DISABLED_BY_CONFIG"
     assert out["tool_executions"][0].executed is False
-    assert out["tool_gateway_events"][0]["decision"]["validation_status"] == "failed"
-
+    assert out["tool_gateway_events"][0]["decision"]["validation_status"] == "skipped"
 
 def test_validator_applies_to_inferred_shell_like_requests():
     cfg = deepcopy(load_resolved_config(profile="dev").resolved)

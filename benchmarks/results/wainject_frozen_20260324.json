@@ -1,0 +1,26 @@
+{
+  "schema_version": "benchmark_snapshot_v1",
+  "benchmark_id": "wainjectbench_text",
+  "frozen_run_id": "wainject_eval_w202613_20260324T125013Z",
+  "source_report": "artifacts/wainject_eval/wainject_eval_w202613_20260324T125013Z/report.json",
+  "status": "ok",
+  "comparability_status": "partial_comparison",
+  "comparability_reason": "Full benign+malicious run completed, but no benchmark-maintainer detector leaderboard equivalence table is available.",
+  "metrics": {
+    "summary": {
+      "attack_off_rate": 0.6700302724520686,
+      "benign_off_rate": 0.007757665312153676,
+      "precision": 0.9693430656934306,
+      "recall": 0.6700302724520686
+    },
+    "counts": {
+      "attack_total": 991,
+      "benign_total": 2707,
+      "samples_total": 3698
+    }
+  },
+  "notes": [
+    "Evaluation mode is stateless per sample.",
+    "Sessionized diagnostic mode is intentionally excluded from frozen comparison claims."
+  ]
+}

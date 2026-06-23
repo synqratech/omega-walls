@@ -13,6 +13,8 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from omega.env_file import load_repo_env_file
+
 
 DEFAULT_PACK = "tests/data/session_benchmark/agentdojo_cocktail_mini_smoke_v1.jsonl"
 DEFAULT_ARTIFACTS_ROOT = "artifacts/quick_demo"
@@ -218,6 +220,10 @@ def run_quick_demo(args: argparse.Namespace) -> int:
         "--artifacts-root",
         str(artifacts_root),
     ]
+    # Built-in smoke pack is currently legacy single-file format (runtime+labels).
+    # Keep demo UX stable by opting in explicitly for this path only.
+    if str(args.dataset_source) == "built_in":
+        eval_argv.append("--allow-legacy-runtime-leakage")
     if bool(args.strict_projector):
         eval_argv.append("--strict-projector")
     if args.api_model:
@@ -331,6 +337,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
+    load_repo_env_file()
     return run_quick_demo(args)
 
 

@@ -23,6 +23,8 @@ def test_openclaw_plugin_package_contract_files_exist() -> None:
         PLUGIN_ROOT / "src" / "omega-client.ts",
         PLUGIN_ROOT / "src" / "hooks.ts",
         PLUGIN_ROOT / "src" / "webfetch.ts",
+        PLUGIN_ROOT / "dist" / "index.js",
+        PLUGIN_ROOT / "dist" / "index.d.ts",
     ]
     for path in required:
         assert path.exists(), f"missing required OpenClaw plugin artifact: {path}"

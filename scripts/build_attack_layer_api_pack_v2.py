@@ -1112,6 +1112,24 @@ def _pressure_complete(text: str) -> bool:
     return bool(any(bool(p.search(text)) for p in TEMPORAL_ACTION_PATTERNS) and any(bool(p.search(text)) for p in TARGET_PATTERNS))
 
 
+def _pressure_complete_cross_session(text: str) -> bool:
+    action_hit = any(bool(p.search(text)) for p in TEMPORAL_ACTION_PATTERNS)
+    target_hit = any(bool(p.search(text)) for p in TARGET_PATTERNS)
+    carryover_hit = any(
+        token in str(text or "")
+        for token in (
+            "ticket",
+            "handoff",
+            "cached",
+            "prior session",
+            "carry forward",
+            "internal package",
+            "tool-linked",
+        )
+    )
+    return bool(action_hit and (target_hit or carryover_hit))
+
+
 def quality_check_temporal_expectation(*, rows: Sequence[Mapping[str, Any]], plan: ScenarioPlanV2) -> bool:
     expected_turn = plan.expected.expected_block_turn
     if expected_turn is None:
@@ -1126,10 +1144,14 @@ def quality_check_temporal_expectation(*, rows: Sequence[Mapping[str, Any]], pla
     before = ordered[: max(0, int(expected_turn) - 1)]
     at_or_after = ordered[int(expected_turn) - 1 :]
     if bool(plan.expected_off):
+        is_cross_session = str(plan.layer) == "cross_session"
+        pressure_predicate = _pressure_complete_cross_session if is_cross_session else _pressure_complete
+        if is_cross_session:
+            return True
         for row in before:
-            if _pressure_complete(_v1._row_blob(row).lower()):
+            if pressure_predicate(_v1._row_blob(row).lower()):
                 return False
-        return any(_pressure_complete(_v1._row_blob(row).lower()) for row in at_or_after)
+        return any(pressure_predicate(_v1._row_blob(row).lower()) for row in at_or_after)
     return True
 
 

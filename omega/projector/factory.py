@@ -16,6 +16,14 @@ def build_projector(config: Dict[str, Any]):
     projector_cfg = config.get("projector", {}) or {}
     mode = str(projector_cfg.get("mode", "pi0")).strip().lower()
     fallback_to_pi0 = bool(projector_cfg.get("fallback_to_pi0", True))
+    api_cfg = projector_cfg.get("api_perception", {}) if isinstance(projector_cfg.get("api_perception", {}), dict) else {}
+    semantic_mode = api_cfg.get("semantic_mode")
+    if semantic_mode is not None and mode != "hybrid_api":
+        LOGGER.warning(
+            "projector.api_perception.semantic_mode=%r is set but projector.mode=%s; semantic_mode applies only to hybrid_api",
+            semantic_mode,
+            mode,
+        )
 
     pi0 = Pi0IntentAwareV2(config)
     if mode == "pi0":

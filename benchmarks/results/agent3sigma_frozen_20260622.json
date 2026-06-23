@@ -1,0 +1,108 @@
+{
+  "schema_version": "benchmark_snapshot_v1",
+  "benchmark_id": "agent3sigma_stage",
+  "frozen_run_id": "session_eval_20260620T075139Z",
+  "source_report": "artifacts/agent3sigma_stateful_only_prod_api/session_eval_20260620T075139Z/report.json",
+  "status": "ok",
+  "comparability_status": "scoped_stateful_family_mix",
+  "comparability_reason": "Primary frozen claim is the repository-native full stateful Agent3Sigma family mix. Recent malicious_skill SkillBox recovery is included as targeted shadow diagnostics, not as headline enforced benchmark uplift.",
+  "metrics": {
+    "summary_core": {
+      "attack_off_rate": 0.6983471074380165,
+      "benign_off_rate": 0.3113207547169811,
+      "precision": 0.7934272300469484,
+      "recall": 0.6983471074380165
+    },
+    "by_family_attack_off_rate": {
+      "configuration_tampering": 0.7021276595744681,
+      "dangerous_command_execution": 0.7359550561797753,
+      "data_exfiltration": 0.875,
+      "information_leakage": 0.9042553191489362,
+      "jailbreak_attack": 1.0,
+      "malicious_skill": 0.2152777777777778,
+      "memory_tampering": 0.9349112426035503,
+      "privilege_escalation": 0.25,
+      "resource_exhaustion": 0.3125,
+      "sandbox_escape": 1.0
+    },
+    "by_family_counts": {
+      "configuration_tampering": {
+        "attack_detected": 33,
+        "attack_total": 47,
+        "benign_fp": 14,
+        "benign_total": 47
+      },
+      "dangerous_command_execution": {
+        "attack_detected": 131,
+        "attack_total": 178,
+        "benign_fp": 14,
+        "benign_total": 45
+      },
+      "data_exfiltration": {
+        "attack_detected": 14,
+        "attack_total": 16,
+        "benign_fp": 7,
+        "benign_total": 16
+      },
+      "information_leakage": {
+        "attack_detected": 85,
+        "attack_total": 94,
+        "benign_fp": 22,
+        "benign_total": 47
+      },
+      "jailbreak_attack": {
+        "attack_detected": 30,
+        "attack_total": 30,
+        "benign_fp": 6,
+        "benign_total": 16
+      },
+      "malicious_skill": {
+        "attack_detected": 31,
+        "attack_total": 144,
+        "benign_fp": 35,
+        "benign_total": 144
+      },
+      "memory_tampering": {
+        "attack_detected": 158,
+        "attack_total": 169,
+        "benign_fp": 22,
+        "benign_total": 61
+      },
+      "privilege_escalation": {
+        "attack_detected": 4,
+        "attack_total": 16,
+        "benign_fp": 4,
+        "benign_total": 16
+      },
+      "resource_exhaustion": {
+        "attack_detected": 5,
+        "attack_total": 16,
+        "benign_fp": 5,
+        "benign_total": 16
+      },
+      "sandbox_escape": {
+        "attack_detected": 16,
+        "attack_total": 16,
+        "benign_fp": 3,
+        "benign_total": 16
+      }
+    },
+    "targeted_updates": {
+      "malicious_skill_skillbox_shadow_20260621": {
+        "source_report": "artifacts/agent3sigma_malicious_skill_full_run_skillbox_only/session_eval_20260621T155729Z/report.json",
+        "attack_sessions": 144,
+        "benign_sessions": 144,
+        "skillbox_source_mismatch_count": 33,
+        "simulated_skillbox_attack_recall": 0.22916666666666666,
+        "simulated_skillbox_benign_fp_rate": 0.0
+      }
+    }
+  },
+  "notes": [
+    "This snapshot fixes the public baseline as of 2026-06-22 for the repository-native Agent3Sigma Stage advanced benchmark.",
+    "Headline benchmark values come from the full stateful-only prod_api run on 2026-06-20.",
+    "The weakest headline families remain malicious_skill, privilege_escalation, and resource_exhaustion.",
+    "SkillBox source_mismatch is now a clean shadow signal for malicious_skill, but it is not yet counted as headline enforcement in this snapshot.",
+    "Next development pressure should focus on controlled enforcement of clean malicious_skill supply-chain mismatches and on recall recovery for privilege_escalation and resource_exhaustion."
+  ]
+}

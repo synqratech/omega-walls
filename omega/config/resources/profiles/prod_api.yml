@@ -1,0 +1,65 @@
+profiles:
+  env: prod_api
+
+runtime:
+  guard_mode: enforce
+  required_components: [attachments]
+
+pi0:
+  semantic:
+    enabled: false
+
+projector:
+  mode: hybrid_api
+  fallback_to_pi0: true
+  api_perception:
+    enabled: true
+    strict: true
+    semantic_mode: hybrid_cloud
+    semantic_failure_policy: fail_closed
+    provider: openai
+    model: gpt-5.4-mini
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+  pitheta:
+    enabled: false
+
+retriever:
+  sqlite_fts:
+    attachments:
+      visual:
+        enabled: false
+      ocr:
+        enabled: false
+
+logging:
+  mode: OFF_ONLY
+  capture_text: NEVER
+
+off_policy:
+  enforcement_mode: ENFORCE
+  trust_boundary:
+    trusted_control_guard:
+      policy_action_on_trigger: warn
+  incident_artifact:
+    capture_incident_text: false
+
+api:
+  limits:
+    request_timeout_sec: 30
+  runtime:
+    mode: stateful
+    allow_request_override: false
+    session_store:
+      backend: sqlite
+      sqlite_path: artifacts/state/api_session_runtime_api.db
+      session_ttl_sec: 86400
+      request_cache_ttl_sec: 86400
+  security:
+    transport_mode: proxy_tls
+    require_https: true
+    trusted_proxy_cidrs: ["127.0.0.1/32", "::1/128"]
+  auth:
+    api_keys: []
+    api_key_env: OMEGA_API_KEYS
+    require_hmac: true

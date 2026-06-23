@@ -1,0 +1,127 @@
+profiles:
+  env: prod_vision_local_ocr
+
+runtime:
+  guard_mode: enforce
+  required_components: [attachments, vision]
+
+projector:
+  mode: hybrid_api
+  fallback_to_pi0: false
+  api_perception:
+    enabled: true
+    strict: true
+    semantic_mode: rules_plus_ocr
+    semantic_failure_policy: fail_closed
+    provider: local_vision
+    model: rapidocr-pi0-local
+    base_url: local://vision
+    api_key_env: OMEGA_LOCAL_VISION
+    provider_options:
+      capabilities:
+        text: true
+        image: true
+        supported_image_mime_types: [image/png, image/jpeg, image/webp, image/gif]
+        max_image_bytes: 20971520
+        max_images: 8
+      visual_egress:
+        enabled: true
+        default_action: deny
+        providers:
+          openai: {external: true, region: global}
+          anthropic: {external: true, region: global}
+          openai_compat: {external: true, region: customer_configured}
+          local_vision: {external: false, region: local}
+        tenants:
+          "*":
+            allow_external: false
+            allowed_providers: [local_vision]
+            allowed_regions: [local]
+            require_region_match: false
+      local_vision:
+        backend: ocr_pi0
+        startup_timeout_sec: 25
+        request_timeout_sec: 15
+        max_memory_mb: 2048
+        max_requests: 500
+        pool_size: 1
+        max_pending_requests: 2
+        queue_timeout_sec: 1.0
+        intra_op_threads: 2
+        inter_op_threads: 1
+    image_region_pass_enabled: false
+    image_region_pass:
+      enabled: false
+
+retriever:
+  sqlite_fts:
+    attachments:
+      visual:
+        enabled: true
+        render_pdf_pages: true
+        extract_embedded_images: true
+        max_assets: 8
+        max_total_bytes: 33554432
+        max_asset_bytes: 8388608
+        max_pdf_pages: 8
+        pdf_dpi: 120
+        max_pdf_pixels_per_page: 16000000
+        min_width: 32
+        min_height: 32
+        failure_policy: fail_closed
+      ocr:
+        enabled: true
+        provider: rapidocr
+        execution_mode: persistent_worker
+        prewarm: true
+        worker_startup_timeout_sec: 25
+        worker_request_timeout_sec: 30
+        worker_max_memory_mb: 2048
+        worker_max_requests: 500
+        worker_pool_size: 1
+        worker_max_pending_requests: 2
+        worker_queue_timeout_sec: 1.0
+        worker_intra_op_threads: 2
+        worker_inter_op_threads: 1
+        lang: en
+        use_angle_cls: true
+        max_text_chars: 200000
+        max_spans_per_chunk: 8
+        min_confidence: 0.55
+        max_spans: 256
+        max_span_chars: 512
+        require_geometry: true
+        min_polygon_area_px: 4.0
+        failure_policy: degrade
+
+logging:
+  mode: OFF_ONLY
+  capture_text: NEVER
+
+off_policy:
+  enforcement_mode: ENFORCE
+  trust_boundary:
+    trusted_control_guard:
+      policy_action_on_trigger: warn
+  incident_artifact:
+    capture_incident_text: false
+
+api:
+  limits:
+    request_timeout_sec: 45
+  runtime:
+    mode: stateful
+    allow_request_override: false
+    session_store:
+      backend: sqlite
+      sqlite_path: artifacts/state/api_session_runtime_vision_ocr.db
+      session_ttl_sec: 86400
+      request_cache_ttl_sec: 86400
+  security:
+    transport_mode: proxy_tls
+    require_https: true
+    trusted_proxy_cidrs: ["127.0.0.1/32", "::1/128"]
+  auth:
+    api_keys: []
+    api_key_env: OMEGA_API_KEYS
+    require_hmac: true

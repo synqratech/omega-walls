@@ -11,9 +11,20 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
+from omega.interfaces.contracts_v1 import K_V1
+from omega.validation.numeric import validate_state_values
+
 
 def _now_ts() -> int:
     return int(time.time())
+
+
+def _reject_nonstandard_json_constant(value: str) -> None:
+    raise ValueError(f"non-standard JSON numeric constant: {value}")
+
+
+def _strict_json_loads(value: str) -> Any:
+    return json.loads(value, parse_constant=_reject_nonstandard_json_constant)
 
 
 @dataclass(frozen=True)
@@ -94,10 +105,10 @@ class ApiSessionStore:
             if row is None:
                 return None
             try:
-                parsed = json.loads(str(row["m_json"]))
-            except json.JSONDecodeError:
-                parsed = []
-            arr = np.asarray(parsed, dtype=float)
+                parsed = _strict_json_loads(str(row["m_json"]))
+            except (json.JSONDecodeError, ValueError, TypeError) as exc:
+                raise ValueError("corrupt session state: invalid strict JSON") from exc
+            arr = validate_state_values(vector=parsed, wall_count=K_V1, name="persisted state.m")
             return SessionStateRow(
                 tenant_id=str(row["tenant_id"]),
                 session_id=str(row["session_id"]),
@@ -119,7 +130,10 @@ class ApiSessionStore:
     ) -> None:
         now_ts = _now_ts()
         expires = now_ts + int(self.session_ttl_sec)
-        payload = json.dumps(np.asarray(m, dtype=float).tolist(), ensure_ascii=False)
+        validated_m = validate_state_values(vector=m, wall_count=K_V1, name="state.m")
+        if isinstance(step, bool) or int(step) != step or int(step) < 0:
+            raise ValueError("state.step must be a nonnegative integer")
+        payload = json.dumps(validated_m.tolist(), ensure_ascii=False, allow_nan=False)
         with self._connect() as conn:
             self._cleanup_expired_conn(conn, now_ts)
             conn.execute(
@@ -159,8 +173,8 @@ class ApiSessionStore:
             if row is None:
                 return None
             try:
-                payload = json.loads(str(row["response_json"]))
-            except json.JSONDecodeError:
+                payload = _strict_json_loads(str(row["response_json"]))
+            except (json.JSONDecodeError, ValueError):
                 return None
             if not isinstance(payload, dict):
                 return None
@@ -176,7 +190,7 @@ class ApiSessionStore:
     ) -> None:
         now_ts = _now_ts()
         expires = now_ts + int(self.request_cache_ttl_sec)
-        blob = json.dumps(dict(response_payload), ensure_ascii=False)
+        blob = json.dumps(dict(response_payload), ensure_ascii=False, allow_nan=False)
         with self._connect() as conn:
             self._cleanup_expired_conn(conn, now_ts)
             conn.execute(
@@ -195,6 +209,68 @@ class ApiSessionStore:
                     blob,
                     int(now_ts),
                     int(expires),
+                ),
+            )
+
+    def save_state_and_cached_response(
+        self,
+        *,
+        tenant_id: str,
+        session_id: str,
+        actor_id: str,
+        m: np.ndarray,
+        step: int,
+        request_id: str,
+        response_payload: Dict[str, Any],
+    ) -> None:
+        """Persist state and idempotency cache in one SQLite transaction."""
+        now_ts = _now_ts()
+        state_expires = now_ts + int(self.session_ttl_sec)
+        cache_expires = now_ts + int(self.request_cache_ttl_sec)
+        validated_m = validate_state_values(vector=m, wall_count=K_V1, name="state.m")
+        if isinstance(step, bool) or int(step) != step or int(step) < 0:
+            raise ValueError("state.step must be a nonnegative integer")
+        state_blob = json.dumps(validated_m.tolist(), ensure_ascii=False, allow_nan=False)
+        response_blob = json.dumps(dict(response_payload), ensure_ascii=False, allow_nan=False)
+        with self._connect() as conn:
+            self._cleanup_expired_conn(conn, now_ts)
+            conn.execute(
+                """
+                INSERT INTO session_state(tenant_id, session_id, actor_id, m_json, step, updated_at_ts, expires_at_ts)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(tenant_id, session_id) DO UPDATE SET
+                  actor_id = excluded.actor_id,
+                  m_json = excluded.m_json,
+                  step = excluded.step,
+                  updated_at_ts = excluded.updated_at_ts,
+                  expires_at_ts = excluded.expires_at_ts
+                """,
+                (
+                    str(tenant_id),
+                    str(session_id),
+                    str(actor_id),
+                    state_blob,
+                    int(step),
+                    int(now_ts),
+                    int(state_expires),
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO request_cache(tenant_id, session_id, request_id, response_json, created_at_ts, expires_at_ts)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(tenant_id, session_id, request_id) DO UPDATE SET
+                  response_json = excluded.response_json,
+                  created_at_ts = excluded.created_at_ts,
+                  expires_at_ts = excluded.expires_at_ts
+                """,
+                (
+                    str(tenant_id),
+                    str(session_id),
+                    str(request_id),
+                    response_blob,
+                    int(now_ts),
+                    int(cache_expires),
                 ),
             )
 

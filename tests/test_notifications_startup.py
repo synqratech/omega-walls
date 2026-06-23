@@ -16,14 +16,28 @@ class _ProjectorActive:
     semantic_active = True
 
     def semantic_status(self) -> Dict[str, Any]:
-        return {"enabled_mode": "auto", "active": True, "attempted": True, "error": ""}
+        return {
+            "enabled_mode": "auto",
+            "active": True,
+            "attempted": True,
+            "configured_device": "auto",
+            "runtime_device": "cpu",
+            "error": "",
+        }
 
 
 class _ProjectorFallback:
     semantic_active = False
 
     def semantic_status(self) -> Dict[str, Any]:
-        return {"enabled_mode": "auto", "active": False, "attempted": True, "error": "missing deps"}
+        return {
+            "enabled_mode": "auto",
+            "active": False,
+            "attempted": True,
+            "configured_device": "auto",
+            "runtime_device": "",
+            "error": "missing deps",
+        }
 
 
 class _OkNotifier:
@@ -124,6 +138,7 @@ def test_preflight_builder_notifications_disabled(monkeypatch: pytest.MonkeyPatc
     assert statuses["semantic_readiness"] == "OK"
     text = render_preflight_text(checklist)
     assert "Channel alerts are disabled globally." in text
+    assert "Local semantic encoder is running on CPU." in text
 
 
 def test_dispatcher_startup_dedup_once_per_process() -> None:

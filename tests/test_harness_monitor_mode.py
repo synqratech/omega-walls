@@ -51,6 +51,10 @@ def test_harness_monitor_mode_keeps_detection_but_suppresses_enforcement(tmp_pat
     assert out["monitor"]["enabled"] is True
     assert out["monitor"]["actual_action"] == "ALLOW"
     assert out["monitor"]["intended_action"] != "ALLOW"
+    assert out["semantic_failure_status"] in {"ok", "semantic_failed"}
+    assert out["semantic_failure_policy"] in {"degrade", "escalate", "fail_closed"}
+    assert out["semantic_failure_policy_branch"] in {"none", "degrade", "escalate", "fail_closed"}
+    assert isinstance(out["monitor"].get("semantic_projection", {}), dict)
     assert all(exec_row.executed is False for exec_row in out["tool_executions"])
     assert events_path.exists()
     rows = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines() if line.strip()]

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "omega-walls"
-version = "0.1.5"
+version = "0.7.0"
 description = "Omega Walls v1 safety layer for RAG/agents"
 readme = { file = "README_PYPI.md", content-type = "text/markdown" }
 requires-python = ">=3.10"
@@ -60,7 +60,8 @@ omega-walls-api = "omega.api.cli:main"
 dev = [
   "pytest>=7.0",
   "pytest-cov>=5.0",
-  "copier>=9.0"
+  "copier>=9.0",
+  "cryptography>=42.0"
 ]
 integrations = [
   "langchain>=1.0",
@@ -74,9 +75,30 @@ integrations = [
 ]
 attachments = [
   "pypdf>=4.0",
+  "PyMuPDF>=1.24",
   "python-docx>=1.1",
   "beautifulsoup4>=4.12",
-  "lxml>=5.0"
+  "lxml>=5.0",
+  "pillow>=10.0"
+]
+ocr = [
+  "rapidocr>=3.8,<4",
+  "onnxruntime>=1.18,<2",
+  "pillow>=10.0"
+]
+vision = [
+  "pypdf>=4.0",
+  "PyMuPDF>=1.24",
+  "python-docx>=1.1",
+  "beautifulsoup4>=4.12",
+  "lxml>=5.0",
+  "rapidocr>=3.8,<4",
+  "onnxruntime>=1.18,<2",
+  "pillow>=10.0"
+]
+ocr-paddle = [
+  "paddleocr>=2.8",
+  "pillow>=10.0"
 ]
 api = [
   "fastapi>=0.110",
@@ -103,8 +125,11 @@ include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["omega*"]
+include = ["omega", "omega.*"]
 exclude = [
+  "omega.enterprise*",
+  "omega.orchestrator*",
+  "omega_walls_enterprise*",
   "tests*",
   "scripts*",
   "docs*",
@@ -119,4 +144,20 @@ exclude = [
 ]
 
 [tool.setuptools.package-data]
-"omega.config" = ["resources/*.yml", "resources/profiles/*.yml"]
+"omega.config" = [
+  "resources/*.yml",
+  "resources/profiles/autonomy_soft.yml",
+  "resources/profiles/deepset_tune.yml",
+  "resources/profiles/dev.yml",
+  "resources/profiles/devops_minimal.yml",
+  "resources/profiles/local_dev.yml",
+  "resources/profiles/pilot.yml",
+  "resources/profiles/pilot_canonical.yml",
+  "resources/profiles/prod.yml",
+  "resources/profiles/prod_api.yml",
+  "resources/profiles/prod_vision.yml",
+  "resources/profiles/prod_vision_local_ocr.yml",
+  "resources/profiles/quickstart.yml",
+  "resources/profiles/sensitive_rules_only.yml",
+]
+"omega.release" = ["version.json", "schemas/*.json"]

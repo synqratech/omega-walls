@@ -1,0 +1,58 @@
+name: Vision Phase 1 Gate
+
+on:
+  pull_request:
+    paths:
+      - "omega/projector/api_hybrid/**"
+      - "omega/projector/api_hybrid_projector.py"
+      - "omega/api/**"
+      - "omega/config/resources/projector.yml"
+      - "omega/config/validators/projector.py"
+      - "tests/data/vision_phase1_frozen/**"
+      - "tests/test_vision_phase1_*.py"
+      - "scripts/eval_vision_phase1_frozen.py"
+      - "scripts/check_vision_phase1_gate.py"
+      - ".github/workflows/vision-phase1-gate.yml"
+  push:
+    branches: [main]
+    paths:
+      - "omega/projector/api_hybrid/**"
+      - "omega/projector/api_hybrid_projector.py"
+      - "omega/api/**"
+      - "omega/config/resources/projector.yml"
+      - "omega/config/validators/projector.py"
+      - "tests/data/vision_phase1_frozen/**"
+      - "tests/test_vision_phase1_*.py"
+      - "scripts/eval_vision_phase1_frozen.py"
+      - "scripts/check_vision_phase1_gate.py"
+      - ".github/workflows/vision-phase1-gate.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  frozen-contract-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install package and test dependencies
+        run: python -m pip install -e ".[dev,api]"
+      - name: Validate committed frozen artifact
+        run: python scripts/check_vision_phase1_gate.py
+      - name: Re-run deterministic benchmark
+        run: |
+          python scripts/eval_vision_phase1_frozen.py --output artifacts/vision_phase1/frozen/ci-regenerated.json
+          python scripts/check_vision_phase1_gate.py --report artifacts/vision_phase1/frozen/ci-regenerated.json
+      - name: Run Wave A regression tests
+        run: |
+          python -m pytest -q \
+            tests/test_vision_phase1_wave_a.py \
+            tests/test_vision_phase1_frozen_gate.py \
+            tests/test_api_hybrid_projector.py \
+            tests/test_api_attachment_scan.py \
+            tests/test_api_attachment_security.py

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.omegawalls.io/release/promotion_record_v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "release", "source_channel", "target_channel", "source_manifest_sha256", "artifact_digests", "behavior_diff_sha256", "approved_by", "created_utc", "rebuild_performed"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "release": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$"},
+    "source_channel": {"enum": ["candidate", "stable"]},
+    "target_channel": {"enum": ["stable", "lts"]},
+    "source_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "artifact_digests": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
+    "behavior_diff_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "approved_by": {"type": "string", "minLength": 1},
+    "created_utc": {"type": "string", "format": "date-time"},
+    "rebuild_performed": {"const": false}
+  },
+  "allOf": [
+    {"if": {"properties": {"source_channel": {"const": "candidate"}}}, "then": {"properties": {"target_channel": {"const": "stable"}}}},
+    {"if": {"properties": {"source_channel": {"const": "stable"}}}, "then": {"properties": {"target_channel": {"const": "lts"}}}}
+  ]
+}

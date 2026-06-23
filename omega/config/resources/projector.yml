@@ -1,11 +1,55 @@
-﻿projector:
+projector:
   mode: hybrid
   fallback_to_pi0: true
   api_perception:
     enabled: auto
     strict: false
+    # optional additive mode switch:
+    # rules_only | hybrid_cloud | hybrid_redacted | local_semantic
+    # unset keeps legacy behavior (current hybrid cloud path).
+    semantic_mode:
+    semantic_failure_policy: degrade   # degrade | escalate | fail_closed
     provider: openai
-    provider_options: {}
+    # Optional official OSS presets. Presets only configure openai_compat;
+    # they do not enable Enterprise provider orchestration.
+    # provider_preset: openrouter   # base_url=https://openrouter.ai/api/v1
+    # provider_preset: litellm      # base_url=http://litellm.internal:4000/v1
+    # api_key_file: /run/secrets/provider_api_key
+    # api_key_file_env: OMEGA_PROVIDER_API_KEY_FILE
+    # allowed_base_urls: [https://api.openai.com/v1]
+    # allow_http_private_gateway: false
+    # allow_redirects: false
+    # extra_headers: {}
+    provider_options:
+      capabilities:
+        text: true
+        image: true
+        supported_image_mime_types: [image/png, image/jpeg, image/webp, image/gif]
+        max_image_bytes: 20971520
+        max_images: 8
+      # Request-scoped in-memory media handles; raw bytes never enter ContentItem/source_meta.
+      blob_ttl_sec: 120
+      blob_max_total_bytes: 134217728
+      blob_max_records: 256
+      hybrid_redacted_allow_raw_image_outbound: false
+      # Tenant-scoped external visual processing and data residency.
+      visual_egress:
+        enabled: false
+        default_action: allow
+        providers:
+          openai: {external: true, region: global}
+          anthropic: {external: true, region: global}
+          openai_compat: {external: true, region: customer_configured}
+          local_vision: {external: false, region: local}
+        tenants: {}
+      local_vision:
+        startup_timeout_sec: 25
+        request_timeout_sec: 15
+        max_memory_mb: 2048
+        max_requests: 500
+        pool_size: 1
+        max_pending_requests: 2
+        queue_timeout_sec: 1.0
     model: gpt-5.4-mini
     base_url: https://api.openai.com/v1
     api_key_env: OPENAI_API_KEY
@@ -21,13 +65,23 @@
     short_chat_only: true
     short_fast_path_enabled: true
     short_fast_path_skip_on_pi0_hard: true
-    short_fast_path_skip_on_pi0_clean: true
+    short_fast_path_skip_on_pi0_clean: false
     short_fast_path_hard_min_score: 0.55
     short_fast_path_clean_max_score: 0.0
     prewarm_on_init: true
     transient_error_ttl_sec: 90
     responses_cooldown_sec: 60
     prompt_version: api_hybrid_v2
+    # Wave B spatial fallback. Legacy boolean remains for backward compatibility.
+    image_region_pass_enabled: false
+    image_region_pass:
+      enabled: false
+      trigger_mode: uncertain
+      pressure_abs_max: 0.12
+      confidence_max: 0.80
+      max_tiles: 5
+      overlap_ratio: 0.08
+      include_center_crop: true
     cache_path: artifacts/projector_api/cache.jsonl
     error_log_path: artifacts/projector_api/errors.jsonl
     benign_task_guard:
@@ -41,6 +95,9 @@
         - post hobbies of the company employees
         - sent their hobbies to
         - direct slack message
+        - landlord-notices.txt
+        - adjust your standing order accordingly
+        - scheduled transaction for rent
       attack_cues:
         - ignore previous
         - reveal token
@@ -93,6 +150,5 @@
         secret_exfiltration: 0.60
         tool_or_action_abuse: 0.60
         policy_evasion: 0.55
-
 
 

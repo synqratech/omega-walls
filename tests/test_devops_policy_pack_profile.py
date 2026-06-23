@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from omega.config.loader import load_resolved_config
 from omega.core.omega_core import OmegaCoreV1
 from omega.core.params import omega_params_from_config
 from omega.interfaces.contracts_v1 import ToolRequest
+from omega.notifications.models import ApprovalRecord, utc_now_iso
+from omega.notifications.store import InMemoryApprovalStore
 from omega.policy.off_policy_v1 import OffPolicyV1
 from omega.projector.pi0_intent_v2 import Pi0IntentAwareV2
 from omega.rag.harness import OmegaRAGHarness
+from omega.tools.approval import tool_args_sha256, tool_intent_id
 from omega.tools.tool_gateway import ToolGatewayV1
 from tests.helpers import mk_item
 
@@ -70,43 +75,63 @@ def test_devops_shell_exfil_command_is_hard_denied_even_with_human_approval() ->
 
 def test_devops_force_push_and_prod_deploy_are_approval_gated() -> None:
     cfg = load_resolved_config(profile="devops_minimal").resolved
-    gateway = ToolGatewayV1(cfg)
+    store = InMemoryApprovalStore()
+    gateway = ToolGatewayV1(cfg, approval_store=store)
 
-    git_pending = gateway.enforce(
-        ToolRequest(tool_name="git_exec", args={"command": "git push --force"}, session_id="s", step=1),
-        [],
+    def approve(request: ToolRequest, approval_id: str) -> None:
+        now = utc_now_iso()
+        expires = (datetime.now(timezone.utc) + timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        store.create(
+            ApprovalRecord(
+                approval_id=approval_id,
+                status="approved",
+                created_at=now,
+                updated_at=now,
+                expires_at=expires,
+                required_action="EXECUTE_TOOL",
+                tenant_id=request.tenant_id,
+                session_id=request.session_id,
+                actor_id=request.actor_id,
+                trace_id="trace",
+                decision_id="decision",
+                control_outcome="REQUIRE_APPROVAL",
+                approval_scope="tool_intent",
+                tool_name=request.tool_name,
+                tool_args_sha256=tool_args_sha256(request.args),
+                tool_intent_id=tool_intent_id(request),
+                single_use=True,
+            )
+        )
+        request.approval_id = approval_id
+
+    git_request = ToolRequest(
+        tool_name="git_exec",
+        args={"command": "git push --force", "human_approved": True},
+        session_id="s",
+        tenant_id="runtime",
+        actor_id="devops",
+        step=1,
     )
+    git_pending = gateway.enforce(git_request, [])
     assert git_pending.allowed is False
     assert git_pending.reason == "HUMAN_APPROVAL_REQUIRED"
+    approve(git_request, "apr-git")
+    assert gateway.enforce(git_request, []).allowed is True
+    assert gateway.enforce(git_request, []).allowed is False  # single-use replay
 
-    git_approved = gateway.enforce(
-        ToolRequest(
-            tool_name="git_exec",
-            args={"command": "git push --force", "human_approved": True},
-            session_id="s",
-            step=1,
-        ),
-        [],
+    deploy_request = ToolRequest(
+        tool_name="deploy_exec",
+        args={"command": "kubectl apply -f prod.yaml", "human_approved": True},
+        session_id="s",
+        tenant_id="runtime",
+        actor_id="devops",
+        step=1,
     )
-    assert git_approved.allowed is True
-
-    deploy_pending = gateway.enforce(
-        ToolRequest(tool_name="deploy_exec", args={"command": "kubectl apply -f prod.yaml"}, session_id="s", step=1),
-        [],
-    )
+    deploy_pending = gateway.enforce(deploy_request, [])
     assert deploy_pending.allowed is False
     assert deploy_pending.reason == "HUMAN_APPROVAL_REQUIRED"
-
-    deploy_approved = gateway.enforce(
-        ToolRequest(
-            tool_name="deploy_exec",
-            args={"command": "kubectl apply -f prod.yaml", "human_approved": True},
-            session_id="s",
-            step=1,
-        ),
-        [],
-    )
-    assert deploy_approved.allowed is True
+    approve(deploy_request, "apr-deploy")
+    assert gateway.enforce(deploy_request, []).allowed is True
 
 
 def test_devops_harness_emits_gateway_event_for_denied_tool_and_no_orphan_execution() -> None:

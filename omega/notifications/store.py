@@ -1,4 +1,4 @@
-"""Approval stores for notification callbacks and human decisions."""
+"""Approval stores for notification callbacks and exact tool-intent decisions."""
 
 from __future__ import annotations
 
@@ -18,6 +18,25 @@ def _parse_iso(value: str) -> datetime:
     return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
 
 
+def _matches_tool_intent(
+    row: ApprovalRecord,
+    *,
+    tenant_id: str,
+    session_id: str,
+    tool_name: str,
+    tool_args_sha256: str,
+    tool_intent_id: str,
+) -> bool:
+    return bool(
+        str(row.approval_scope) == "tool_intent"
+        and str(row.tenant_id) == str(tenant_id)
+        and str(row.session_id) == str(session_id)
+        and str(row.tool_name).strip().lower() == str(tool_name).strip().lower()
+        and str(row.tool_args_sha256) == str(tool_args_sha256)
+        and str(row.tool_intent_id) == str(tool_intent_id)
+    )
+
+
 class InMemoryApprovalStore(ApprovalStore):
     def __init__(self) -> None:
         self._rows: Dict[str, ApprovalRecord] = {}
@@ -25,6 +44,8 @@ class InMemoryApprovalStore(ApprovalStore):
 
     def create(self, record: ApprovalRecord) -> ApprovalRecord:
         with self._lock:
+            if str(record.approval_id) in self._rows:
+                return self._rows[str(record.approval_id)]
             self._rows[str(record.approval_id)] = record
             return record
 
@@ -43,6 +64,63 @@ class InMemoryApprovalStore(ApprovalStore):
             return None
         candidates.sort(key=lambda x: str(x.created_at), reverse=True)
         return candidates[0]
+
+    def get_latest_for_intent(
+        self,
+        *,
+        tenant_id: str,
+        session_id: str,
+        tool_intent_id: str,
+    ) -> Optional[ApprovalRecord]:
+        with self._lock:
+            candidates = [
+                row
+                for row in self._rows.values()
+                if str(row.tenant_id) == str(tenant_id)
+                and str(row.session_id) == str(session_id)
+                and str(row.tool_intent_id) == str(tool_intent_id)
+            ]
+        if not candidates:
+            return None
+        candidates.sort(key=lambda x: str(x.created_at), reverse=True)
+        return candidates[0]
+
+    def consume_tool_approval(
+        self,
+        *,
+        approval_id: str,
+        tenant_id: str,
+        session_id: str,
+        tool_name: str,
+        tool_args_sha256: str,
+        tool_intent_id: str,
+        step: int,
+        now_iso: str,
+    ) -> Optional[ApprovalRecord]:
+        now_dt = _parse_iso(now_iso)
+        with self._lock:
+            row = self._rows.get(str(approval_id))
+            if row is None or not _matches_tool_intent(
+                row,
+                tenant_id=tenant_id,
+                session_id=session_id,
+                tool_name=tool_name,
+                tool_args_sha256=tool_args_sha256,
+                tool_intent_id=tool_intent_id,
+            ):
+                return None
+            if str(row.status) != "approved" or _parse_iso(row.expires_at) <= now_dt:
+                return None
+            if bool(row.single_use) and str(row.consumed_at or ""):
+                return None
+            updated = replace(
+                row,
+                consumed_at=str(now_iso),
+                consumed_by_step=int(step),
+                updated_at=str(now_iso),
+            )
+            self._rows[str(approval_id)] = updated
+            return updated
 
     def resolve(self, approval_id: str, decision: ApprovalDecision) -> Optional[ApprovalRecord]:
         normalized = decision.normalized()
@@ -102,6 +180,16 @@ class InMemoryApprovalStore(ApprovalStore):
 
 
 class SQLiteApprovalStore(ApprovalStore):
+    _ADDITIVE_COLUMNS = {
+        "approval_scope": "TEXT NOT NULL DEFAULT 'policy'",
+        "tool_name": "TEXT NOT NULL DEFAULT ''",
+        "tool_args_sha256": "TEXT NOT NULL DEFAULT ''",
+        "tool_intent_id": "TEXT NOT NULL DEFAULT ''",
+        "single_use": "INTEGER NOT NULL DEFAULT 1",
+        "consumed_at": "TEXT NOT NULL DEFAULT ''",
+        "consumed_by_step": "INTEGER",
+    }
+
     def __init__(self, *, sqlite_path: str | Path) -> None:
         self.sqlite_path = Path(str(sqlite_path))
         self.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
@@ -113,6 +201,7 @@ class SQLiteApprovalStore(ApprovalStore):
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA busy_timeout=5000;")
+        conn.execute("PRAGMA foreign_keys=ON;")
         return conn
 
     def _init_db(self) -> None:
@@ -132,14 +221,26 @@ class SQLiteApprovalStore(ApprovalStore):
                   trace_id TEXT NOT NULL,
                   decision_id TEXT NOT NULL,
                   control_outcome TEXT NOT NULL,
+                  approval_scope TEXT NOT NULL DEFAULT 'policy',
+                  tool_name TEXT NOT NULL DEFAULT '',
+                  tool_args_sha256 TEXT NOT NULL DEFAULT '',
+                  tool_intent_id TEXT NOT NULL DEFAULT '',
+                  single_use INTEGER NOT NULL DEFAULT 1,
+                  consumed_at TEXT NOT NULL DEFAULT '',
+                  consumed_by_step INTEGER,
                   channels_json TEXT NOT NULL,
                   callback_ids_json TEXT NOT NULL,
                   resolution_json TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_approvals_session ON approvals(tenant_id, session_id, created_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_approvals_pending ON approvals(status, expires_at);
+                CREATE INDEX IF NOT EXISTS idx_approvals_intent ON approvals(tenant_id, session_id, tool_intent_id, created_at DESC);
                 """
             )
+            cols = {str(row[1]) for row in conn.execute("PRAGMA table_info(approvals)").fetchall()}
+            for name, ddl in self._ADDITIVE_COLUMNS.items():
+                if name not in cols:
+                    conn.execute(f"ALTER TABLE approvals ADD COLUMN {name} {ddl}")
 
     @staticmethod
     def _row_to_record(row: sqlite3.Row) -> ApprovalRecord:
@@ -154,6 +255,7 @@ class SQLiteApprovalStore(ApprovalStore):
                 reason=str(data.get("reason", "")),
                 resolved_at=str(data.get("resolved_at", "")),
             )
+        keys = set(row.keys())
         return ApprovalRecord(
             approval_id=str(row["approval_id"]),
             status=str(row["status"]),
@@ -167,6 +269,13 @@ class SQLiteApprovalStore(ApprovalStore):
             trace_id=str(row["trace_id"]),
             decision_id=str(row["decision_id"]),
             control_outcome=str(row["control_outcome"]),
+            approval_scope=str(row["approval_scope"]) if "approval_scope" in keys else "policy",
+            tool_name=str(row["tool_name"]) if "tool_name" in keys else "",
+            tool_args_sha256=str(row["tool_args_sha256"]) if "tool_args_sha256" in keys else "",
+            tool_intent_id=str(row["tool_intent_id"]) if "tool_intent_id" in keys else "",
+            single_use=bool(int(row["single_use"])) if "single_use" in keys else True,
+            consumed_at=str(row["consumed_at"]) if "consumed_at" in keys else "",
+            consumed_by_step=(int(row["consumed_by_step"]) if "consumed_by_step" in keys and row["consumed_by_step"] is not None else None),
             channels=list(json.loads(str(row["channels_json"]))),
             callback_ids=dict(json.loads(str(row["callback_ids_json"]))),
             resolution=resolution,
@@ -180,14 +289,17 @@ class SQLiteApprovalStore(ApprovalStore):
             INSERT INTO approvals(
               approval_id, status, created_at, updated_at, expires_at, required_action,
               tenant_id, session_id, actor_id, trace_id, decision_id, control_outcome,
-              channels_json, callback_ids_json, resolution_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              approval_scope, tool_name, tool_args_sha256, tool_intent_id, single_use,
+              consumed_at, consumed_by_step, channels_json, callback_ids_json, resolution_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(approval_id) DO UPDATE SET
               status=excluded.status,
               updated_at=excluded.updated_at,
               channels_json=excluded.channels_json,
               callback_ids_json=excluded.callback_ids_json,
-              resolution_json=excluded.resolution_json
+              resolution_json=excluded.resolution_json,
+              consumed_at=excluded.consumed_at,
+              consumed_by_step=excluded.consumed_by_step
             """,
             (
                 record.approval_id,
@@ -202,6 +314,13 @@ class SQLiteApprovalStore(ApprovalStore):
                 record.trace_id,
                 record.decision_id,
                 record.control_outcome,
+                record.approval_scope,
+                record.tool_name,
+                record.tool_args_sha256,
+                record.tool_intent_id,
+                1 if record.single_use else 0,
+                record.consumed_at,
+                record.consumed_by_step,
                 json.dumps(list(record.channels), ensure_ascii=False),
                 json.dumps(dict(record.callback_ids), ensure_ascii=False),
                 resolution_json,
@@ -210,29 +329,78 @@ class SQLiteApprovalStore(ApprovalStore):
 
     def create(self, record: ApprovalRecord) -> ApprovalRecord:
         with self._lock, self._connect() as conn:
+            existing = conn.execute("SELECT * FROM approvals WHERE approval_id = ?", (str(record.approval_id),)).fetchone()
+            if existing is not None:
+                return self._row_to_record(existing)
             self._insert_or_update(conn, record)
         return record
 
     def get(self, approval_id: str) -> Optional[ApprovalRecord]:
         with self._lock, self._connect() as conn:
             row = conn.execute("SELECT * FROM approvals WHERE approval_id = ?", (str(approval_id),)).fetchone()
-        if row is None:
-            return None
-        return self._row_to_record(row)
+        return None if row is None else self._row_to_record(row)
 
     def get_latest_for_session(self, *, tenant_id: str, session_id: str) -> Optional[ApprovalRecord]:
         with self._lock, self._connect() as conn:
             row = conn.execute(
-                """
-                SELECT * FROM approvals
-                WHERE tenant_id = ? AND session_id = ?
-                ORDER BY created_at DESC LIMIT 1
-                """,
+                "SELECT * FROM approvals WHERE tenant_id = ? AND session_id = ? ORDER BY created_at DESC LIMIT 1",
                 (str(tenant_id), str(session_id)),
             ).fetchone()
-        if row is None:
-            return None
-        return self._row_to_record(row)
+        return None if row is None else self._row_to_record(row)
+
+    def get_latest_for_intent(
+        self,
+        *,
+        tenant_id: str,
+        session_id: str,
+        tool_intent_id: str,
+    ) -> Optional[ApprovalRecord]:
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM approvals
+                WHERE tenant_id = ? AND session_id = ? AND tool_intent_id = ?
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                (str(tenant_id), str(session_id), str(tool_intent_id)),
+            ).fetchone()
+        return None if row is None else self._row_to_record(row)
+
+    def consume_tool_approval(
+        self,
+        *,
+        approval_id: str,
+        tenant_id: str,
+        session_id: str,
+        tool_name: str,
+        tool_args_sha256: str,
+        tool_intent_id: str,
+        step: int,
+        now_iso: str,
+    ) -> Optional[ApprovalRecord]:
+        now_dt = _parse_iso(now_iso)
+        with self._lock, self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT * FROM approvals WHERE approval_id = ?", (str(approval_id),)).fetchone()
+            if row is None:
+                return None
+            record = self._row_to_record(row)
+            if not _matches_tool_intent(
+                record,
+                tenant_id=tenant_id,
+                session_id=session_id,
+                tool_name=tool_name,
+                tool_args_sha256=tool_args_sha256,
+                tool_intent_id=tool_intent_id,
+            ):
+                return None
+            if str(record.status) != "approved" or _parse_iso(record.expires_at) <= now_dt:
+                return None
+            if bool(record.single_use) and str(record.consumed_at or ""):
+                return None
+            updated = replace(record, consumed_at=str(now_iso), consumed_by_step=int(step), updated_at=str(now_iso))
+            self._insert_or_update(conn, updated)
+            return updated
 
     def resolve(self, approval_id: str, decision: ApprovalDecision) -> Optional[ApprovalRecord]:
         normalized = decision.normalized()
@@ -243,12 +411,7 @@ class SQLiteApprovalStore(ApprovalStore):
             record = self._row_to_record(row)
             if str(record.status) != "pending":
                 return record
-            updated = replace(
-                record,
-                status=str(normalized.decision),
-                updated_at=str(normalized.resolved_at),
-                resolution=normalized,
-            )
+            updated = replace(record, status=str(normalized.decision), updated_at=str(normalized.resolved_at), resolution=normalized)
             self._insert_or_update(conn, updated)
         return updated
 
@@ -269,9 +432,7 @@ class SQLiteApprovalStore(ApprovalStore):
         now_dt = _parse_iso(now_iso)
         expired: List[ApprovalRecord] = []
         with self._lock, self._connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM approvals WHERE status = 'pending'",
-            ).fetchall()
+            rows = conn.execute("SELECT * FROM approvals WHERE status = 'pending'").fetchall()
             for row in rows:
                 record = self._row_to_record(row)
                 if _parse_iso(record.expires_at) > now_dt:
@@ -292,4 +453,3 @@ class SQLiteApprovalStore(ApprovalStore):
 
     def close(self) -> None:
         return None
-

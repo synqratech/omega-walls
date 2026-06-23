@@ -6,13 +6,13 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from importlib.metadata import PackageNotFoundError, version as pkg_version
 import sys
 from typing import Any, Dict, Mapping, MutableMapping, Optional, Sequence
 
 import structlog
 
 from omega.log_contract import OmegaLogEvent
+from omega.release import get_release_info
 
 
 _BASE_LOGGER = logging.getLogger(__name__)
@@ -59,12 +59,7 @@ _SAFE_EXACT_KEYS = {
 
 
 def engine_version() -> str:
-    try:
-        return str(pkg_version("omega-walls"))
-    except PackageNotFoundError:
-        return "0.1.2"
-    except Exception:  # noqa: BLE001
-        return "0.1.2"
+    return get_release_info().engine_version
 
 
 def _sanitize_value(value: Any, *, key_context: str = "") -> Any:

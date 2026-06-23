@@ -1,0 +1,160 @@
+{
+  "api_runtime_modes": {
+    "stateful": {
+      "runtime_mode": "stateful",
+      "status": 200,
+      "step_next": 1,
+      "step_prev": 0,
+      "verdict": "allow"
+    },
+    "stateless": {
+      "runtime_mode": "stateless",
+      "status": 200,
+      "step_next": 1,
+      "step_prev": 0,
+      "verdict": "allow"
+    }
+  },
+  "config_profiles": {
+    "dev": {
+      "guard_mode": "enforce",
+      "semantic_mode": null
+    },
+    "prod": {
+      "guard_mode": "enforce",
+      "semantic_mode": null
+    },
+    "quickstart": {
+      "guard_mode": "monitor",
+      "semantic_mode": null
+    },
+    "sensitive_rules_only": {
+      "guard_mode": "enforce",
+      "semantic_mode": "rules_only"
+    }
+  },
+  "harness_behavior": {
+    "approval_required": true,
+    "control_outcome": "HUMAN_ESCALATE",
+    "off": true,
+    "reasons": {
+      "reason_multi": true,
+      "reason_spike": true,
+      "reason_sum": true,
+      "reason_wall": true
+    },
+    "top_docs": [
+      "doc-mal"
+    ]
+  },
+  "hybrid_projector": {
+    "polarity": [
+      1,
+      -1,
+      1,
+      1
+    ],
+    "status": {
+      "api_adapter_active": true,
+      "schema_valid": true,
+      "semantic_status": "semantic_active",
+      "zero_mode": "none"
+    },
+    "v": {
+      "override_instructions": 0.11,
+      "policy_evasion": 0.44,
+      "secret_exfiltration": 0.0,
+      "tool_or_action_abuse": 0.33
+    }
+  },
+  "pi0_projection": {
+    "attack": {
+      "polarity": [
+        1,
+        1,
+        0,
+        0
+      ],
+      "v": {
+        "override_instructions": 8.239611,
+        "policy_evasion": 0.0,
+        "secret_exfiltration": 3.25,
+        "tool_or_action_abuse": 0.0
+      }
+    },
+    "benign": {
+      "polarity": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "v": {
+        "override_instructions": 0.0,
+        "policy_evasion": 0.0,
+        "secret_exfiltration": 0.0,
+        "tool_or_action_abuse": 0.0
+      }
+    }
+  },
+  "schema_version": "refactor_characterization_v1",
+  "sdk_behavior": {
+    "dev": {
+      "attack": {
+        "control_outcome": "HUMAN_ESCALATE",
+        "max_wall": 1.0,
+        "off": true,
+        "reason_codes": [
+          "reason_spike",
+          "reason_wall",
+          "reason_sum",
+          "reason_multi"
+        ]
+      },
+      "benign": {
+        "control_outcome": "ALLOW",
+        "max_wall": 0.0,
+        "off": false,
+        "reason_codes": []
+      }
+    },
+    "prod": {
+      "attack": {
+        "control_outcome": "HUMAN_ESCALATE",
+        "max_wall": 1.0,
+        "off": true,
+        "reason_codes": [
+          "reason_spike",
+          "reason_wall",
+          "reason_sum",
+          "reason_multi"
+        ]
+      },
+      "benign": {
+        "control_outcome": "ALLOW",
+        "max_wall": 0.0,
+        "off": false,
+        "reason_codes": []
+      }
+    },
+    "quickstart": {
+      "attack": {
+        "control_outcome": "ALLOW",
+        "max_wall": 1.0,
+        "off": true,
+        "reason_codes": [
+          "reason_spike",
+          "reason_wall",
+          "reason_sum",
+          "reason_multi"
+        ]
+      },
+      "benign": {
+        "control_outcome": "ALLOW",
+        "max_wall": 0.0,
+        "off": false,
+        "reason_codes": []
+      }
+    }
+  }
+}

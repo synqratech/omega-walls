@@ -11,4 +11,5 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_oss_docs_contract_against_curated_export_manifest() -> None:
     report = validate(manifest=ROOT / "config" / "oss_export_github.json")
     assert report["status"] == "ok"
+    assert report["mode"] == "fast_manifest_link_check"
     assert int(report["linked_targets_checked"]) > 0

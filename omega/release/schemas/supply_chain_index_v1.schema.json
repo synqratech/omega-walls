@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.omegawalls.io/release/supply_chain_index_v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "release", "channel", "created_utc", "manifest", "manifest_signature", "sbom", "provenance", "signatures"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "release": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$"},
+    "channel": {"enum": ["candidate", "stable", "lts"]},
+    "created_utc": {"type": "string", "format": "date-time"},
+    "manifest": {"$ref": "#/$defs/ref"},
+    "manifest_signature": {"$ref": "#/$defs/ref"},
+    "sbom": {"$ref": "#/$defs/ref"},
+    "provenance": {"$ref": "#/$defs/ref"},
+    "signatures": {"type": "object", "additionalProperties": {"$ref": "#/$defs/ref"}}
+  },
+  "$defs": {
+    "ref": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1, "not": {"pattern": "(^|/)\\.\\.(/|$)"}},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  }
+}

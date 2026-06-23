@@ -17,6 +17,7 @@ import uuid
 import numpy as np
 
 from omega.interfaces.contracts_v1 import K_V1, OffAction
+from omega.validation.numeric import validate_state_values
 
 LOGGER = logging.getLogger(__name__)
 
@@ -37,13 +38,20 @@ def _json_list(value: Optional[str], default: Iterable[Any]) -> List[Any]:
     return parsed
 
 
-def _to_vec(values: Iterable[float], k: int) -> np.ndarray:
-    arr = np.asarray(list(values), dtype=float)
-    if arr.size != k:
-        out = np.zeros(k, dtype=float)
-        out[: min(k, arr.size)] = arr[: min(k, arr.size)]
-        return out
-    return arr
+def _reject_nonstandard_json_constant(value: str) -> None:
+    raise ValueError(f"non-standard JSON numeric constant: {value}")
+
+
+def _strict_state_vec_json(value: str, k: int) -> np.ndarray:
+    try:
+        parsed = json.loads(str(value), parse_constant=_reject_nonstandard_json_constant)
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise ValueError("corrupt cross-session state: invalid strict JSON") from exc
+    return validate_state_values(vector=parsed, wall_count=k, name="cross_session.scars")
+
+
+def _to_vec(values: Iterable[float], k: int, *, name: str = "cross_session.scars") -> np.ndarray:
+    return validate_state_values(vector=list(values), wall_count=k, name=name)
 
 
 @dataclass(frozen=True)
@@ -81,12 +89,14 @@ class CrossSessionStateManager:
     k: int
 
     def __post_init__(self) -> None:
+        if int(self.k) != K_V1:
+            raise ValueError(f"cross-session state wall count must be {K_V1}")
         if self.enabled:
             self.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
             self._init_db()
         self._last_hydrated: Dict[Tuple[str, str], HydratedState] = {}
-        if self.decay_half_life_steps <= 0:
-            raise ValueError("cross_session.decay.half_life_steps must be > 0")
+        if not math.isfinite(float(self.decay_half_life_steps)) or self.decay_half_life_steps <= 0:
+            raise ValueError("cross_session.decay.half_life_steps must be finite and > 0")
 
     @classmethod
     def from_config(cls, config: Dict[str, Any]) -> "CrossSessionStateManager":
@@ -202,12 +212,17 @@ class CrossSessionStateManager:
         return hashlib.sha256(payload).hexdigest()
 
     def _decay_scars(self, scars: np.ndarray, delta_steps: int) -> np.ndarray:
+        validated = validate_state_values(vector=scars, wall_count=self.k, name="cross_session.scars_before_decay")
         if not self.transfer_scars:
-            return np.zeros_like(scars)
+            return np.zeros(self.k, dtype=float)
         if self.decay_mode == "exponential":
             decay_k = math.log(2.0) / self.decay_half_life_steps
             factor = math.exp(-decay_k * max(0, int(delta_steps)))
-            return scars * factor
+            return validate_state_values(
+                vector=validated * factor,
+                wall_count=self.k,
+                name="cross_session.scars_after_decay",
+            )
         raise ValueError(f"Unsupported cross_session decay mode: {self.decay_mode}")
 
     def _resolve_run_step(self, conn: sqlite3.Connection, actor_id: str, session_id: str) -> int:
@@ -259,7 +274,7 @@ class CrossSessionStateManager:
             before = np.zeros(self.k, dtype=float)
             after = np.zeros(self.k, dtype=float)
             if state_row is not None:
-                before = _to_vec(_json_list(state_row["scars_json"], [0.0] * self.k), self.k)
+                before = _strict_state_vec_json(str(state_row["scars_json"]), self.k)
                 last_step = int(state_row["last_step"])
                 expires_at = int(state_row["expires_at_step"])
                 if step <= expires_at:
@@ -275,7 +290,7 @@ class CrossSessionStateManager:
                   expires_at_step = excluded.expires_at_step,
                   updated_at_ts = excluded.updated_at_ts
                 """,
-                (actor_id, json.dumps(after.tolist()), step, step + self.actor_ttl_steps, now),
+                (actor_id, json.dumps(after.tolist(), allow_nan=False), step, step + self.actor_ttl_steps, now),
             )
 
             freeze_until: Optional[int] = None
@@ -326,7 +341,7 @@ class CrossSessionStateManager:
         now = _utc_now_iso()
         with self._connect() as conn:
             step = self._resolve_run_step(conn, actor_id=actor_id, session_id=session_id)
-            scars = _to_vec(getattr(step_result, "m_next", np.zeros(self.k, dtype=float)), self.k)
+            scars = _to_vec(getattr(step_result, "m_next", np.zeros(self.k, dtype=float)), self.k, name="step_result.m_next")
             if not self.transfer_scars:
                 scars = np.zeros(self.k, dtype=float)
             conn.execute(
@@ -339,7 +354,7 @@ class CrossSessionStateManager:
                   expires_at_step = excluded.expires_at_step,
                   updated_at_ts = excluded.updated_at_ts
                 """,
-                (actor_id, json.dumps(scars.tolist()), step, step + self.actor_ttl_steps, now),
+                (actor_id, json.dumps(scars.tolist(), allow_nan=False), step, step + self.actor_ttl_steps, now),
             )
 
             for action in policy_actions:

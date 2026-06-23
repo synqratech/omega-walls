@@ -7,6 +7,12 @@ from typing import Any, Dict, List, Optional, Protocol
 
 import numpy as np
 
+from omega.validation.numeric import (
+    validate_omega_params_values,
+    validate_projection_values,
+    validate_state_values,
+)
+
 
 K_V1 = 4
 WALLS_V1 = [
@@ -25,6 +31,11 @@ class ContentItem:
     trust: str
     text: str
     language: Optional[str] = None
+    artifact_id: Optional[str] = None
+    origin: Optional[str] = None
+    derived_from: Optional[List[str]] = None
+    content_hash: Optional[str] = None
+    boundary_step: Optional[int] = None
     meta: Optional[Dict[str, Any]] = None
 
 
@@ -34,12 +45,32 @@ class ProjectionEvidence:
     debug_scores_raw: List[float]
     matches: Dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        # Full vector validation is completed by ProjectionResult, where wall count is known.
+        if not isinstance(self.matches, dict):
+            raise ValueError("projection evidence.matches must be a mapping")
+
 
 @dataclass
 class ProjectionResult:
     doc_id: str
     v: np.ndarray
     evidence: ProjectionEvidence
+
+    def __post_init__(self) -> None:
+        if not str(self.doc_id).strip():
+            raise ValueError("projection.doc_id must be non-empty")
+        if not isinstance(self.evidence, ProjectionEvidence):
+            raise ValueError("projection.evidence must be ProjectionEvidence")
+        vector, polarity, raw = validate_projection_values(
+            vector=self.v,
+            polarity=self.evidence.polarity,
+            debug_scores_raw=self.evidence.debug_scores_raw,
+            wall_count=K_V1,
+        )
+        self.v = vector
+        self.evidence.polarity = polarity
+        self.evidence.debug_scores_raw = raw
 
 
 @dataclass
@@ -57,12 +88,39 @@ class OmegaParams:
     off_N: int
     attrib_gamma: float
 
+    def __post_init__(self) -> None:
+        values = validate_omega_params_values(
+            walls=self.walls,
+            expected_walls=WALLS_V1,
+            epsilon=self.epsilon,
+            alpha=self.alpha,
+            beta=self.beta,
+            lam=self.lam,
+            synergy=self.S,
+            off_tau=self.off_tau,
+            off_theta_hard=self.off_Theta,
+            off_sigma=self.off_Sigma,
+            off_theta_multi=self.off_theta,
+            off_n=self.off_N,
+            attrib_gamma=self.attrib_gamma,
+        )
+        for key, value in values.items():
+            setattr(self, key, value)
+
 
 @dataclass
 class OmegaState:
     session_id: str
     m: np.ndarray
     step: int = 0
+
+    def __post_init__(self) -> None:
+        if not str(self.session_id).strip():
+            raise ValueError("state.session_id must be non-empty")
+        self.m = validate_state_values(vector=self.m, wall_count=K_V1)
+        if isinstance(self.step, bool) or int(self.step) != self.step or int(self.step) < 0:
+            raise ValueError("state.step must be a nonnegative integer")
+        self.step = int(self.step)
 
 
 @dataclass
@@ -95,6 +153,7 @@ class OmegaStepResult:
     reasons: OmegaOffReasons
     top_docs: List[str]
     contribs: List[DocContribution]
+    attribution_mode: str = "current_packet"  # current_packet|state_only|none
 
 
 @dataclass
@@ -129,6 +188,10 @@ class ToolRequest:
     args: Dict[str, Any]
     session_id: str
     step: int
+    tenant_id: str = "runtime"
+    actor_id: str = ""
+    approval_id: Optional[str] = None
+    intent_id: Optional[str] = None
 
 
 @dataclass
@@ -142,6 +205,8 @@ class ToolDecision:
     capability_class: Optional[str] = None
     risk_level: Optional[str] = None
     approval_required: bool = False
+    intent_id: Optional[str] = None
+    approval_id: Optional[str] = None
 
 
 @dataclass

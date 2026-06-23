@@ -11,6 +11,12 @@ off_policy:
     gamma: 0.70
     target: DOC
 
+  wall_participation:
+    current_p_gte: 0.01
+    current_v_gte: 0.12
+    scar_m_gte: 0.05
+    scar_fraction_of_multi_threshold: 0.25
+
   tool_freeze:
     enabled: true
     horizon_steps: 20
@@ -51,6 +57,17 @@ off_policy:
       hash_actor_id: true
       actor_hash_salt_env: OMEGA_ACTOR_HASH_SALT
 
+  trust_boundary:
+    trusted_control_guard:
+      enabled: true
+      min_total_docs_for_ratio: 6
+      warn_ratio_gte: 0.75
+      warn_count_gte: 12
+      alert_cooldown_steps: 5
+      emit_structured_alert: true
+      emit_notification_alert: false
+      policy_action_on_trigger: none
+
   escalate:
     enabled: true
     always_on_exfil: true
@@ -79,6 +96,7 @@ off_policy:
     enabled: false
     emit_for_outcomes: ['WARN', 'SOFT_BLOCK', 'SOURCE_QUARANTINE', 'TOOL_FREEZE', 'HUMAN_ESCALATE', 'REQUIRE_APPROVAL']
     include_timeline: true
+    capture_incident_text: false
 
 logging:
   mode: OFF_ONLY

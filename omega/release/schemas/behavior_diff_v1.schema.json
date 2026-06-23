@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.omegawalls.io/release/behavior_diff_v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "metrics", "thresholds", "changed", "missing_ids", "failures"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "status": {"enum": ["PASS", "FAIL"]},
+    "metrics": {"type": "object"},
+    "thresholds": {"type": "object"},
+    "changed": {"type": "array"},
+    "missing_ids": {"type": "object", "required": ["old", "new"], "properties": {"old": {"type": "array"}, "new": {"type": "array"}}},
+    "failures": {"type": "array", "items": {"type": "string"}}
+  }
+}

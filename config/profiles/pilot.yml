@@ -1,7 +1,77 @@
 profiles:
   env: pilot
 
+projector:
+  mode: hybrid_api
+  fallback_to_pi0: true
+  api_perception:
+    semantic_mode: hybrid_cloud
+    provider_options:
+      visual_egress:
+        enabled: true
+        default_action: deny
+        providers:
+          openai: {external: true, region: global}
+          anthropic: {external: true, region: global}
+          openai_compat: {external: true, region: customer_configured}
+          local_vision: {external: false, region: local}
+        tenants:
+          "*":
+            allow_external: true
+            allowed_providers: [openai, anthropic, openai_compat, local_vision]
+            allowed_regions: [global, customer_configured, local]
+    image_region_pass_enabled: true
+    image_region_pass:
+      enabled: true
+      trigger_mode: uncertain
+      pressure_abs_max: 0.12
+      confidence_max: 0.80
+      max_tiles: 5
+      overlap_ratio: 0.08
+      include_center_crop: true
+
+retriever:
+  sqlite_fts:
+    attachments:
+      visual:
+        enabled: true
+        render_pdf_pages: true
+        extract_embedded_images: true
+        max_assets: 8
+        max_total_bytes: 33554432
+        max_asset_bytes: 8388608
+        max_pdf_pages: 8
+        pdf_dpi: 120
+        max_pdf_pixels_per_page: 16000000
+        min_width: 32
+        min_height: 32
+        failure_policy: degrade
+      ocr:
+        enabled: auto
+        provider: rapidocr
+        execution_mode: persistent_worker
+        prewarm: true
+        worker_startup_timeout_sec: 25
+        worker_request_timeout_sec: 15
+        worker_max_memory_mb: 2048
+        worker_max_requests: 500
+        worker_pool_size: 1
+        worker_max_pending_requests: 2
+        worker_queue_timeout_sec: 1.0
+        lang: en
+        use_angle_cls: true
+        max_text_chars: 200000
+        max_spans_per_chunk: 8
+        min_confidence: 0.55
+        max_spans: 256
+        max_span_chars: 512
+        require_geometry: true
+        min_polygon_area_px: 4.0
+        failure_policy: degrade
+
 api:
+  limits:
+    request_timeout_sec: 30
   debug:
     enable_document_scan_report: true
     max_report_chunks: 200

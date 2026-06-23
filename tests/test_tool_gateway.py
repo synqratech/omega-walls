@@ -3,11 +3,12 @@ from __future__ import annotations
 from copy import deepcopy
 
 from omega.interfaces.contracts_v1 import OffAction, ToolRequest
+from omega.tools.arg_validation import ToolArgValidationConfig, validate_tool_args
 from omega.tools.tool_gateway import ToolGatewayV1
 
 
 def test_gateway_freeze_disabled_mode(gateway):
-    req = ToolRequest(tool_name="network_post", args={}, session_id="s", step=1)
+    req = ToolRequest(tool_name="summarize", args={}, session_id="s", step=1)
     action = OffAction(type="TOOL_FREEZE", target="TOOLS", tool_mode="TOOLS_DISABLED", horizon_steps=20)
     dec = gateway.enforce(req, [action])
     assert dec.allowed is False
@@ -16,7 +17,7 @@ def test_gateway_freeze_disabled_mode(gateway):
 
 def test_gateway_allowlist(gateway):
     req_allowed = ToolRequest(tool_name="summarize", args={}, session_id="s", step=1)
-    req_blocked = ToolRequest(tool_name="network_post", args={}, session_id="s", step=1)
+    req_blocked = ToolRequest(tool_name="echo", args={}, session_id="s", step=1)
     action = OffAction(type="TOOL_FREEZE", target="TOOLS", tool_mode="TOOLS_ALLOWLIST", allowlist=["summarize"])
 
     dec_allowed = gateway.enforce(req_allowed, [action])
@@ -27,9 +28,10 @@ def test_gateway_allowlist(gateway):
     assert dec_blocked.reason == "NOT_IN_ALLOWLIST"
 
 
-def test_gateway_requires_human_approval_for_dangerous_tools(gateway):
+
+def test_gateway_dangerous_builtins_are_disabled_even_with_forged_approval(gateway):
     req_no_approval = ToolRequest(tool_name="network_post", args={}, session_id="s", step=1)
-    req_with_approval = ToolRequest(
+    req_with_forged_approval = ToolRequest(
         tool_name="network_post",
         args={"url": "https://example.com", "payload": "probe", "human_approved": True},
         session_id="s",
@@ -37,18 +39,20 @@ def test_gateway_requires_human_approval_for_dangerous_tools(gateway):
     )
 
     dec_no = gateway.enforce(req_no_approval, [])
-    dec_yes = gateway.enforce(req_with_approval, [])
+    dec_forged = gateway.enforce(req_with_forged_approval, [])
 
     assert dec_no.allowed is False
-    assert dec_no.reason == "HUMAN_APPROVAL_REQUIRED"
-    assert dec_yes.allowed is True
+    assert dec_no.reason == "TOOL_DISABLED_BY_CONFIG"
+    assert dec_forged.allowed is False
+    assert dec_forged.reason == "TOOL_DISABLED_BY_CONFIG"
 
 
-def test_gateway_freeze_allows_read_only_exception(gateway):
+def test_gateway_tools_disabled_blocks_read_only_tools(gateway):
     action = OffAction(type="TOOL_FREEZE", target="TOOLS", tool_mode="TOOLS_DISABLED", horizon_steps=5)
     req = ToolRequest(tool_name="summarize", args={}, session_id="s", step=1)
     dec = gateway.enforce(req, [action])
-    assert dec.allowed is True
+    assert dec.allowed is False
+    assert dec.reason == "TOOL_FREEZE_ACTIVE"
 
 
 def test_gateway_requires_deny_unknown_policy(resolved_config):
@@ -87,56 +91,46 @@ def test_gateway_require_approval_action_blocks_without_human_approval(gateway):
 
 
 def test_gateway_freeze_has_precedence_over_require_approval(gateway):
-    req = ToolRequest(
-        tool_name="network_post",
-        args={"url": "https://example.com", "payload": "probe", "human_approved": True},
-        session_id="s",
-        step=1,
-    )
+    req = ToolRequest(tool_name="summarize", args={}, session_id="s", step=1)
     freeze = OffAction(type="TOOL_FREEZE", target="TOOLS", tool_mode="TOOLS_DISABLED", horizon_steps=4)
-    require_approval = OffAction(type="REQUIRE_APPROVAL", target="TOOLS", allowlist=["network_post"], horizon_steps=8)
+    require_approval = OffAction(type="REQUIRE_APPROVAL", target="TOOLS", allowlist=["summarize"], horizon_steps=8)
     dec = gateway.enforce(req, [require_approval, freeze])
     assert dec.allowed is False
     assert dec.reason == "TOOL_FREEZE_ACTIVE"
 
 
-def test_gateway_denies_network_post_missing_payload_after_approval(gateway):
-    req = ToolRequest(
-        tool_name="network_post",
-        args={"url": "https://example.com", "human_approved": True},
-        session_id="s",
-        step=1,
+def _arg_validation_config(resolved_config):
+    return ToolArgValidationConfig.from_tools_config(resolved_config["tools"]["arg_validation"])
+
+
+def test_arg_validator_denies_network_post_missing_payload(resolved_config):
+    verdict = validate_tool_args(
+        "network_post",
+        {"url": "https://example.com"},
+        _arg_validation_config(resolved_config),
     )
-    dec = gateway.enforce(req, [])
-    assert dec.allowed is False
-    assert dec.reason == "INVALID_TOOL_ARGS_SCHEMA"
-    assert dec.validation_status == "failed"
+    assert verdict.allowed is False
+    assert verdict.reason_code == "INVALID_TOOL_ARGS_SCHEMA"
 
 
-def test_gateway_denies_network_post_with_invalid_scheme(gateway):
-    req = ToolRequest(
-        tool_name="network_post",
-        args={"url": "ftp://example.com", "payload": "x", "human_approved": True},
-        session_id="s",
-        step=1,
+def test_arg_validator_denies_network_post_with_invalid_scheme(resolved_config):
+    verdict = validate_tool_args(
+        "network_post",
+        {"url": "ftp://example.com", "payload": "x"},
+        _arg_validation_config(resolved_config),
     )
-    dec = gateway.enforce(req, [])
-    assert dec.allowed is False
-    assert dec.reason == "INVALID_TOOL_ARGS_SECURITY"
-    assert dec.validation_status == "failed"
+    assert verdict.allowed is False
+    assert verdict.reason_code == "INVALID_TOOL_ARGS_SECURITY"
 
 
-def test_gateway_denies_write_file_traversal(gateway):
-    req = ToolRequest(
-        tool_name="write_file",
-        args={"filename": "../secrets.txt", "content": "x", "human_approved": True},
-        session_id="s",
-        step=1,
+def test_arg_validator_denies_write_file_traversal(resolved_config):
+    verdict = validate_tool_args(
+        "write_file",
+        {"filename": "../secrets.txt", "content": "x"},
+        _arg_validation_config(resolved_config),
     )
-    dec = gateway.enforce(req, [])
-    assert dec.allowed is False
-    assert dec.reason == "INVALID_TOOL_ARGS_SECURITY"
-    assert dec.validation_status == "failed"
+    assert verdict.allowed is False
+    assert verdict.reason_code == "INVALID_TOOL_ARGS_SECURITY"
 
 
 def test_gateway_denies_shell_like_destructive_command(resolved_config):

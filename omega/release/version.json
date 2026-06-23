@@ -1,0 +1,12 @@
+{
+  "engine_version": "0.7.0",
+  "api_version": "v1",
+  "config_schema_version": 1,
+  "runtime_state_schema_version": 2,
+  "control_plane_schema_version": 1,
+  "license_schema_version": 1,
+  "policy_pack_version": "2026.06.1",
+  "vision_pack_version": "2026.06.1",
+  "edition": "community",
+  "release_channel": "candidate"
+}

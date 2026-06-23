@@ -1,0 +1,12 @@
+effects:
+  enabled: false
+  mode: shadow
+  min_confidence: 0.70
+  allowed_effects:
+    - install_untrusted_skill
+    - modify_skill_or_tool
+    - write_persistent_memory
+    - memory_poisoning
+    - privilege_escalation
+    - resource_exhaustion
+  provider: api_perception

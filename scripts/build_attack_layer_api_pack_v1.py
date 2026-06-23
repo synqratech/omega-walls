@@ -2272,6 +2272,8 @@ def build_attack_layer_api_pack_v1(
                 last_case_id=str(plan.case_id),
                 case_errors=len(case_errors),
             )
+            if quality_mode_norm == QUALITY_MODE_STRICT_FAIL:
+                raise
             continue
 
     rows.sort(

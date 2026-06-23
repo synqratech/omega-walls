@@ -1,0 +1,42 @@
+name: commercial-boundary-gate
+
+on:
+  pull_request:
+    paths:
+      - "pyproject.toml"
+      - "pyproject.enterprise.toml"
+      - "MANIFEST.in"
+      - "Dockerfile*"
+      - "omega/**"
+      - "omega_walls_enterprise/**"
+      - "scripts/build_edition_wheels.py"
+      - "scripts/check_commercial_boundary.py"
+      - "scripts/check_docker_image_hygiene.py"
+      - "tests/test_commercial_boundary*.py"
+      - ".github/workflows/commercial-boundary-gate.yml"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install build/test tools
+        run: python -m pip install --upgrade pip wheel pytest
+      - name: Build separated wheels
+        run: python scripts/build_edition_wheels.py --edition all --outdir dist-boundary
+      - name: Build community sdist
+        run: >-
+          python -c "import os,setuptools.build_meta as b; os.chdir('.'); b.build_sdist('dist-boundary')"
+      - name: Run commercial boundary artifact gate
+        run: python scripts/check_commercial_boundary.py --dist-dir dist-boundary
+      - name: Run boundary regression tests
+        run: python -m pytest -q tests/test_commercial_boundary_packaging.py tests/test_commercial_boundary_gate.py tests/test_packaging_hygiene.py

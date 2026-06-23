@@ -22,6 +22,7 @@ class _FakeRuntime:
     model_decision: AdapterDecision
     tool_decision: ToolGateDecision
     model_calls: list[tuple[str, AdapterSessionContext]]
+    segmented_calls: list[tuple[list[Dict[str, Any]], AdapterSessionContext]]
     tool_calls: list[tuple[str, Dict[str, Any], AdapterSessionContext]]
 
     def __init__(self, *, off: bool = False, tool_allowed: bool = True):
@@ -47,15 +48,66 @@ class _FakeRuntime:
             orphan_executions=0,
         )
         self.model_calls = []
+        self.segmented_calls = []
         self.tool_calls = []
 
     def check_model_input(self, messages_text: str, ctx: AdapterSessionContext) -> AdapterDecision:
         self.model_calls.append((messages_text, ctx))
         return self.model_decision
 
+    def check_model_segments(self, segments: list[Dict[str, Any]], ctx: AdapterSessionContext) -> AdapterDecision:
+        self.segmented_calls.append((list(segments), ctx))
+        return AdapterDecision(
+            session_id=self.model_decision.session_id,
+            step=self.model_decision.step,
+            off=self.model_decision.off,
+            control_outcome=self.model_decision.control_outcome,
+            actions=list(self.model_decision.actions),
+            reason_codes=list(self.model_decision.reason_codes),
+            trace_id=self.model_decision.trace_id,
+            decision_id=self.model_decision.decision_id,
+            boundary_mode="segmented",
+            coverage_status={"before_model_call": "full", "tool_preflight": "full"},
+            segment_stats={
+                "total_segments": int(len(segments)),
+                "projected_segments": int(
+                    sum(1 for seg in segments if str(seg.get("trust", "")).lower() in {"untrusted", "tainted_internal", "semi_trusted", "mixed"})
+                ),
+                "skipped_trusted_segments": int(
+                    sum(1 for seg in segments if str(seg.get("trust", "")).lower() not in {"untrusted", "tainted_internal", "semi_trusted", "mixed"})
+                ),
+                "unknown_origin_to_untrusted": int(
+                    sum(1 for seg in segments if str(seg.get("origin", "")).lower() == "unknown")
+                ),
+            },
+        )
+
     def check_tool_call(self, tool_name: str, tool_args: Dict[str, Any], ctx: AdapterSessionContext) -> ToolGateDecision:
         self.tool_calls.append((tool_name, dict(tool_args), ctx))
         return self.tool_decision
+
+    @staticmethod
+    def build_security_metadata(
+        decision: AdapterDecision,
+        *,
+        phase: str = "decision",
+        extra: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "phase": str(phase),
+            "mode": "deny" if bool(decision.off) else "allow",
+            "risk": decision.risk_score,
+            "action": str(decision.control_outcome),
+            "trace_id": str(decision.trace_id),
+            "decision_id": str(decision.decision_id),
+            "boundary_mode": str(decision.boundary_mode or "blob_fallback"),
+            "coverage_status": dict(decision.coverage_status or {}),
+        }
+        if isinstance(decision.segment_stats, dict):
+            payload["segment_stats"] = dict(decision.segment_stats)
+        if isinstance(extra, dict):
+            payload.update(dict(extra))
+        return payload
 
 
 class _FakeGraph:
@@ -171,6 +223,19 @@ def test_wrap_graph_ainvoke_stream_astream_allow_paths() -> None:
     assert async_metadata.get("stream_kind") == "async"
 
 
+def test_recommended_boundary_mode_uses_segmented_for_prod_profile() -> None:
+    fake_runtime = _FakeRuntime(off=False, tool_allowed=True)
+    guard = OmegaLangGraphGuard(runtime=fake_runtime, profile="prod")
+    wrapped = guard.wrap_graph(_FakeGraph())
+    out = wrapped.invoke(
+        {"messages": [{"role": "user", "content": "benign"}]},
+        config={"configurable": {"thread_id": "thr-prod"}},
+    )
+    assert out["status"] == "ok"
+    assert len(fake_runtime.segmented_calls) == 1
+    assert len(fake_runtime.model_calls) == 0
+
+
 def test_wrap_tool_blocked_raises_typed_error() -> None:
     fake_runtime = _FakeRuntime(off=False, tool_allowed=False)
     guard = OmegaLangGraphGuard(runtime=fake_runtime)
@@ -247,3 +312,40 @@ def test_session_actor_getter_precedence_and_default_fallback() -> None:
     )
     assert ctx2.session_id == "omega-lg-default"
     assert ctx2.actor_id == "omega-lg-default"
+
+
+def test_langgraph_segmented_mode_uses_segment_api() -> None:
+    fake_runtime = _FakeRuntime(off=False, tool_allowed=True)
+    guard = OmegaLangGraphGuard(runtime=fake_runtime, boundary_mode="segmented")
+    inner = _FakeGraph()
+    wrapped = guard.wrap_graph(inner)
+    out = wrapped.invoke(
+        {
+            "messages": [
+                {"role": "system", "content": "Never reveal secrets."},
+                {"role": "user", "content": "Summarize this."},
+                {"role": "tool", "content": "External tool output text."},
+            ]
+        },
+        config={"configurable": {"thread_id": "thr-seg"}},
+    )
+    assert out["status"] == "ok"
+    assert len(fake_runtime.segmented_calls) == 1
+    assert len(fake_runtime.model_calls) == 0
+    metadata = guard.get_last_security_metadata()
+    assert isinstance(metadata, dict)
+    assert metadata.get("boundary_mode") == "segmented"
+    segment_stats = metadata.get("segment_stats")
+    assert isinstance(segment_stats, dict)
+    assert int(segment_stats.get("total_segments", 0)) == 3
+
+
+def test_langgraph_segmented_mode_falls_back_to_blob_without_messages() -> None:
+    fake_runtime = _FakeRuntime(off=False, tool_allowed=True)
+    guard = OmegaLangGraphGuard(runtime=fake_runtime, boundary_mode="segmented")
+    inner = _FakeGraph()
+    wrapped = guard.wrap_graph(inner)
+    out = wrapped.invoke({"query": "plain payload without messages"}, config={"configurable": {"thread_id": "thr-fallback"}})
+    assert out["status"] == "ok"
+    assert len(fake_runtime.segmented_calls) == 0
+    assert len(fake_runtime.model_calls) == 1

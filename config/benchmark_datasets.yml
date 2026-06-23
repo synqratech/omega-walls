@@ -31,3 +31,10 @@ benchmark_datasets:
           path: tests/data/session_benchmark/session_pack_stateful_focus_v1.jsonl
           source_type: repo_internal
           source_url: repo://tests/data/session_benchmark/session_pack_stateful_focus_v1.jsonl
+    agent3sigma_stage_advance_v1:
+      description: "Agent3Sigma Stage advanced session pack derived from the repo-local A3S benchmark clone."
+      datasets:
+        - dataset_id: agent3sigma_stage_advance_v1
+          path: tests/data/session_benchmark/agent3sigma_stage_advance_v1/runtime/session_pack.jsonl
+          source_type: repo_internal
+          source_url: repo://tests/data/session_benchmark/agent3sigma_stage_advance_v1/runtime/session_pack.jsonl

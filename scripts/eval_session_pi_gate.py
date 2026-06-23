@@ -5,7 +5,6 @@ from collections import Counter, defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import hashlib
 import json
 from pathlib import Path
 import random
@@ -26,6 +25,7 @@ from omega.policy.off_policy_v1 import OffPolicyV1
 from omega.projector.factory import build_projector
 from omega.rag.harness import MockLLM, OmegaRAGHarness
 from omega.tools.tool_gateway import ToolGatewayV1
+from scripts.session_pack_leakage import load_dual_session_pack
 
 
 def _utc_compact_now() -> str:
@@ -71,14 +71,34 @@ class SessionTurnRow:
     session_id: str
     turn_id: int
     text: str
+    source_id: str
+    source_type: str
     label_turn: str
     label_session: str
     family: str
     source_ref: str
-    source_type: str
     actor_id: str
     bucket: str
     eval_slice: str
+
+
+@dataclass(frozen=True)
+class RuntimeTurnPayload:
+    session_id: str
+    turn_id: int
+    text: str
+    source_id: str
+    source_type: str
+
+
+@dataclass(frozen=True)
+class RuntimePacketPayload:
+    user_query: str
+    packet_items: List[ContentItem]
+    provenance_mode: str
+    segment_count: int
+    trusted_user_segments: int
+    untrusted_segments: int
 
 
 @dataclass(frozen=True)
@@ -112,8 +132,110 @@ class SessionRunner(Protocol):
     def reset(self, *, session_id: str, actor_id: str) -> None:
         ...
 
-    def run_turn(self, *, session_id: str, actor_id: str, turn: SessionTurnRow) -> Dict[str, Any]:
+    def run_turn(self, *, session_id: str, actor_id: str, turn: RuntimeTurnPayload) -> Dict[str, Any]:
         ...
+
+
+def build_runtime_turn_payload(turn: SessionTurnRow) -> RuntimeTurnPayload:
+    return RuntimeTurnPayload(
+        session_id=str(turn.session_id),
+        turn_id=int(turn.turn_id),
+        text=str(turn.text),
+        source_id=str(turn.source_id),
+        source_type=str(turn.source_type),
+    )
+
+
+def _trust_for_source_type(source_type: str) -> str:
+    st = str(source_type).strip().lower()
+    if st in {"trusted", "internal_trusted", "policy"}:
+        return "trusted"
+    if st in {"semi", "semi_trusted", "ticket", "chat"}:
+        return "semi"
+    return "untrusted"
+
+
+def _split_segmented_turn_text(text: str) -> tuple[str, str]:
+    raw = str(text or "").strip()
+    if "\n\n" not in raw:
+        return raw, ""
+    first, rest = raw.split("\n\n", 1)
+    return first.strip(), rest.strip()
+
+
+def build_runtime_packet_payload(
+    turn: RuntimeTurnPayload,
+    *,
+    provenance_mode: str = "blob",
+) -> RuntimePacketPayload:
+    mode = str(provenance_mode or "blob").strip().lower()
+    if mode not in {"blob", "segmented"}:
+        raise ValueError("provenance_mode must be blob or segmented")
+
+    source_type = str(turn.source_type or "external_untrusted").strip() or "external_untrusted"
+    source_id = str(turn.source_id or "").strip()
+    if mode == "blob":
+        item = ContentItem(
+            doc_id=f"{turn.session_id}:turn:{int(turn.turn_id):03d}",
+            source_id=source_id,
+            source_type=source_type,
+            trust=_trust_for_source_type(source_type),
+            text=str(turn.text),
+        )
+        return RuntimePacketPayload(
+            user_query=str(turn.text),
+            packet_items=[item],
+            provenance_mode="blob",
+            segment_count=1,
+            trusted_user_segments=0,
+            untrusted_segments=1,
+        )
+
+    user_text, evidence_text = _split_segmented_turn_text(str(turn.text))
+    items: List[ContentItem] = []
+    if user_text:
+        items.append(
+            ContentItem(
+                doc_id=f"{turn.session_id}:turn:{int(turn.turn_id):03d}:user",
+                source_id=f"{source_id}:user",
+                source_type="user",
+                trust="trusted_user",
+                text=user_text,
+                origin="user",
+                meta={"provenance_mode": "segmented", "segment_role": "trusted_user"},
+            )
+        )
+    if evidence_text:
+        items.append(
+            ContentItem(
+                doc_id=f"{turn.session_id}:turn:{int(turn.turn_id):03d}:evidence",
+                source_id=f"{source_id}:evidence",
+                source_type=source_type,
+                trust=_trust_for_source_type(source_type),
+                text=evidence_text,
+                origin="retrieval",
+                meta={"provenance_mode": "segmented", "segment_role": "untrusted_evidence"},
+            )
+        )
+    if not items:
+        items.append(
+            ContentItem(
+                doc_id=f"{turn.session_id}:turn:{int(turn.turn_id):03d}:empty",
+                source_id=source_id,
+                source_type=source_type,
+                trust=_trust_for_source_type(source_type),
+                text=str(turn.text),
+                meta={"provenance_mode": "segmented", "segment_role": "fallback_blob"},
+            )
+        )
+    return RuntimePacketPayload(
+        user_query=user_text or str(turn.text),
+        packet_items=items,
+        provenance_mode="segmented",
+        segment_count=len(items),
+        trusted_user_segments=sum(1 for item in items if str(item.trust) == "trusted_user"),
+        untrusted_segments=sum(1 for item in items if str(item.trust) != "trusted_user"),
+    )
 
 
 class OmegaHarnessRunner:
@@ -136,9 +258,14 @@ class OmegaHarnessRunner:
         api_error_log_path: Optional[str] = None,
         blind_eval: bool = False,
         enable_stateful_support_tuning: bool = False,
+        enable_effects_shadow: bool = False,
+        provenance_mode: str = "blob",
     ) -> None:
         random.seed(int(seed))
         mode_norm = str(mode).strip().lower()
+        provenance_mode_norm = str(provenance_mode or "blob").strip().lower()
+        if provenance_mode_norm not in {"blob", "segmented"}:
+            raise ValueError("provenance_mode must be blob or segmented")
         projector_override: Dict[str, Any] = {"mode": mode_norm}
         if mode_norm == "hybrid_api":
             api_perception: Dict[str, Any] = {
@@ -168,6 +295,8 @@ class OmegaHarnessRunner:
         cli_overrides: Dict[str, Any] = {"projector": projector_override}
         if bool(enable_stateful_support_tuning):
             cli_overrides["off_policy"] = {"stateful_support_tuning": {"enabled": True}}
+        if bool(enable_effects_shadow):
+            cli_overrides["effects"] = {"enabled": True, "mode": "shadow"}
         snapshot = load_resolved_config(profile=profile, cli_overrides=cli_overrides)
         cfg = deepcopy(snapshot.resolved)
         cfg.setdefault("off_policy", {}).setdefault("cross_session", {})
@@ -192,6 +321,7 @@ class OmegaHarnessRunner:
         self._strict_projector = bool(strict_projector)
         self._require_api_adapter = bool(require_api_adapter)
         self._blind_eval = bool(blind_eval)
+        self._provenance_mode = provenance_mode_norm
 
         self._harness = OmegaRAGHarness(
             projector=projector,
@@ -225,39 +355,14 @@ class OmegaHarnessRunner:
     def reset(self, *, session_id: str, actor_id: str) -> None:
         self._harness.reset_state(session_id=session_id, actor_id=actor_id)
 
-    @staticmethod
-    def _blind_source_id(turn: SessionTurnRow) -> str:
-        seed_source = str(turn.source_ref).strip()
-        if not seed_source or seed_source.lower() == "unknown":
-            seed_source = f"session::{turn.session_id}"
-        digest = hashlib.sha1(seed_source.encode("utf-8")).hexdigest()[:16]
-        return f"session_benchmark_blind:{digest}"
-
-    @staticmethod
-    def _blind_trust_for_source_type(source_type: str) -> str:
-        st = str(source_type).strip().lower()
-        if st in {"trusted", "internal_trusted", "policy"}:
-            return "trusted"
-        return "untrusted"
-
-    def run_turn(self, *, session_id: str, actor_id: str, turn: SessionTurnRow) -> Dict[str, Any]:
-        source_type = str(turn.source_type or "other").strip() or "other"
-        if bool(self._blind_eval):
-            trust = self._blind_trust_for_source_type(source_type)
-            source_id = self._blind_source_id(turn)
-        else:
-            trust = "untrusted" if str(turn.label_turn) == "attack" else "semi"
-            source_id = f"session_benchmark:{turn.bucket}:{turn.family}"
-        item = ContentItem(
-            doc_id=f"{session_id}:turn:{int(turn.turn_id):03d}",
-            source_id=source_id,
-            source_type=source_type,
-            trust=trust,
-            text=turn.text,
+    def run_turn(self, *, session_id: str, actor_id: str, turn: RuntimeTurnPayload) -> Dict[str, Any]:
+        runtime_packet = build_runtime_packet_payload(
+            turn,
+            provenance_mode=getattr(self, "_provenance_mode", "blob"),
         )
         out = self._harness.run_step(
-            user_query=turn.text,
-            packet_items=[item],
+            user_query=runtime_packet.user_query,
+            packet_items=runtime_packet.packet_items,
             actor_id=actor_id,
         )
         step_result = out["step_result"]
@@ -279,6 +384,56 @@ class OmegaHarnessRunner:
         return {
             "off": bool(step_result.off),
             "max_p": max_p,
+            "effect_wall_candidate": (
+                dict(out.get("effect_wall_candidate", {}))
+                if isinstance(out.get("effect_wall_candidate"), Mapping)
+                else None
+            ),
+            "effect_policy_gate": (
+                dict(out.get("effect_policy_gate", {}))
+                if isinstance(out.get("effect_policy_gate"), Mapping)
+                else None
+            ),
+            "effect_forecast": (
+                dict(out.get("effect_forecast", {}))
+                if isinstance(out.get("effect_forecast"), Mapping)
+                else None
+            ),
+            "effect_forecast_status": str(out.get("effect_forecast_status", "disabled")),
+            "effect_policy_gate_status": str(out.get("effect_policy_gate_status", "disabled")),
+            "named_skill_invocation": (
+                dict(out.get("named_skill_invocation", {}))
+                if isinstance(out.get("named_skill_invocation"), Mapping)
+                else None
+            ),
+            "skill_provenance_assessment": (
+                dict(out.get("skill_provenance_assessment", {}))
+                if isinstance(out.get("skill_provenance_assessment"), Mapping)
+                else None
+            ),
+            "skillbox_status": str(out.get("skillbox_status", "disabled")),
+            "skillbox_verification": (
+                dict(out.get("skillbox_verification", {}))
+                if isinstance(out.get("skillbox_verification"), Mapping)
+                else None
+            ),
+            "skillbox_ledger_hit": bool(out.get("skillbox_ledger_hit", False)),
+            "skillbox_content_sha256": out.get("skillbox_content_sha256"),
+            "skillbox_capabilities": [
+                str(x) for x in list(out.get("skillbox_capabilities", []) or [])
+            ],
+            "skillbox_gate_decision": str(out.get("skillbox_gate_decision", "disabled")),
+            "effect_text_analysis": (
+                dict(out.get("effect_text_analysis", {}))
+                if isinstance(out.get("effect_text_analysis"), Mapping)
+                else None
+            ),
+            "provenance": {
+                "mode": str(runtime_packet.provenance_mode),
+                "segment_count": int(runtime_packet.segment_count),
+                "trusted_user_segments": int(runtime_packet.trusted_user_segments),
+                "untrusted_segments": int(runtime_packet.untrusted_segments),
+            },
             "off_reasons": {
                 "reason_spike": int(bool(step_result.reasons.reason_spike)),
                 "reason_wall": int(bool(step_result.reasons.reason_wall)),
@@ -288,18 +443,26 @@ class OmegaHarnessRunner:
         }
 
 
-def load_pack_rows(path: Path) -> List[SessionTurnRow]:
+def load_pack_rows(
+    path: Path,
+    *,
+    labels_path: Optional[Path] = None,
+    allow_legacy_runtime_leakage: bool = False,
+) -> List[SessionTurnRow]:
     rows: List[SessionTurnRow] = []
-    for ln in path.read_text(encoding="utf-8").splitlines():
-        line = ln.strip()
-        if not line:
-            continue
-        raw = json.loads(line)
-        if not isinstance(raw, dict):
-            continue
+    loaded = load_dual_session_pack(
+        runtime_pack_path=path,
+        labels_pack_path=labels_path,
+        allow_legacy_runtime_leakage=bool(allow_legacy_runtime_leakage),
+    )
+    for raw in loaded:
         session_id = str(raw.get("session_id", "")).strip()
+        source_id = str(raw.get("source_id", "")).strip()
+        if not source_id and allow_legacy_runtime_leakage:
+            source_ref_fallback = str(raw.get("source_ref", "")).strip()
+            source_id = source_ref_fallback or f"legacy:{session_id}:{raw.get('turn_id', 0)}"
         text = str(raw.get("text", "")).strip()
-        if not session_id or not text:
+        if not session_id or not source_id or not text:
             continue
         turn_id = int(raw.get("turn_id", 0))
         if turn_id <= 0:
@@ -311,11 +474,12 @@ def load_pack_rows(path: Path) -> List[SessionTurnRow]:
                 session_id=session_id,
                 turn_id=turn_id,
                 text=text,
+                source_id=source_id,
+                source_type=str(raw.get("source_type", "external_untrusted")).strip() or "external_untrusted",
                 label_turn=label_turn,
                 label_session=label_session,
                 family=str(raw.get("family", "unknown")).strip() or "unknown",
                 source_ref=str(raw.get("source_ref", "unknown")).strip() or "unknown",
-                source_type=str(raw.get("source_type", "other")).strip() or "other",
                 actor_id=str(raw.get("actor_id", session_id)).strip() or session_id,
                 bucket=str(raw.get("bucket", "core")).strip() or "core",
                 eval_slice=str(raw.get("eval_slice", "")).strip() or infer_eval_slice_from_source_ref(str(raw.get("source_ref", ""))),
@@ -380,7 +544,12 @@ def evaluate_sessions(
         max_turn_p = 0.0
         off_reason_counts: Dict[str, int] = Counter()
         for turn in session.turns:
-            result = runner.run_turn(session_id=session.session_id, actor_id=session.actor_id, turn=turn)
+            runtime_turn = build_runtime_turn_payload(turn)
+            result = runner.run_turn(
+                session_id=session.session_id,
+                actor_id=session.actor_id,
+                turn=runtime_turn,
+            )
             off = bool(result.get("off", False))
             max_p = float(result.get("max_p", 0.0))
             max_turn_p = max(max_turn_p, max_p)
@@ -401,6 +570,59 @@ def evaluate_sessions(
                     "label_session": session.label_session,
                     "off": off,
                     "max_p": max_p,
+                    "effect_wall_candidate": (
+                        dict(result.get("effect_wall_candidate", {}))
+                        if isinstance(result.get("effect_wall_candidate"), Mapping)
+                        else None
+                    ),
+                    "effect_policy_gate": (
+                        dict(result.get("effect_policy_gate", {}))
+                        if isinstance(result.get("effect_policy_gate"), Mapping)
+                        else None
+                    ),
+                    "effect_forecast": (
+                        dict(result.get("effect_forecast", {}))
+                        if isinstance(result.get("effect_forecast"), Mapping)
+                        else None
+                    ),
+                    "effect_forecast_status": str(
+                        result.get("effect_forecast_status", "disabled")
+                    ),
+                    "effect_policy_gate_status": str(
+                        result.get("effect_policy_gate_status", "disabled")
+                    ),
+                    "named_skill_invocation": (
+                        dict(result.get("named_skill_invocation", {}))
+                        if isinstance(result.get("named_skill_invocation"), Mapping)
+                        else None
+                    ),
+                    "skill_provenance_assessment": (
+                        dict(result.get("skill_provenance_assessment", {}))
+                        if isinstance(result.get("skill_provenance_assessment"), Mapping)
+                        else None
+                    ),
+                    "skillbox_status": str(result.get("skillbox_status", "disabled")),
+                    "skillbox_verification": (
+                        dict(result.get("skillbox_verification", {}))
+                        if isinstance(result.get("skillbox_verification"), Mapping)
+                        else None
+                    ),
+                    "skillbox_ledger_hit": bool(result.get("skillbox_ledger_hit", False)),
+                    "skillbox_content_sha256": result.get("skillbox_content_sha256"),
+                    "skillbox_capabilities": [
+                        str(x) for x in list(result.get("skillbox_capabilities", []) or [])
+                    ],
+                    "skillbox_gate_decision": str(result.get("skillbox_gate_decision", "disabled")),
+                    "effect_text_analysis": (
+                        dict(result.get("effect_text_analysis", {}))
+                        if isinstance(result.get("effect_text_analysis"), Mapping)
+                        else None
+                    ),
+                    "provenance": (
+                        dict(result.get("provenance", {}))
+                        if isinstance(result.get("provenance"), Mapping)
+                        else None
+                    ),
                 }
             )
 
@@ -493,6 +715,189 @@ def summarize_outcomes(outcomes: Sequence[SessionOutcome]) -> Dict[str, Any]:
     }
 
 
+def summarize_effect_shadow_rows(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+    total = 0
+    candidate_turns = 0
+    policy_gate_passed_turns = 0
+    provider_failure_turns = 0
+    benign_turns = 0
+    benign_candidate_turns = 0
+    benign_policy_gate_passed_turns = 0
+    status_counts: Counter[str] = Counter()
+    policy_gate_status_counts: Counter[str] = Counter()
+    candidate_by_family: Counter[str] = Counter()
+    candidate_by_label: Counter[str] = Counter()
+    policy_gate_passed_by_family: Counter[str] = Counter()
+    policy_gate_passed_by_label: Counter[str] = Counter()
+    confidence_histogram: Counter[str] = Counter()
+    named_skill_invocation_turns = 0
+    named_skill_invocation_by_label: Counter[str] = Counter()
+    skipped_due_to_missing_effect_text = 0
+    no_effect_but_named_skill_invocation = 0
+    source_mismatch_simulated_blocks = 0
+    skillbox_checked_count = 0
+    skillbox_verified_count = 0
+    skillbox_unknown_count = 0
+    skillbox_source_mismatch_count = 0
+    skillbox_hash_mismatch_count = 0
+    skillbox_tampered_count = 0
+    skillbox_dangerous_capability_unapproved_count = 0
+    attack_turns = 0
+    benign_source_mismatch_simulated_blocks = 0
+    attack_skillbox_block_sessions = set()
+    attack_sessions_with_source_mismatch = set()
+    attack_sessions_total = set()
+    benign_skillbox_block_sessions = set()
+    benign_sessions_with_source_mismatch = set()
+    benign_sessions_total = set()
+
+    for row in rows:
+        total += 1
+        label = str(row.get("label_session", "unknown"))
+        session_id = str(row.get("session_id", ""))
+        if label == "attack":
+            attack_turns += 1
+            if session_id:
+                attack_sessions_total.add(session_id)
+        elif label == "benign" and session_id:
+            benign_sessions_total.add(session_id)
+        status = str(row.get("effect_forecast_status", "disabled"))
+        status_counts[status] += 1
+        named_skill = row.get("named_skill_invocation")
+        if isinstance(named_skill, Mapping) and bool(named_skill.get("detected", False)):
+            named_skill_invocation_turns += 1
+            named_skill_invocation_by_label[label] += 1
+            if status == "no_effect":
+                no_effect_but_named_skill_invocation += 1
+        effect_text = row.get("effect_text_analysis")
+        if (
+            status == "skipped"
+            and isinstance(effect_text, Mapping)
+            and bool(effect_text.get("missing_effect_text", False))
+        ):
+            skipped_due_to_missing_effect_text += 1
+        gate = row.get("effect_policy_gate")
+        gate_status = str(row.get("effect_policy_gate_status", "disabled"))
+        if isinstance(gate, Mapping):
+            gate_status = str(gate.get("status", gate_status))
+        policy_gate_status_counts[gate_status] += 1
+        if label == "benign":
+            benign_turns += 1
+        if status in {"provider_error", "provider_unavailable", "invalid_response"}:
+            provider_failure_turns += 1
+        candidate = row.get("effect_wall_candidate")
+        if isinstance(candidate, Mapping):
+            candidate_turns += 1
+            candidate_by_family[str(row.get("family", "unknown"))] += 1
+            candidate_by_label[label] += 1
+            if label == "benign":
+                benign_candidate_turns += 1
+            conf = float(candidate.get("confidence", 0.0) or 0.0)
+            if conf >= 0.90:
+                confidence_histogram["0.90-1.00"] += 1
+            elif conf >= 0.80:
+                confidence_histogram["0.80-0.89"] += 1
+            else:
+                confidence_histogram["0.70-0.79"] += 1
+        if isinstance(gate, Mapping) and bool(gate.get("would_enforce", False)):
+            policy_gate_passed_turns += 1
+            policy_gate_passed_by_family[str(row.get("family", "unknown"))] += 1
+            policy_gate_passed_by_label[label] += 1
+            if label == "benign":
+                benign_policy_gate_passed_turns += 1
+        provenance = row.get("skill_provenance_assessment")
+        if isinstance(provenance, Mapping) and bool(provenance.get("simulated_block", False)):
+            source_mismatch_simulated_blocks += 1
+            if label == "benign":
+                benign_source_mismatch_simulated_blocks += 1
+                if session_id:
+                    benign_sessions_with_source_mismatch.add(session_id)
+            elif label == "attack" and session_id:
+                attack_sessions_with_source_mismatch.add(session_id)
+        skillbox_verification = row.get("skillbox_verification")
+        if isinstance(skillbox_verification, Mapping):
+            skillbox_checked_count += 1
+            verification_status = str(skillbox_verification.get("verification_status", "unknown"))
+            if verification_status == "verified":
+                skillbox_verified_count += 1
+            elif verification_status == "unknown":
+                skillbox_unknown_count += 1
+            elif verification_status == "source_mismatch":
+                skillbox_source_mismatch_count += 1
+            elif verification_status == "hash_mismatch":
+                skillbox_hash_mismatch_count += 1
+            elif verification_status == "tampered":
+                skillbox_tampered_count += 1
+            elif verification_status == "dangerous_capability_unapproved":
+                skillbox_dangerous_capability_unapproved_count += 1
+            if bool(skillbox_verification.get("simulated_block", False)) and session_id:
+                if label == "attack":
+                    attack_skillbox_block_sessions.add(session_id)
+                elif label == "benign":
+                    benign_skillbox_block_sessions.add(session_id)
+
+    return {
+        "turns_total": int(total),
+        "candidate_turns": int(candidate_turns),
+        "policy_gate_passed_turns": int(policy_gate_passed_turns),
+        "provider_failure_turns": int(provider_failure_turns),
+        "benign_turns": int(benign_turns),
+        "benign_candidate_turns": int(benign_candidate_turns),
+        "benign_policy_gate_passed_turns": int(benign_policy_gate_passed_turns),
+        "candidate_turn_rate": _safe_div(candidate_turns, total),
+        "benign_candidate_turn_rate": _safe_div(benign_candidate_turns, benign_turns),
+        "policy_gate_passed_turn_rate": _safe_div(policy_gate_passed_turns, total),
+        "benign_policy_gate_passed_turn_rate": _safe_div(
+            benign_policy_gate_passed_turns, benign_turns
+        ),
+        "status_counts": dict(sorted(status_counts.items())),
+        "policy_gate_status_counts": dict(sorted(policy_gate_status_counts.items())),
+        "candidate_by_family": dict(sorted(candidate_by_family.items())),
+        "candidate_by_label": dict(sorted(candidate_by_label.items())),
+        "policy_gate_passed_by_family": dict(sorted(policy_gate_passed_by_family.items())),
+        "policy_gate_passed_by_label": dict(sorted(policy_gate_passed_by_label.items())),
+        "named_skill_invocation_turns": int(named_skill_invocation_turns),
+        "named_skill_invocation_by_label": dict(sorted(named_skill_invocation_by_label.items())),
+        "skipped_due_to_missing_effect_text": int(skipped_due_to_missing_effect_text),
+        "no_effect_but_named_skill_invocation": int(no_effect_but_named_skill_invocation),
+        "source_mismatch_simulated_blocks": int(source_mismatch_simulated_blocks),
+        "skillbox_checked_count": int(skillbox_checked_count),
+        "skillbox_verified_count": int(skillbox_verified_count),
+        "skillbox_unknown_count": int(skillbox_unknown_count),
+        "skillbox_source_mismatch_count": int(skillbox_source_mismatch_count),
+        "skillbox_hash_mismatch_count": int(skillbox_hash_mismatch_count),
+        "skillbox_tampered_count": int(skillbox_tampered_count),
+        "skillbox_dangerous_capability_unapproved_count": int(
+            skillbox_dangerous_capability_unapproved_count
+        ),
+        "simulated_skillbox_block_sessions": int(len(attack_skillbox_block_sessions)),
+        "simulated_skillbox_attack_recall": _safe_div(
+            len(attack_skillbox_block_sessions), len(attack_sessions_total)
+        ),
+        "simulated_skillbox_benign_fp_rate": _safe_div(
+            len(benign_skillbox_block_sessions), len(benign_sessions_total)
+        ),
+        "simulate_source_mismatch_attack_turn_rate": _safe_div(
+            source_mismatch_simulated_blocks - benign_source_mismatch_simulated_blocks,
+            attack_turns,
+        ),
+        "simulate_source_mismatch_session_recall": _safe_div(
+            len(attack_sessions_with_source_mismatch), len(attack_sessions_total)
+        ),
+        "simulate_source_mismatch_fp_rate": _safe_div(
+            benign_source_mismatch_simulated_blocks, benign_turns
+        ),
+        "simulate_source_mismatch_session_fp_rate": _safe_div(
+            len(benign_sessions_with_source_mismatch), len(benign_sessions_total)
+        ),
+        "confidence_histogram": {
+            "0.70-0.79": int(confidence_histogram.get("0.70-0.79", 0)),
+            "0.80-0.89": int(confidence_histogram.get("0.80-0.89", 0)),
+            "0.90-1.00": int(confidence_histogram.get("0.90-1.00", 0)),
+        },
+    }
+
+
 def evaluate_pack_with_runner(
     *,
     rows: Sequence[SessionTurnRow],
@@ -530,6 +935,42 @@ def evaluate_pack_with_runner(
         },
         "trace_rows": core_traces + cross_traces,
         "misses_by_family": {k: sorted(v) for k, v in sorted(misses_by_family.items())},
+        "effect_shadow": {
+            "all": summarize_effect_shadow_rows(core_traces + cross_traces),
+            "core": summarize_effect_shadow_rows(core_traces),
+            "cross_session": summarize_effect_shadow_rows(cross_traces),
+        },
+        "provenance": {
+            "all": summarize_provenance_rows(core_traces + cross_traces),
+            "core": summarize_provenance_rows(core_traces),
+            "cross_session": summarize_provenance_rows(cross_traces),
+        },
+    }
+
+
+def summarize_provenance_rows(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+    total = 0
+    mode_counts: Counter[str] = Counter()
+    total_segments = 0
+    trusted_user_segments = 0
+    untrusted_segments = 0
+    for row in rows:
+        total += 1
+        prov = row.get("provenance")
+        if not isinstance(prov, Mapping):
+            mode_counts["unknown"] += 1
+            continue
+        mode_counts[str(prov.get("mode", "unknown"))] += 1
+        total_segments += int(prov.get("segment_count", 0) or 0)
+        trusted_user_segments += int(prov.get("trusted_user_segments", 0) or 0)
+        untrusted_segments += int(prov.get("untrusted_segments", 0) or 0)
+    return {
+        "turns_total": int(total),
+        "mode_counts": dict(sorted(mode_counts.items())),
+        "segment_count": int(total_segments),
+        "trusted_user_segments": int(trusted_user_segments),
+        "untrusted_segments": int(untrusted_segments),
+        "avg_segments_per_turn": _safe_div(total_segments, total),
     }
 
 
@@ -582,7 +1023,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Evaluate session-based prompt-injection benchmark without per-turn reset.")
     parser.add_argument("--profile", default="dev")
     parser.add_argument("--mode", choices=["pi0", "hybrid", "hybrid_api"], default="pi0")
-    parser.add_argument("--pack", default="tests/data/session_benchmark/session_pack_seed41_v1.jsonl")
+    parser.add_argument("--pack", default="tests/data/session_benchmark/runtime/session_pack.jsonl")
+    parser.add_argument("--labels-pack", default=None)
     parser.add_argument("--seed", type=int, default=41)
     parser.add_argument("--artifacts-root", default="artifacts/session_eval")
     parser.add_argument("--weekly-regression", action="store_true")
@@ -598,9 +1040,16 @@ def main() -> int:
     parser.add_argument("--api-cache-path", default=None)
     parser.add_argument("--api-error-log-path", default=None)
     parser.add_argument("--blind-eval", action="store_true")
+    parser.add_argument("--enable-effects-shadow", action="store_true")
+    parser.add_argument("--provenance-mode", choices=["blob", "segmented"], default="blob")
+    parser.add_argument("--allow-legacy-runtime-leakage", action="store_true")
     args = parser.parse_args()
 
-    rows = load_pack_rows((ROOT / str(args.pack)).resolve())
+    rows = load_pack_rows(
+        (ROOT / str(args.pack)).resolve(),
+        labels_path=((ROOT / str(args.labels_pack)).resolve() if args.labels_pack else None),
+        allow_legacy_runtime_leakage=bool(args.allow_legacy_runtime_leakage),
+    )
     if not rows:
         payload = {
             "status": "dataset_not_ready",
@@ -632,6 +1081,8 @@ def main() -> int:
         api_cache_path=(str(args.api_cache_path) if args.api_cache_path else None),
         api_error_log_path=(str(args.api_error_log_path) if args.api_error_log_path else None),
         blind_eval=bool(args.blind_eval),
+        enable_effects_shadow=bool(args.enable_effects_shadow),
+        provenance_mode=str(args.provenance_mode),
     )
     cross_runner = OmegaHarnessRunner(
         profile=str(args.profile),
@@ -649,6 +1100,8 @@ def main() -> int:
         api_cache_path=(str(args.api_cache_path) if args.api_cache_path else None),
         api_error_log_path=(str(args.api_error_log_path) if args.api_error_log_path else None),
         blind_eval=bool(args.blind_eval),
+        enable_effects_shadow=bool(args.enable_effects_shadow),
+        provenance_mode=str(args.provenance_mode),
     )
     result = evaluate_pack_with_runner(rows=rows, core_runner=core_runner, cross_runner=cross_runner)
 
@@ -665,6 +1118,8 @@ def main() -> int:
         "profile": str(args.profile),
         "mode": str(args.mode),
         "blind_eval": bool(args.blind_eval),
+        "enable_effects_shadow": bool(args.enable_effects_shadow),
+        "provenance_mode": str(args.provenance_mode),
         "seed": int(args.seed),
         "pack": str((ROOT / str(args.pack)).resolve()),
         "summary_core_text_intrinsic": result["core"]["summary_text_intrinsic"],
@@ -673,6 +1128,8 @@ def main() -> int:
         # Backward compatibility key.
         "summary_core": result["core"]["summary_text_intrinsic"],
         "cross_session": result["cross_session"]["summary"],
+        "effect_shadow": result["effect_shadow"],
+        "provenance": result["provenance"],
         "projector": {
             "strict_projector": bool(args.strict_projector),
             "require_api_adapter": bool(str(args.mode) == "hybrid_api" and not bool(args.allow_api_fallback)),

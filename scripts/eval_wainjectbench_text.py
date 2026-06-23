@@ -114,6 +114,14 @@ def _load_jsonl_rows(path: Path) -> tuple[List[Mapping[str, Any]], Dict[str, int
     return out, stats
 
 
+def _opaque_text_sample_id(index: int) -> str:
+    return f"sample_{int(index):06d}"
+
+
+def _opaque_session_id(index: int) -> str:
+    return f"wa-sess-{int(index):06d}"
+
+
 def load_wainject_text_with_stats(root: Path) -> tuple[List[WATextSample], WATextLoadStats]:
     samples: List[WATextSample] = []
     files_seen = 0
@@ -127,6 +135,7 @@ def load_wainject_text_with_stats(root: Path) -> tuple[List[WATextSample], WATex
     rows_dropped_empty_text = 0
     benign_samples_built = 0
     malicious_samples_built = 0
+    sample_index = 0
 
     for split_dir, label in (("benign", 0), ("malicious", 1)):
         base = root / split_dir
@@ -149,9 +158,10 @@ def load_wainject_text_with_stats(root: Path) -> tuple[List[WATextSample], WATex
                 if not text:
                     rows_dropped_empty_text += 1
                     continue
+                sample_index += 1
                 samples.append(
                     WATextSample(
-                        sample_id=f"{split_dir}:{file.name}:{idx:06d}",
+                        sample_id=_opaque_text_sample_id(sample_index),
                         label=int(label),
                         source_file=file.name,
                         text=text,
@@ -292,7 +302,7 @@ def _build_sessionized_turns(
     for src in sorted(benign_by_file.keys()):
         for chunk in _chunk_rows(benign_by_file[src], benign_chunk_size):
             session_idx += 1
-            session_id = f"wa-sess-ben-{session_idx:05d}"
+            session_id = _opaque_session_id(session_idx)
             per_session_meta[session_id] = {"label_session": 0, "source_file": src, "turns": len(chunk), "prefixed_benign_turns": 0}
             for idx, row in enumerate(chunk, start=1):
                 turns.append(
@@ -310,7 +320,7 @@ def _build_sessionized_turns(
     for src in sorted(attack_by_file.keys()):
         for chunk in _chunk_rows(attack_by_file[src], attack_chunk_size):
             session_idx += 1
-            session_id = f"wa-sess-atk-{session_idx:05d}"
+            session_id = _opaque_session_id(session_idx)
             turns_local: List[SessionizedTurn] = []
             added_prefix = 0
             if benign_pool and benign_prefix_turns > 0:

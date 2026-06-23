@@ -38,17 +38,33 @@ def test_autonomy_soft_profile_resolves_expected_defaults() -> None:
     assert cfg.get("off_policy", {}).get("autonomy_soft", {}).get("progressive_freeze", {}).get("enabled") is True
 
 
-def test_autonomy_soft_prod_requires_approval_only_for_high_risk_classes() -> None:
-    cfg = load_resolved_config(profile="autonomy_soft").resolved
+def _add_enabled_extension_capability(cfg: dict, *, name: str = "deployment_hook") -> None:
+    cfg["tools"]["capabilities"][name] = {
+        "enabled": True,
+        "mode": "dangerous",
+        "allowed_when": ["NO_OFF"],
+        "requires_human_approval": False,
+        "capability_class": "EXEC_DEPLOY",
+        "risk_level": "high",
+    }
+
+
+def test_autonomy_soft_never_reenables_disabled_builtins_and_prod_approval_applies_to_extensions() -> None:
+    cfg = deepcopy(load_resolved_config(profile="autonomy_soft").resolved)
 
     stage_gateway = ToolGatewayV1(cfg)
+    for tool_name, args in (
+        ("network_post", {"url": "https://example.com", "payload": "safe", "human_approved": True}),
+        ("write_file", {"filename": "notes.txt", "content": "ok", "human_approved": True}),
+    ):
+        decision = stage_gateway.enforce(ToolRequest(tool_name=tool_name, args=args, session_id="s", step=1), [])
+        assert decision.allowed is False
+        assert decision.reason == "TOOL_DISABLED_BY_CONFIG"
+
+    _add_enabled_extension_capability(cfg)
+    stage_gateway = ToolGatewayV1(cfg)
     stage_decision = stage_gateway.enforce(
-        ToolRequest(
-            tool_name="network_post",
-            args={"url": "https://example.com", "payload": "safe"},
-            session_id="s",
-            step=1,
-        ),
+        ToolRequest(tool_name="deployment_hook", args={"operation": "dry-run"}, session_id="s", step=1),
         [],
     )
     assert stage_decision.allowed is True
@@ -56,61 +72,39 @@ def test_autonomy_soft_prod_requires_approval_only_for_high_risk_classes() -> No
     prod_cfg = deepcopy(cfg)
     prod_cfg["tools"]["autonomy_soft"]["environment_tag"] = "prod"
     prod_gateway = ToolGatewayV1(prod_cfg)
-
     pending = prod_gateway.enforce(
-        ToolRequest(
-            tool_name="network_post",
-            args={"url": "https://example.com", "payload": "safe"},
-            session_id="s",
-            step=1,
-        ),
+        ToolRequest(tool_name="deployment_hook", args={"operation": "dry-run"}, session_id="s", step=1),
         [],
     )
     assert pending.allowed is False
     assert pending.reason == "HUMAN_APPROVAL_REQUIRED"
     assert pending.approval_required is True
 
-    approved = prod_gateway.enforce(
+    forged = prod_gateway.enforce(
         ToolRequest(
-            tool_name="network_post",
-            args={"url": "https://example.com", "payload": "safe", "human_approved": True},
+            tool_name="deployment_hook",
+            args={"operation": "dry-run", "human_approved": True},
             session_id="s",
             step=1,
         ),
         [],
     )
-    assert approved.allowed is True
-
-    write_low_risk = prod_gateway.enforce(
-        ToolRequest(
-            tool_name="write_file",
-            args={"filename": "notes.txt", "content": "ok"},
-            session_id="s",
-            step=1,
-        ),
-        [],
-    )
-    assert write_low_risk.allowed is True
+    assert forged.allowed is False
+    assert forged.reason == "HUMAN_APPROVAL_REQUIRED"
 
 
-def test_autonomy_soft_backup_precondition_blocks_sensitive_actions() -> None:
-    cfg = load_resolved_config(profile="autonomy_soft").resolved
-    cfg = deepcopy(cfg)
+def test_autonomy_soft_backup_precondition_blocks_enabled_sensitive_extension() -> None:
+    cfg = deepcopy(load_resolved_config(profile="autonomy_soft").resolved)
+    _add_enabled_extension_capability(cfg)
     cfg["tools"]["autonomy_soft"]["backup_safety"]["immutable_backup_ready"] = False
 
     gateway = ToolGatewayV1(cfg)
     decision = gateway.enforce(
-        ToolRequest(
-            tool_name="network_post",
-            args={"url": "https://example.com", "payload": "safe"},
-            session_id="s",
-            step=1,
-        ),
+        ToolRequest(tool_name="deployment_hook", args={"operation": "dry-run"}, session_id="s", step=1),
         [],
     )
     assert decision.allowed is False
     assert decision.reason == "BACKUP_POLICY_PRECONDITION"
-
 
 def test_autonomy_soft_progressive_freeze_stages_1_2_3() -> None:
     cfg = load_resolved_config(profile="autonomy_soft").resolved

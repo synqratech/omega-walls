@@ -7,12 +7,12 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 
 PUBLIC_DOCS = [
+    "README_OSS.md",
+    "README_PYPI.md",
     "docs/README.md",
     "docs/quickstart.md",
     "docs/config.md",
     "docs/framework_integrations_quickstart.md",
-    "docs/enterprise_pilot_guide.md",
-    "docs/pilot_operations_runbook.md",
 ]
 
 
@@ -34,10 +34,10 @@ def test_docs_index_contains_exact_mvp_pages() -> None:
         "quickstart.md",
         "config.md",
         "framework_integrations_quickstart.md",
-        "enterprise_pilot_guide.md",
-        "pilot_operations_runbook.md",
     }
     assert set(local_links) == expected
+    assert "enterprise_pilot_guide.md" not in set(local_links)
+    assert "pilot_operations_runbook.md" not in set(local_links)
 
 
 def test_no_internal_docs_links_from_public_surface() -> None:

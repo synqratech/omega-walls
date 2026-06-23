@@ -26,13 +26,19 @@ Related runbooks:
 
 ```bash
 pip install "omega-walls[integrations]"
+python scripts/run_framework_smokes.py --framework langchain --strict
+```
+
+Full matrix run (all 6 adapters, typically ~2-3 minutes):
+
+```bash
 python scripts/run_framework_smokes.py --strict
 ```
 
 Expected summary invariants:
 
 - `status = ok`
-- `framework_count = 6`
+- `framework_count = selected adapter count (1 with --framework, 6 for full matrix)`
 - `min_gateway_coverage >= 1.0`
 - `total_orphans = 0`
 
@@ -56,7 +62,24 @@ Exception path remains backward-compatible:
 - `OmegaBlockedError` for model/input blocking.
 - `OmegaToolBlockedError` for tool-call blocking.
 
-## 4. Minimal Adapter Wiring Pattern
+## 4. Boundary Mode Presets (P3)
+
+- `boundary_mode="recommended"` (default): profile-aware mode.
+  - `prod` / `pilot` / `pilot_canonical` -> `segmented`
+  - `quickstart` / `dev` -> `blob_fallback`
+- `boundary_mode="segmented"`: explicit production mode.
+- `boundary_mode="blob_fallback"`: compatibility mode for legacy integrations.
+
+LangChain/LangGraph example:
+
+```python
+from omega.integrations import OmegaLangChainGuard
+
+# Default is "recommended" and resolves by profile.
+guard = OmegaLangChainGuard(profile="prod")
+```
+
+## 5. Minimal Adapter Wiring Pattern
 
 ```python
 from omega.adapters import OmegaBlockedError, OmegaToolBlockedError
@@ -75,7 +98,17 @@ except OmegaToolBlockedError as exc:
 
 Use the same pattern in all official adapters and in custom wrappers.
 
-## 5. What Is Executable in the Repo
+## 6. SIEM-Friendly Boundary Events
+
+`security_metadata` now includes `siem_boundary_event` with stable keys:
+- `event`, `schema_version`, `timestamp`, `phase`
+- `session_id`, `step`, `trace_id`, `decision_id`
+- `boundary_mode`, `coverage_status`, `coverage_grade`, `missing_boundaries`
+- `reason_codes`, `risk_score`, `control_outcome`
+
+This object is designed to be forwarded as-is to SIEM pipelines.
+
+## 7. What Is Executable in the Repo
 
 For each integration package under `/integrations/<framework>/`:
 
@@ -88,7 +121,7 @@ Template for new frameworks:
 
 - [`/integrations/_template`](../integrations/_template/README.md)
 
-## 6. Troubleshooting (Fast Path)
+## 8. Troubleshooting (Fast Path)
 
 1. Verify Python and package install:
    - `python --version`

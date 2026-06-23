@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Mapping, Optional
 import uuid
+import hashlib
+import os
 
 import numpy as np
 
 from omega.config.loader import load_resolved_config
+from omega.edition import verify_runtime_license_if_available
 from omega.core.omega_core import OmegaCoreV1
 from omega.core.params import omega_params_from_config
 from omega.errors import (
@@ -21,14 +24,26 @@ from omega.errors import (
 from omega.interfaces.contracts_v1 import ContentItem, OffAction, OmegaState
 from omega.log_contract import make_log_event
 from omega.monitoring.collector import build_monitor_collector_from_config
-from omega.monitoring.enrichment import build_downstream_summary, build_redacted_fragments
+from omega.monitoring.enrichment import (
+    build_downstream_summary,
+    build_redacted_fragments,
+)
 from omega.monitoring.hints import infer_false_positive_hint
 from omega.monitoring.mode import GuardMode, resolve_guard_mode
 from omega.monitoring.models import MonitorEvent, utc_now_iso
 from omega.policy.off_policy_v1 import OffPolicyV1
 from omega.projector.factory import build_projector
-from omega.structured_logging import build_structured_emitter_from_config, engine_version
-from omega.sdk_types import DetectionResult, GuardAction, GuardDecision, OmegaDetectionResult
+from omega.rag.attachment_ingestion import extract_attachment
+from omega.structured_logging import (
+    build_structured_emitter_from_config,
+    engine_version,
+)
+from omega.sdk_types import DetectionResult, GuardAction, GuardDecision
+
+
+def _verify_runtime_license_if_available(cfg: Mapping[str, Any]) -> Any:
+    """Backward-compatible local wrapper around the centralized edition guard."""
+    return verify_runtime_license_if_available(cfg)
 
 
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
@@ -54,7 +69,9 @@ def _reason_codes(reasons: Any) -> List[str]:
     return out
 
 
-def _to_missing_dependency_error(exc: ModuleNotFoundError) -> OmegaMissingDependencyError:
+def _to_missing_dependency_error(
+    exc: ModuleNotFoundError,
+) -> OmegaMissingDependencyError:
     dep = str(getattr(exc, "name", "") or "unknown")
     return OmegaMissingDependencyError(
         dep,
@@ -89,7 +106,9 @@ def _map_exception(*, exc: Exception, phase: str) -> OmegaSDKError:
     if hasattr(exc, "code") and hasattr(exc, "body"):
         code = getattr(exc, "code", None)
         body = getattr(exc, "body", None)
-        return OmegaAPIError(f"API request failed (code={code})", code=code, details={"body": body})
+        return OmegaAPIError(
+            f"API request failed (code={code})", code=code, details={"body": body}
+        )
     if _is_api_error_message(msg):
         return OmegaAPIError(msg)
 
@@ -125,13 +144,21 @@ class OmegaWalls:
         if projector_mode is not None:
             projector_override.setdefault("projector", {})["mode"] = str(projector_mode)
         if api_model is not None:
-            projector_override.setdefault("projector", {}).setdefault("api_perception", {})["model"] = str(api_model)
+            projector_override.setdefault("projector", {}).setdefault(
+                "api_perception", {}
+            )["model"] = str(api_model)
         if api_provider is not None:
-            projector_override.setdefault("projector", {}).setdefault("api_perception", {})["provider"] = str(api_provider)
+            projector_override.setdefault("projector", {}).setdefault(
+                "api_perception", {}
+            )["provider"] = str(api_provider)
         if api_key_env is not None:
-            projector_override.setdefault("projector", {}).setdefault("api_perception", {})["api_key_env"] = str(api_key_env)
+            projector_override.setdefault("projector", {}).setdefault(
+                "api_perception", {}
+            )["api_key_env"] = str(api_key_env)
         if api_base_url is not None:
-            projector_override.setdefault("projector", {}).setdefault("api_perception", {})["base_url"] = str(api_base_url)
+            projector_override.setdefault("projector", {}).setdefault(
+                "api_perception", {}
+            )["base_url"] = str(api_base_url)
         if projector_override:
             effective_overrides = _deep_merge(effective_overrides, projector_override)
 
@@ -147,6 +174,7 @@ class OmegaWalls:
 
         cfg = snapshot.resolved
         try:
+            self._license_status = _verify_runtime_license_if_available(cfg)
             params = omega_params_from_config(cfg)
             self._snapshot = snapshot
             self._config = cfg
@@ -159,7 +187,9 @@ class OmegaWalls:
                 config=cfg,
                 force_enable=(self._guard_mode == GuardMode.MONITOR),
             )
-            self._structured_emitter = build_structured_emitter_from_config(config=cfg, logger_name="omega.sdk")
+            self._structured_emitter = build_structured_emitter_from_config(
+                config=cfg, logger_name="omega.sdk"
+            )
         except Exception as exc:  # noqa: BLE001
             raise _map_exception(exc=exc, phase="init") from exc
 
@@ -168,10 +198,44 @@ class OmegaWalls:
         self.default_trust = str(default_trust or "untrusted")
         self.default_source_type = str(default_source_type or "other")
         self.default_session_id = str(default_session_id or "omega-sdk-default")
+        self._closed = False
 
     @property
     def config(self) -> Dict[str, Any]:
         return dict(self._config)
+
+    @property
+    def license_status(self) -> Optional[Dict[str, Any]]:
+        return self._license_status.to_dict() if self._license_status is not None else None
+
+    def close(self) -> None:
+        """Release process-level multimodal workers owned by the SDK runtime.
+
+        The bundled OCR and attachment parser pools are intentionally shared
+        within a process. Applications using multiple guards should close them
+        during coordinated shutdown, after in-flight scans have completed.
+        """
+        if self._closed:
+            return
+        self._closed = True
+        self._states.clear()
+        try:
+            from omega.vision.ocr_runtime import shutdown_ocr_workers
+
+            shutdown_ocr_workers()
+        finally:
+            from omega.rag.attachment_parser_runtime import (
+                shutdown_attachment_parser_broker,
+            )
+
+            shutdown_attachment_parser_broker()
+
+    def __enter__(self) -> "OmegaWalls":
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
+        _ = (exc_type, exc, traceback)
+        self.close()
 
     def reset_session(self, session_id: Optional[str] = None) -> None:
         sid = str(session_id or self.default_session_id)
@@ -211,8 +275,12 @@ class OmegaWalls:
         )
         try:
             projection = self._projector.project(item)
-            step_result = self._core.step(state=state, items=[item], projections=[projection])
-            intended_decision = self._off_policy.select_actions(step_result=step_result, items=[item])
+            step_result = self._core.step(
+                state=state, items=[item], projections=[projection]
+            )
+            intended_decision = self._off_policy.select_actions(
+                step_result=step_result, items=[item]
+            )
         except Exception as exc:  # noqa: BLE001
             raise _map_exception(exc=exc, phase="runtime") from exc
 
@@ -235,18 +303,19 @@ class OmegaWalls:
                 control_outcome=str(intended_decision.control_outcome),
                 reason_codes=_reason_codes(step_result.reasons),
                 top_docs=[str(x) for x in list(step_result.top_docs)],
-                actions=[self._action_to_guard_action(action) for action in list(intended_decision.actions)],
+                actions=[
+                    self._action_to_guard_action(action)
+                    for action in list(intended_decision.actions)
+                ],
             )
             intended_action = str(intended_decision.control_outcome)
             actual_action = str(intended_decision.control_outcome)
 
         wall_scores = {
-            wall: float(step_result.p[idx])
-            for idx, wall in enumerate(self.walls)
+            wall: float(step_result.p[idx]) for idx, wall in enumerate(self.walls)
         }
         memory_scores = {
-            wall: float(step_result.m_next[idx])
-            for idx, wall in enumerate(self.walls)
+            wall: float(step_result.m_next[idx]) for idx, wall in enumerate(self.walls)
         }
         walls_triggered = sorted(
             wall
@@ -256,8 +325,12 @@ class OmegaWalls:
         max_p = float(np.max(step_result.p)) if len(step_result.p) else 0.0
         sum_m = float(np.sum(step_result.m_next)) if len(step_result.m_next) else 0.0
         sum_ratio = min(1.0, sum_m / max(float(self._core.params.off_Sigma), 1e-6))
-        severity_score = {"L1": 0.0, "L2": 0.5, "L3": 1.0}.get(str(intended_decision.severity), 0.0)
-        risk_score = float(max(0.0, min(1.0, 0.60 * max_p + 0.30 * sum_ratio + 0.10 * severity_score)))
+        severity_score = {"L1": 0.0, "L2": 0.5, "L3": 1.0}.get(
+            str(intended_decision.severity), 0.0
+        )
+        risk_score = float(
+            max(0.0, min(1.0, 0.60 * max_p + 0.30 * sum_ratio + 0.10 * severity_score))
+        )
         fp_hint = infer_false_positive_hint(
             risk_score=float(risk_score),
             intended_action=str(intended_action),
@@ -284,10 +357,17 @@ class OmegaWalls:
         monitor_fragments = build_redacted_fragments(
             attribution_rows=monitor_attribution,
             item_text_by_doc={str(item.doc_id): str(item.text)},
+            item_meta_by_doc={
+                str(item.doc_id): (
+                    dict(item.meta) if isinstance(item.meta, dict) else {}
+                )
+            },
             max_fragments=1,
             max_chars=240,
         )
-        intended_action_types = sorted({str(a.type) for a in list(intended_decision.actions)})
+        intended_action_types = sorted(
+            {str(a.type) for a in list(intended_decision.actions)}
+        )
         intended_blocked_doc_ids = sorted(
             {
                 str(doc_id)
@@ -304,7 +384,9 @@ class OmegaWalls:
                 for source in list(action.source_ids or [])
             }
         )
-        intended_prevented_tools = ["*"] if "TOOL_FREEZE" in set(intended_action_types) else []
+        intended_prevented_tools = (
+            ["*"] if "TOOL_FREEZE" in set(intended_action_types) else []
+        )
         monitor_downstream = build_downstream_summary(
             intended_action=str(intended_action),
             action_types=list(intended_action_types),
@@ -372,7 +454,10 @@ class OmegaWalls:
                     trace_id=str(trace_id),
                     decision_id=str(decision_id),
                     false_positive_hint=(str(fp_hint) if fp_hint else None),
-                    metadata={"source_id": str(item.source_id), "source_type": str(item.source_type)},
+                    metadata={
+                        "source_id": str(item.source_id),
+                        "source_type": str(item.source_type),
+                    },
                 )
             )
 
@@ -386,6 +471,103 @@ class OmegaWalls:
             monitor=monitor_payload,
         )
 
+    def analyze_attachment(
+        self,
+        content: bytes,
+        *,
+        filename: str,
+        mime: str,
+        tenant_id: str = "sdk",
+        data_region: str = "unspecified",
+        session_id: Optional[str] = None,
+        source_id: Optional[str] = None,
+        trust: Optional[str] = None,
+        reset_session: bool = False,
+    ) -> DetectionResult:
+        """Analyze PDF/DOCX/HTML/image attachments through the multimodal boundary."""
+        raw = bytes(content)
+        request_id = f"sdk-attachment-{uuid.uuid4().hex}"
+        attachment_cfg = (
+            (self._config.get("retriever", {}) or {}).get("sqlite_fts", {}) or {}
+        ).get("attachments", {}) or {}
+        try:
+            extracted = extract_attachment(
+                content_bytes=raw,
+                filename=str(filename),
+                mime=str(mime),
+                cfg=attachment_cfg,
+            )
+            variants: list[dict[str, Any]] = []
+            register = getattr(self._projector, "register_image_blob", None)
+            for asset in list(extracted.visual_assets or []):
+                if not callable(register):
+                    raise OmegaInitializationError(
+                        "Configured projector does not expose multimodal BlobRef support"
+                    )
+                payload = asset.decode()
+                ref = register(
+                    scope_id=request_id,
+                    data=payload,
+                    mime=asset.mime,
+                    expected_sha256=asset.sha256,
+                )
+                variants.append(
+                    {
+                        "mime": asset.mime,
+                        "sha256": asset.sha256,
+                        "bytes_ref": ref,
+                        "size_bytes": asset.size_bytes,
+                        "role": asset.role,
+                        "width": asset.width or None,
+                        "height": asset.height or None,
+                        "asset_id": asset.asset_id,
+                        "source_kind": asset.source_kind,
+                        "page_number": asset.page_number,
+                        "embedded_index": asset.embedded_index,
+                    }
+                )
+            meta: dict[str, Any] = {
+                "tenant_id": str(tenant_id),
+                "data_region": str(data_region),
+                "request_id": request_id,
+                "attachment_format": str(extracted.format),
+                "ingestion_flags": list(extracted.warnings),
+                "visual_status": str(extracted.visual_status),
+                "visual_asset_manifest": [
+                    {k: v for k, v in row.items() if k != "bytes_ref"}
+                    for row in variants
+                ],
+            }
+            if variants:
+                meta["semantic_image"] = (
+                    variants[0] if len(variants) == 1 else {"variants": variants}
+                )
+            text = str(extracted.text or "").strip()
+            if not text:
+                text = (
+                    "[attachment_visual_only]"
+                    if variants
+                    else "[attachment_text_empty]"
+                )
+            return self.analyze_text(
+                text,
+                session_id=session_id,
+                source_id=str(
+                    source_id
+                    or f"sdk:attachment:{hashlib.sha256(raw).hexdigest()[:16]}"
+                ),
+                source_type=str(extracted.format or "attachment"),
+                trust=trust,
+                meta=meta,
+                reset_session=reset_session,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise _map_exception(exc=exc, phase="runtime") from exc
+        finally:
+            release = getattr(self._projector, "release_image_scope", None)
+            if callable(release):
+                release(request_id)
+
     def _action_to_guard_action(self, action: OffAction) -> GuardAction:
         return GuardAction(
             type=str(action.type),
@@ -394,12 +576,24 @@ class OmegaWalls:
             source_ids=list(action.source_ids) if action.source_ids else None,
             tool_mode=str(action.tool_mode) if action.tool_mode else None,
             allowlist=list(action.allowlist) if action.allowlist else None,
-            horizon_steps=int(action.horizon_steps) if action.horizon_steps is not None else None,
-            incident_packet=dict(action.incident_packet) if action.incident_packet else None,
-            capability_class=str(action.capability_class) if action.capability_class else None,
+            horizon_steps=int(action.horizon_steps)
+            if action.horizon_steps is not None
+            else None,
+            incident_packet=dict(action.incident_packet)
+            if action.incident_packet
+            else None,
+            capability_class=str(action.capability_class)
+            if action.capability_class
+            else None,
             risk_level=str(action.risk_level) if action.risk_level else None,
-            freeze_stage=int(action.freeze_stage) if action.freeze_stage is not None else None,
+            freeze_stage=int(action.freeze_stage)
+            if action.freeze_stage is not None
+            else None,
             stage_reason=str(action.stage_reason) if action.stage_reason else None,
-            escalation_required=bool(action.escalation_required) if action.escalation_required is not None else None,
-            approval_required=bool(action.approval_required) if action.approval_required is not None else None,
+            escalation_required=bool(action.escalation_required)
+            if action.escalation_required is not None
+            else None,
+            approval_required=bool(action.approval_required)
+            if action.approval_required is not None
+            else None,
         )

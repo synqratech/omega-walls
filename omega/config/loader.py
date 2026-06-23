@@ -8,10 +8,25 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Iterable, Optional, Sequence, Tuple
 
 import yaml
+from omega.runtime.environment import expand_omega_environment, parse_env_override
+from omega.config.validators import (
+    validate_api_config,
+    validate_benchmark_configs,
+    validate_effects_config,
+    validate_off_policy_config,
+    validate_projector_config,
+    validate_production_profile_contract,
+    validate_release_gate_config,
+    validate_licensing_config,
+    validate_runtime_integrity_config,
+    validate_skillbox_config,
+    validate_telemetry_config,
+    validate_tools_config,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -19,6 +34,9 @@ _CONFIG_LAYER_FILES: Dict[str, str] = {
     "pi0": "pi0_defaults.yml",
     "pi0_semantic": "pi0_semantic.yml",
     "projector": "projector.yml",
+    "effects": "effects.yml",
+    "runtime_integrity": "runtime_integrity.yml",
+    "skillbox": "skillbox.yml",
     "omega": "omega_defaults.yml",
     "off_policy": "off_policy.yml",
     "source_policy": "source_policy.yml",
@@ -33,11 +51,15 @@ _CONFIG_LAYER_FILES: Dict[str, str] = {
     "pitheta_dataset_registry": "pitheta_dataset_registry.yml",
     "pitheta_train": "pitheta_train.yml",
     "release_gate": "release_gate.yml",
+    "licensing": "licensing.yml",
 }
 _CONFIG_LAYER_ORDER: Tuple[str, ...] = (
     "pi0",
     "pi0_semantic",
     "projector",
+    "effects",
+    "runtime_integrity",
+    "skillbox",
     "omega",
     "off_policy",
     "source_policy",
@@ -52,6 +74,7 @@ _CONFIG_LAYER_ORDER: Tuple[str, ...] = (
     "pitheta_dataset_registry",
     "pitheta_train",
     "release_gate",
+    "licensing",
 )
 _BUNDLED_CONFIG_PACKAGE = "omega.config"
 _BUNDLED_CONFIG_ROOT = "resources"
@@ -92,6 +115,24 @@ def _load_bundled_yaml(*parts: str) -> Tuple[Dict[str, Any], Optional[str], Opti
     return _parse_yaml_bytes(content, source=source), source, digest
 
 
+
+
+def _load_enterprise_bundled_yaml(*parts: str) -> Tuple[Dict[str, Any], Optional[str], Optional[str]]:
+    try:
+        traversable = importlib_resources.files("omega_walls_enterprise.config").joinpath(_BUNDLED_CONFIG_ROOT, *parts)
+    except ModuleNotFoundError:
+        return {}, None, None
+    if not traversable.exists():
+        return {}, None, None
+    content = traversable.read_bytes()
+    source = f"pkg://omega_walls_enterprise.config/{_BUNDLED_CONFIG_ROOT}/{'/'.join(parts)}"
+    digest = _sha256_bytes(content)
+    return _parse_yaml_bytes(content, source=source), source, digest
+
+def _raise_profile_not_found(*, profile: str) -> None:
+    raise ValueError(f"profile not found: {profile}")
+
+
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
     result = dict(base)
     for key, value in override.items():
@@ -103,12 +144,18 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
 
 
 def _apply_env_overrides(config: Dict[str, Any], env: Dict[str, str], prefix: str = "OMEGA__") -> Dict[str, Any]:
-    """Apply env vars like OMEGA__OMEGA__EPSILON=0.2 to nested keys."""
+    """Apply env vars like ``OMEGA__API__PORT=8080`` to nested keys.
+
+    Structured YAML/JSON values are accepted so list-valued deployment fields
+    such as trusted proxy CIDRs can be configured without custom files.
+    """
     updated = dict(config)
     for key, value in env.items():
         if not key.startswith(prefix):
             continue
         path = key[len(prefix) :].lower().split("__")
+        if any(not part for part in path):
+            raise ValueError(f"invalid nested environment override: {key}")
         cur: Dict[str, Any] = updated
         for part in path[:-1]:
             next_val = cur.get(part)
@@ -116,74 +163,13 @@ def _apply_env_overrides(config: Dict[str, Any], env: Dict[str, str], prefix: st
                 next_val = {}
                 cur[part] = next_val
             cur = next_val
-        leaf = path[-1]
-        parsed: Any = value
-        for cast in (int, float):
-            try:
-                parsed = cast(value)
-                break
-            except ValueError:
-                continue
-        if value.lower() in {"true", "false"}:
-            parsed = value.lower() == "true"
-        cur[leaf] = parsed
+        cur[path[-1]] = parse_env_override(value)
     return updated
 
 
 def validate_resolved_config(config: Dict[str, Any]) -> None:
-    walls = config["omega"]["walls"]
-    if walls != [
-        "override_instructions",
-        "secret_exfiltration",
-        "tool_or_action_abuse",
-        "policy_evasion",
-    ]:
-        raise ValueError("Wall ordering mismatch with v1 contract")
-
-    gamma_omega = config["omega"]["attribution"]["gamma"]
-    gamma_policy = config["off_policy"]["block"]["gamma"]
-    if abs(float(gamma_omega) - float(gamma_policy)) > 1e-9:
-        raise ValueError("gamma mismatch between omega.attribution and off_policy.block")
-
-    enforcement_mode = str(config["off_policy"].get("enforcement_mode", "ENFORCE")).upper()
-    if enforcement_mode not in {"ENFORCE", "LOG_ONLY"}:
-        raise ValueError("off_policy.enforcement_mode must be ENFORCE or LOG_ONLY")
-    control_outcome_cfg = (config.get("off_policy", {}) or {}).get("control_outcome", {}) or {}
-    if control_outcome_cfg and not isinstance(control_outcome_cfg, dict):
-        raise ValueError("off_policy.control_outcome must be a mapping")
-    if isinstance(control_outcome_cfg, dict) and control_outcome_cfg:
-        warn_cfg = control_outcome_cfg.get("warn", {}) or {}
-        if warn_cfg and not isinstance(warn_cfg, dict):
-            raise ValueError("off_policy.control_outcome.warn must be a mapping")
-        if isinstance(warn_cfg, dict) and warn_cfg:
-            _ = bool(warn_cfg.get("enabled", False))
-            if not str(warn_cfg.get("target", "SESSION")).strip():
-                raise ValueError("off_policy.control_outcome.warn.target must be non-empty")
-            if float(warn_cfg.get("max_p_gte", 0.0)) < 0.0:
-                raise ValueError("off_policy.control_outcome.warn.max_p_gte must be >= 0")
-            if float(warn_cfg.get("sum_m_next_gte", 0.0)) < 0.0:
-                raise ValueError("off_policy.control_outcome.warn.sum_m_next_gte must be >= 0")
-        req_cfg = control_outcome_cfg.get("require_approval", {}) or {}
-        if req_cfg and not isinstance(req_cfg, dict):
-            raise ValueError("off_policy.control_outcome.require_approval must be a mapping")
-        if isinstance(req_cfg, dict) and req_cfg:
-            _ = bool(req_cfg.get("enabled", False))
-            _ = bool(req_cfg.get("on_off", True))
-            _ = bool(req_cfg.get("on_warn", True))
-            tools = req_cfg.get("tools", [])
-            if not isinstance(tools, list):
-                raise ValueError("off_policy.control_outcome.require_approval.tools must be a list")
-            if int(req_cfg.get("horizon_steps", 0)) < 0:
-                raise ValueError("off_policy.control_outcome.require_approval.horizon_steps must be >= 0")
-    incident_artifact_cfg = (config.get("off_policy", {}) or {}).get("incident_artifact", {}) or {}
-    if incident_artifact_cfg and not isinstance(incident_artifact_cfg, dict):
-        raise ValueError("off_policy.incident_artifact must be a mapping")
-    if isinstance(incident_artifact_cfg, dict) and incident_artifact_cfg:
-        _ = bool(incident_artifact_cfg.get("enabled", False))
-        _ = bool(incident_artifact_cfg.get("include_timeline", True))
-        emit_for = incident_artifact_cfg.get("emit_for_outcomes", [])
-        if emit_for is not None and not isinstance(emit_for, list):
-            raise ValueError("off_policy.incident_artifact.emit_for_outcomes must be a list")
+    # Wave A/B/C split: keep facade entrypoint stable while delegating by domain.
+    validate_off_policy_config(config)
 
     source_policy = config.get("source_policy", {})
     default_trust = source_policy.get("default_trust", "untrusted")
@@ -191,35 +177,10 @@ def validate_resolved_config(config: Dict[str, Any]) -> None:
     if default_trust not in valid_trust:
         raise ValueError("source_policy.default_trust must be trusted|semi|semi_trusted|untrusted")
 
-    tools_cfg = config.get("tools", {})
-    execution_mode = str(tools_cfg.get("execution_mode", "ENFORCE")).upper()
-    if execution_mode not in {"ENFORCE", "DRY_RUN"}:
-        raise ValueError("tools.execution_mode must be ENFORCE or DRY_RUN")
-    arg_validation_cfg = tools_cfg.get("arg_validation", {}) or {}
-    if arg_validation_cfg and not isinstance(arg_validation_cfg, dict):
-        raise ValueError("tools.arg_validation must be a mapping")
-    if isinstance(arg_validation_cfg, dict) and arg_validation_cfg:
-        _ = bool(arg_validation_cfg.get("enabled", True))
-        fail_mode = str(arg_validation_cfg.get("fail_mode", "deny")).strip().lower()
-        if fail_mode != "deny":
-            raise ValueError("tools.arg_validation.fail_mode must be deny")
-        shell_patterns = arg_validation_cfg.get("shell_like_name_patterns", [])
-        if shell_patterns is not None and not isinstance(shell_patterns, list):
-            raise ValueError("tools.arg_validation.shell_like_name_patterns must be a list")
-        net_cfg = arg_validation_cfg.get("network_post", {}) or {}
-        wr_cfg = arg_validation_cfg.get("write_file", {}) or {}
-        sh_cfg = arg_validation_cfg.get("shell_like", {}) or {}
-        for key in ("max_payload_bytes", "max_headers", "max_header_key_chars", "max_header_value_chars"):
-            if int(net_cfg.get(key, 1)) <= 0:
-                raise ValueError(f"tools.arg_validation.network_post.{key} must be > 0")
-        for key in ("max_filename_chars", "max_content_bytes"):
-            if int(wr_cfg.get(key, 1)) <= 0:
-                raise ValueError(f"tools.arg_validation.write_file.{key} must be > 0")
-        if int(sh_cfg.get("max_command_chars", 1)) <= 0:
-            raise ValueError("tools.arg_validation.shell_like.max_command_chars must be > 0")
-        destructive_patterns = sh_cfg.get("destructive_patterns", [])
-        if destructive_patterns is not None and not isinstance(destructive_patterns, list):
-            raise ValueError("tools.arg_validation.shell_like.destructive_patterns must be a list")
+    validate_tools_config(config)
+    validate_effects_config(config)
+    validate_runtime_integrity_config(config)
+    validate_skillbox_config(config)
 
     runtime_cfg = config.get("runtime", {}) or {}
     if runtime_cfg and not isinstance(runtime_cfg, dict):
@@ -227,6 +188,15 @@ def validate_resolved_config(config: Dict[str, Any]) -> None:
     guard_mode = str(runtime_cfg.get("guard_mode", "enforce")).strip().lower()
     if guard_mode not in {"enforce", "monitor"}:
         raise ValueError("runtime.guard_mode must be enforce|monitor")
+    required_components = runtime_cfg.get("required_components", [])
+    if not isinstance(required_components, list):
+        raise ValueError("runtime.required_components must be a list")
+    allowed_required_components = {"attachments", "vision"}
+    for idx, component in enumerate(required_components):
+        if str(component) not in allowed_required_components:
+            raise ValueError(
+                f"runtime.required_components[{idx}] must be attachments|vision"
+            )
 
     monitoring_cfg = config.get("monitoring", {}) or {}
     if monitoring_cfg and not isinstance(monitoring_cfg, dict):
@@ -285,17 +255,35 @@ def validate_resolved_config(config: Dict[str, Any]) -> None:
             _ = bool(structured_cfg.get("json_output", True))
             _ = bool(structured_cfg.get("validate", True))
 
-    cross_session_cfg = config.get("off_policy", {}).get("cross_session", {})
-    if cross_session_cfg:
-        backend = str(cross_session_cfg.get("backend", "sqlite")).lower()
-        if backend != "sqlite":
-            raise ValueError("off_policy.cross_session.backend must be sqlite in v1")
-        decay_mode = str(cross_session_cfg.get("decay", {}).get("mode", "exponential")).lower()
-        if decay_mode != "exponential":
-            raise ValueError("off_policy.cross_session.decay.mode must be exponential in v1")
-        half_life = float(cross_session_cfg.get("decay", {}).get("half_life_steps", 120))
-        if half_life <= 0:
-            raise ValueError("off_policy.cross_session.decay.half_life_steps must be > 0")
+    deployment_cfg = config.get("deployment", {}) or {}
+    if deployment_cfg:
+        if not isinstance(deployment_cfg, dict):
+            raise ValueError("deployment must be a mapping")
+        mode = str(deployment_cfg.get("mode", "library")).strip().lower()
+        if mode not in {"library", "customer_self_hosted", "container", "sidecar"}:
+            raise ValueError("deployment.mode must be library|customer_self_hosted|container|sidecar")
+        data_dir = str(deployment_cfg.get("data_dir", "")).strip()
+        if mode == "customer_self_hosted" and not data_dir:
+            raise ValueError("deployment.data_dir is required for customer_self_hosted mode")
+        if bool(deployment_cfg.get("require_absolute_data_dir", False)) and data_dir:
+            data_path = Path(data_dir).expanduser()
+            posix_data_path = PurePosixPath(data_dir)
+            if not data_path.is_absolute() and not posix_data_path.is_absolute():
+                raise ValueError("deployment.data_dir must be absolute")
+            if data_path in {Path('/'), Path('/proc'), Path('/sys'), Path('/dev')} or posix_data_path in {
+                PurePosixPath("/"),
+                PurePosixPath("/proc"),
+                PurePosixPath("/sys"),
+                PurePosixPath("/dev"),
+            }:
+                raise ValueError("deployment.data_dir points to an unsafe filesystem root")
+        required_subdirs = deployment_cfg.get("required_subdirs", [])
+        if not isinstance(required_subdirs, list):
+            raise ValueError("deployment.required_subdirs must be a list")
+        allowed_subdirs = {"state", "logs", "audit", "replay", "backups", "tmp", "control-plane"}
+        unknown_subdirs = [str(x) for x in required_subdirs if str(x) not in allowed_subdirs]
+        if unknown_subdirs:
+            raise ValueError("deployment.required_subdirs contains unsupported values")
 
     retriever_cfg = config.get("retriever", {})
     if retriever_cfg:
@@ -336,245 +324,62 @@ def validate_resolved_config(config: Dict[str, Any]) -> None:
                         raise ValueError(f"retriever.sqlite_fts.attachments.zip.{key} must be > 0")
                 _ = bool(zip_cfg.get("enabled", False))
                 _ = bool(zip_cfg.get("allow_encrypted", False))
+            ocr_cfg = attachments_cfg.get("ocr", {}) or {}
+            if ocr_cfg and not isinstance(ocr_cfg, dict):
+                raise ValueError("retriever.sqlite_fts.attachments.ocr must be a mapping")
+            if isinstance(ocr_cfg, dict) and ocr_cfg:
+                enabled = str(ocr_cfg.get("enabled", "auto")).strip().lower()
+                if enabled not in {"auto", "true", "false"}:
+                    raise ValueError("retriever.sqlite_fts.attachments.ocr.enabled must be auto|true|false")
+                provider = str(ocr_cfg.get("provider", "rapidocr")).strip().lower()
+                if provider not in {"paddleocr", "rapidocr"}:
+                    raise ValueError("retriever.sqlite_fts.attachments.ocr.provider must be rapidocr|paddleocr")
+                execution_mode = str(ocr_cfg.get("execution_mode", "inline")).strip().lower()
+                if execution_mode not in {"inline", "persistent_worker"}:
+                    raise ValueError("retriever.sqlite_fts.attachments.ocr.execution_mode must be inline|persistent_worker")
+                if execution_mode == "persistent_worker" and provider != "rapidocr":
+                    raise ValueError("persistent OCR worker currently supports rapidocr only")
+                if "prewarm" in ocr_cfg and type(ocr_cfg.get("prewarm")) is not bool:
+                    raise ValueError("retriever.sqlite_fts.attachments.ocr.prewarm must be boolean")
+                if float(ocr_cfg.get("worker_startup_timeout_sec", 25.0)) <= 0:
+                    raise ValueError("retriever.sqlite_fts.attachments.ocr.worker_startup_timeout_sec must be > 0")
+                if float(ocr_cfg.get("worker_request_timeout_sec", 15.0)) <= 0:
+                    raise ValueError("retriever.sqlite_fts.attachments.ocr.worker_request_timeout_sec must be > 0")
+                if int(ocr_cfg.get("worker_max_memory_mb", 2048)) < 256:
+                    raise ValueError("retriever.sqlite_fts.attachments.ocr.worker_max_memory_mb must be >= 256")
+                if int(ocr_cfg.get("worker_max_requests", 500)) < 1:
+                    raise ValueError("retriever.sqlite_fts.attachments.ocr.worker_max_requests must be >= 1")
+                pool_size = int(ocr_cfg.get("worker_pool_size", 1))
+                if pool_size < 1 or pool_size > 8:
+                    raise ValueError("retriever.sqlite_fts.attachments.ocr.worker_pool_size must be in [1,8]")
+                max_pending = int(ocr_cfg.get("worker_max_pending_requests", 2))
+                if max_pending < 0 or max_pending > 128:
+                    raise ValueError("retriever.sqlite_fts.attachments.ocr.worker_max_pending_requests must be in [0,128]")
+                if float(ocr_cfg.get("worker_queue_timeout_sec", 1.0)) <= 0:
+                    raise ValueError("retriever.sqlite_fts.attachments.ocr.worker_queue_timeout_sec must be > 0")
+                if not str(ocr_cfg.get("lang", "en")).strip():
+                    raise ValueError("retriever.sqlite_fts.attachments.ocr.lang must be non-empty")
+                _ = bool(ocr_cfg.get("use_angle_cls", True))
+                if int(ocr_cfg.get("max_text_chars", 1)) <= 0:
+                    raise ValueError("retriever.sqlite_fts.attachments.ocr.max_text_chars must be > 0")
+                if int(ocr_cfg.get("max_spans_per_chunk", 1)) <= 0:
+                    raise ValueError("retriever.sqlite_fts.attachments.ocr.max_spans_per_chunk must be > 0")
+                min_confidence = float(ocr_cfg.get("min_confidence", 0.50))
+                if min_confidence < 0.0 or min_confidence > 1.0:
+                    raise ValueError("retriever.sqlite_fts.attachments.ocr.min_confidence must be in [0,1]")
+                if int(ocr_cfg.get("max_spans", 1)) <= 0:
+                    raise ValueError("retriever.sqlite_fts.attachments.ocr.max_spans must be > 0")
+                if int(ocr_cfg.get("max_span_chars", 1)) <= 0:
+                    raise ValueError("retriever.sqlite_fts.attachments.ocr.max_span_chars must be > 0")
+                if float(ocr_cfg.get("min_polygon_area_px", 0.0)) < 0.0:
+                    raise ValueError("retriever.sqlite_fts.attachments.ocr.min_polygon_area_px must be >= 0")
+                _ = bool(ocr_cfg.get("require_geometry", True))
+                failure_policy = str(ocr_cfg.get("failure_policy", "degrade")).strip().lower()
+                if failure_policy not in {"degrade", "quarantine", "fail_closed"}:
+                    raise ValueError("retriever.sqlite_fts.attachments.ocr.failure_policy must be degrade|quarantine|fail_closed")
 
-    api_cfg = config.get("api", {}) or {}
-    if api_cfg:
-        host = str(api_cfg.get("host", "127.0.0.1")).strip()
-        if not host:
-            raise ValueError("api.host must be non-empty")
-        port = int(api_cfg.get("port", 8080))
-        if port <= 0 or port > 65535:
-            raise ValueError("api.port must be in 1..65535")
-        auth_cfg = api_cfg.get("auth", {}) or {}
-        if auth_cfg and not isinstance(auth_cfg, dict):
-            raise ValueError("api.auth must be a mapping")
-        api_keys = auth_cfg.get("api_keys", [])
-        if not isinstance(api_keys, list):
-            raise ValueError("api.auth.api_keys must be a list")
-        _ = bool(auth_cfg.get("require_hmac", True))
-        hmac_secret_env = str(auth_cfg.get("hmac_secret_env", "OMEGA_API_HMAC_SECRET")).strip()
-        if not hmac_secret_env:
-            raise ValueError("api.auth.hmac_secret_env must be non-empty")
-        hmac_headers = auth_cfg.get("hmac_headers", {}) or {}
-        if hmac_headers and not isinstance(hmac_headers, dict):
-            raise ValueError("api.auth.hmac_headers must be a mapping")
-        for key in ("signature", "timestamp", "nonce"):
-            if not str(hmac_headers.get(key, f"X-{key.title()}")).strip():
-                raise ValueError(f"api.auth.hmac_headers.{key} must be non-empty")
-        if int(auth_cfg.get("max_clock_skew_sec", 300)) <= 0:
-            raise ValueError("api.auth.max_clock_skew_sec must be > 0")
-        if int(auth_cfg.get("replay_nonce_ttl_sec", 600)) <= 0:
-            raise ValueError("api.auth.replay_nonce_ttl_sec must be > 0")
-        if int(auth_cfg.get("replay_cache_max_entries", 100000)) <= 0:
-            raise ValueError("api.auth.replay_cache_max_entries must be > 0")
-        security_cfg = api_cfg.get("security", {}) or {}
-        if security_cfg and not isinstance(security_cfg, dict):
-            raise ValueError("api.security must be a mapping")
-        transport_mode = str(security_cfg.get("transport_mode", "proxy_tls")).strip().lower()
-        if transport_mode not in {"proxy_tls", "disabled"}:
-            raise ValueError("api.security.transport_mode must be proxy_tls|disabled")
-        _ = bool(security_cfg.get("require_https", True))
-        limits_cfg = api_cfg.get("limits", {}) or {}
-        if limits_cfg and not isinstance(limits_cfg, dict):
-            raise ValueError("api.limits must be a mapping")
-        if int(limits_cfg.get("max_file_bytes", 20 * 1024 * 1024)) <= 0:
-            raise ValueError("api.limits.max_file_bytes must be > 0")
-        if int(limits_cfg.get("max_extracted_text_chars", 200_000)) <= 0:
-            raise ValueError("api.limits.max_extracted_text_chars must be > 0")
-        if int(limits_cfg.get("request_timeout_sec", 15)) <= 0:
-            raise ValueError("api.limits.request_timeout_sec must be > 0")
-        logging_cfg = api_cfg.get("logging", {}) or {}
-        if logging_cfg and not isinstance(logging_cfg, dict):
-            raise ValueError("api.logging must be a mapping")
-        _ = bool(logging_cfg.get("enabled", True))
-        _ = bool(logging_cfg.get("include_policy_trace", True))
-        debug_cfg = api_cfg.get("debug", {}) or {}
-        if debug_cfg and not isinstance(debug_cfg, dict):
-            raise ValueError("api.debug must be a mapping")
-        _ = bool(debug_cfg.get("enable_document_scan_report", False))
-        if int(debug_cfg.get("max_report_chunks", 200)) <= 0:
-            raise ValueError("api.debug.max_report_chunks must be > 0")
-        chunk_cfg = api_cfg.get("chunk_pipeline", {}) or {}
-        if chunk_cfg and not isinstance(chunk_cfg, dict):
-            raise ValueError("api.chunk_pipeline must be a mapping")
-        if isinstance(chunk_cfg, dict) and chunk_cfg:
-            wall_thr = float(chunk_cfg.get("wall_trigger_threshold", 0.12))
-            if wall_thr < 0.0 or wall_thr > 1.0:
-                raise ValueError("api.chunk_pipeline.wall_trigger_threshold must be in [0,1]")
-            for key in ("worst_weight", "synergy_weight", "confidence_weight"):
-                if float(chunk_cfg.get(key, 0.0)) < 0.0:
-                    raise ValueError(f"api.chunk_pipeline.{key} must be >= 0")
-            for key in (
-                "synergy_pair_bonus",
-                "synergy_multiwall_bonus",
-                "synergy_pattern_bonus",
-                "confidence_margin",
-                "confidence_support_threshold",
-            ):
-                if float(chunk_cfg.get(key, 0.0)) < 0.0:
-                    raise ValueError(f"api.chunk_pipeline.{key} must be >= 0")
-            if int(chunk_cfg.get("confidence_support_chunks", 1)) <= 0:
-                raise ValueError("api.chunk_pipeline.confidence_support_chunks must be > 0")
-            if int(chunk_cfg.get("top_chunks_limit", 1)) <= 0:
-                raise ValueError("api.chunk_pipeline.top_chunks_limit must be > 0")
-            synergy_pairs = chunk_cfg.get("synergy_pairs", [])
-            if synergy_pairs is not None and not isinstance(synergy_pairs, list):
-                raise ValueError("api.chunk_pipeline.synergy_pairs must be a list")
-            if isinstance(synergy_pairs, list):
-                for idx, pair in enumerate(synergy_pairs):
-                    if not isinstance(pair, list) or len(pair) != 2:
-                        raise ValueError(f"api.chunk_pipeline.synergy_pairs[{idx}] must be [wall_a, wall_b]")
-        policy_mapper_cfg = api_cfg.get("policy_mapper", {}) or {}
-        if policy_mapper_cfg and not isinstance(policy_mapper_cfg, dict):
-            raise ValueError("api.policy_mapper must be a mapping")
-        if isinstance(policy_mapper_cfg, dict) and policy_mapper_cfg:
-            for key in (
-                "block_score_threshold",
-                "quarantine_score_threshold",
-                "quarantine_worst_threshold",
-                "quarantine_synergy_threshold",
-                "exfil_block_wall_threshold",
-                "confidence_block_threshold",
-            ):
-                value = float(policy_mapper_cfg.get(key, 0.0))
-                if value < 0.0 or value > 1.0:
-                    raise ValueError(f"api.policy_mapper.{key} must be in [0,1]")
-            hgl_cfg = policy_mapper_cfg.get("hallucination_guard_lite", {}) or {}
-            if hgl_cfg and not isinstance(hgl_cfg, dict):
-                raise ValueError("api.policy_mapper.hallucination_guard_lite must be a mapping")
-            if isinstance(hgl_cfg, dict) and hgl_cfg:
-                _ = bool(hgl_cfg.get("enabled", False))
-                bands = hgl_cfg.get("apply_when_source_trust", ["untrusted", "mixed"])
-                if bands is not None and not isinstance(bands, list):
-                    raise ValueError("api.policy_mapper.hallucination_guard_lite.apply_when_source_trust must be a list")
-                valid_bands = {"trusted", "untrusted", "mixed"}
-                for idx, band in enumerate(list(bands or [])):
-                    norm = str(band).strip().lower()
-                    if norm == "semi":
-                        norm = "trusted"
-                    if norm == "semi_trusted":
-                        norm = "trusted"
-                    if norm not in valid_bands:
-                        raise ValueError(
-                            "api.policy_mapper.hallucination_guard_lite.apply_when_source_trust"
-                            f"[{idx}] must be trusted|untrusted|mixed"
-                        )
-                low_conf = float(hgl_cfg.get("low_confidence_lte", 0.35))
-                if low_conf < 0.0 or low_conf > 1.0:
-                    raise ValueError("api.policy_mapper.hallucination_guard_lite.low_confidence_lte must be in [0,1]")
-                _ = bool(hgl_cfg.get("only_if_intended_allow", True))
-                soft_q_cfg = hgl_cfg.get("soft_quarantine", {}) or {}
-                if soft_q_cfg and not isinstance(soft_q_cfg, dict):
-                    raise ValueError("api.policy_mapper.hallucination_guard_lite.soft_quarantine must be a mapping")
-                if isinstance(soft_q_cfg, dict) and soft_q_cfg:
-                    _ = bool(soft_q_cfg.get("enabled", False))
-                    _ = bool(soft_q_cfg.get("mixed_only", True))
-                    very_low = float(soft_q_cfg.get("very_low_confidence_lte", 0.20))
-                    if very_low < 0.0 or very_low > 1.0:
-                        raise ValueError(
-                            "api.policy_mapper.hallucination_guard_lite.soft_quarantine.very_low_confidence_lte "
-                            "must be in [0,1]"
-                        )
-                    pattern_synergy = float(soft_q_cfg.get("pattern_synergy_gte", 0.30))
-                    if pattern_synergy < 0.0 or pattern_synergy > 1.0:
-                        raise ValueError(
-                            "api.policy_mapper.hallucination_guard_lite.soft_quarantine.pattern_synergy_gte "
-                            "must be in [0,1]"
-                        )
-        att_cfg = api_cfg.get("attestation", {}) or {}
-        if att_cfg and not isinstance(att_cfg, dict):
-            raise ValueError("api.attestation must be a mapping")
-        if bool(att_cfg.get("enabled", False)):
-            fmt = str(att_cfg.get("format", "jws")).strip().lower()
-            if fmt != "jws":
-                raise ValueError("api.attestation.format must be jws")
-            alg = str(att_cfg.get("alg", "RS256")).strip().upper()
-            if alg != "RS256":
-                raise ValueError("api.attestation.alg must be RS256")
-            if not str(att_cfg.get("kid", "omega-attestation-v1")).strip():
-                raise ValueError("api.attestation.kid must be non-empty")
-            if not str(att_cfg.get("private_key_pem_env", "OMEGA_API_ATTESTATION_PRIVATE_KEY")).strip():
-                raise ValueError("api.attestation.private_key_pem_env must be non-empty")
-            if int(att_cfg.get("exp_sec", 300)) <= 0:
-                raise ValueError("api.attestation.exp_sec must be > 0")
-        incident_export_cfg = api_cfg.get("incident_export", {}) or {}
-        if incident_export_cfg and not isinstance(incident_export_cfg, dict):
-            raise ValueError("api.incident_export must be a mapping")
-        if isinstance(incident_export_cfg, dict) and incident_export_cfg:
-            _ = bool(incident_export_cfg.get("enabled", False))
-            if not str(incident_export_cfg.get("contract_version", "1.0")).strip():
-                raise ValueError("api.incident_export.contract_version must be non-empty")
-            default_env = str(incident_export_cfg.get("default_environment", "staging")).strip().lower()
-            if default_env not in {"dev", "staging", "prod"}:
-                raise ValueError("api.incident_export.default_environment must be dev|staging|prod")
-            if int(incident_export_cfg.get("retention_days", 30)) <= 0:
-                raise ValueError("api.incident_export.retention_days must be > 0")
-            store_cfg = incident_export_cfg.get("store", {}) or {}
-            if store_cfg and not isinstance(store_cfg, dict):
-                raise ValueError("api.incident_export.store must be a mapping")
-            if not str(store_cfg.get("sqlite_path", "artifacts/state/incident_export.db")).strip():
-                raise ValueError("api.incident_export.store.sqlite_path must be non-empty")
-            auth_cfg_ie = incident_export_cfg.get("auth", {}) or {}
-            if auth_cfg_ie and not isinstance(auth_cfg_ie, dict):
-                raise ValueError("api.incident_export.auth must be a mapping")
-            if not str(auth_cfg_ie.get("key_store_path", "artifacts/state/incident_export_keys.db")).strip():
-                raise ValueError("api.incident_export.auth.key_store_path must be non-empty")
-            if not str(auth_cfg_ie.get("required_scope", "incidents:read")).strip():
-                raise ValueError("api.incident_export.auth.required_scope must be non-empty")
-            rl_cfg = incident_export_cfg.get("rate_limit", {}) or {}
-            if rl_cfg and not isinstance(rl_cfg, dict):
-                raise ValueError("api.incident_export.rate_limit must be a mapping")
-            if int(rl_cfg.get("rpm", 60)) <= 0:
-                raise ValueError("api.incident_export.rate_limit.rpm must be > 0")
-            if int(rl_cfg.get("burst", 10)) <= 0:
-                raise ValueError("api.incident_export.rate_limit.burst must be > 0")
-            cors_cfg = incident_export_cfg.get("cors", {}) or {}
-            if cors_cfg and not isinstance(cors_cfg, dict):
-                raise ValueError("api.incident_export.cors must be a mapping")
-            allowed_origins = cors_cfg.get("allowed_origins", [])
-            if allowed_origins is not None and not isinstance(allowed_origins, list):
-                raise ValueError("api.incident_export.cors.allowed_origins must be a list")
-        incident_replay_cfg = api_cfg.get("incident_replay", {}) or {}
-        if incident_replay_cfg and not isinstance(incident_replay_cfg, dict):
-            raise ValueError("api.incident_replay must be a mapping")
-        if isinstance(incident_replay_cfg, dict) and incident_replay_cfg:
-            _ = bool(incident_replay_cfg.get("enabled", False))
-            if not str(incident_replay_cfg.get("contract_version", "1.0.0")).strip():
-                raise ValueError("api.incident_replay.contract_version must be non-empty")
-            if int(incident_replay_cfg.get("download_ttl_hours", 24)) <= 0:
-                raise ValueError("api.incident_replay.download_ttl_hours must be > 0")
-            if int(incident_replay_cfg.get("job_ttl_hours", 72)) <= 0:
-                raise ValueError("api.incident_replay.job_ttl_hours must be > 0")
-            max_steps = int(incident_replay_cfg.get("max_steps", 50))
-            if max_steps <= 0 or max_steps > 50:
-                raise ValueError("api.incident_replay.max_steps must be in 1..50")
-            store_cfg = incident_replay_cfg.get("store", {}) or {}
-            if store_cfg and not isinstance(store_cfg, dict):
-                raise ValueError("api.incident_replay.store must be a mapping")
-            if not str(store_cfg.get("sqlite_path", "artifacts/state/incident_replay.db")).strip():
-                raise ValueError("api.incident_replay.store.sqlite_path must be non-empty")
-            package_cfg = incident_replay_cfg.get("package_storage", {}) or {}
-            if package_cfg and not isinstance(package_cfg, dict):
-                raise ValueError("api.incident_replay.package_storage must be a mapping")
-            if not str(package_cfg.get("path", "artifacts/replay/packages")).strip():
-                raise ValueError("api.incident_replay.package_storage.path must be non-empty")
-            if not str(package_cfg.get("encryption_key_env", "OMEGA_REPLAY_ENCRYPTION_KEY")).strip():
-                raise ValueError("api.incident_replay.package_storage.encryption_key_env must be non-empty")
-            worker_cfg = incident_replay_cfg.get("worker", {}) or {}
-            if worker_cfg and not isinstance(worker_cfg, dict):
-                raise ValueError("api.incident_replay.worker must be a mapping")
-            if int(worker_cfg.get("max_concurrent_jobs", 4)) <= 0:
-                raise ValueError("api.incident_replay.worker.max_concurrent_jobs must be > 0")
-            auth_cfg_ir = incident_replay_cfg.get("auth", {}) or {}
-            if auth_cfg_ir and not isinstance(auth_cfg_ir, dict):
-                raise ValueError("api.incident_replay.auth must be a mapping")
-            scopes_cfg = auth_cfg_ir.get("required_scopes", {}) or {}
-            if scopes_cfg and not isinstance(scopes_cfg, dict):
-                raise ValueError("api.incident_replay.auth.required_scopes must be a mapping")
-            if not str(scopes_cfg.get("read", "incidents:replay:read")).strip():
-                raise ValueError("api.incident_replay.auth.required_scopes.read must be non-empty")
-            if not str(scopes_cfg.get("raw", "incidents:replay:raw")).strip():
-                raise ValueError("api.incident_replay.auth.required_scopes.raw must be non-empty")
+    validate_production_profile_contract(config)
+    validate_api_config(config)
 
     notifications_cfg = config.get("notifications", {}) or {}
     if notifications_cfg:
@@ -692,107 +497,10 @@ def validate_resolved_config(config: Dict[str, Any]) -> None:
             if types and not isinstance(types, list):
                 raise ValueError("notifications.webhook.types must be a list")
 
-    telemetry_cfg = config.get("telemetry", {}) or {}
-    if telemetry_cfg and not isinstance(telemetry_cfg, dict):
-        raise ValueError("telemetry must be a mapping")
-    if isinstance(telemetry_cfg, dict) and telemetry_cfg:
-        _ = bool(telemetry_cfg.get("enabled", True))
-        if not str(telemetry_cfg.get("endpoint", "https://telemetry.omega-walls.io/v1/collect")).strip():
-            raise ValueError("telemetry.endpoint must be non-empty")
-        if int(telemetry_cfg.get("interval_hours", 24)) <= 0:
-            raise ValueError("telemetry.interval_hours must be > 0")
-        if int(telemetry_cfg.get("max_batch_kb", 50)) <= 0:
-            raise ValueError("telemetry.max_batch_kb must be > 0")
-        retry_schedule = telemetry_cfg.get("retry_schedule_sec", [60, 300, 900])
-        if not isinstance(retry_schedule, list) or not retry_schedule:
-            raise ValueError("telemetry.retry_schedule_sec must be a non-empty list")
-        for idx, raw in enumerate(list(retry_schedule)):
-            if int(raw) <= 0:
-                raise ValueError(f"telemetry.retry_schedule_sec[{idx}] must be > 0")
-        tier = str(telemetry_cfg.get("tier", "oss")).strip().lower()
-        if tier not in {"oss", "enterprise"}:
-            raise ValueError("telemetry.tier must be oss|enterprise")
-        deployment_mode = str(telemetry_cfg.get("deployment_mode", "auto")).strip().lower()
-        if deployment_mode not in {"auto", "lib", "sidecar", "gateway"}:
-            raise ValueError("telemetry.deployment_mode must be auto|lib|sidecar|gateway")
-        if not str(telemetry_cfg.get("audit_log_path", "artifacts/logs/telemetry_audit.log")).strip():
-            raise ValueError("telemetry.audit_log_path must be non-empty")
-        if not str(telemetry_cfg.get("state_path", "artifacts/state/telemetry_state.json")).strip():
-            raise ValueError("telemetry.state_path must be non-empty")
-        policy_urls = telemetry_cfg.get("policy_urls", {}) or {}
-        if policy_urls and not isinstance(policy_urls, dict):
-            raise ValueError("telemetry.policy_urls must be a mapping")
-        if isinstance(policy_urls, dict):
-            for key in ("privacy", "dpa"):
-                value = policy_urls.get(key, "")
-                if value is not None and not isinstance(value, str):
-                    raise ValueError(f"telemetry.policy_urls.{key} must be a string")
-
-    bipia_cfg = config.get("bipia", {})
-    if bipia_cfg:
-        mode = str(bipia_cfg.get("mode_default", "sampled")).lower()
-        if mode not in {"sampled", "full"}:
-            raise ValueError("bipia.mode_default must be sampled|full")
-        split = str(bipia_cfg.get("split_default", "test")).lower()
-        if split != "test":
-            raise ValueError("bipia.split_default must be test in v1")
-        sampled = bipia_cfg.get("sampled", {})
-        max_contexts = int(sampled.get("max_contexts_per_task", 20))
-        max_attacks = int(sampled.get("max_attacks_per_task", 10))
-        if max_contexts <= 0:
-            raise ValueError("bipia.sampled.max_contexts_per_task must be > 0")
-        if max_attacks <= 0:
-            raise ValueError("bipia.sampled.max_attacks_per_task must be > 0")
-        thresholds = bipia_cfg.get("thresholds", {}).get("sampled", {})
-        for key in ("attack_off_rate_ge", "per_task_attack_off_rate_ge", "coverage_wall_any_ge"):
-            if float(thresholds.get(key, 0.0)) < 0.0:
-                raise ValueError(f"bipia.thresholds.sampled.{key} must be >= 0")
-
-    deepset_cfg = config.get("deepset", {})
-    if deepset_cfg:
-        mode = str(deepset_cfg.get("mode_default", "full")).lower()
-        if mode not in {"sampled", "full"}:
-            raise ValueError("deepset.mode_default must be sampled|full")
-        split = str(deepset_cfg.get("split_default", "test")).lower()
-        if split not in {"train", "test"}:
-            raise ValueError("deepset.split_default must be train|test")
-        label_attack = int(deepset_cfg.get("label_attack_value", 1))
-        if label_attack not in {0, 1}:
-            raise ValueError("deepset.label_attack_value must be 0|1")
-        sampled = deepset_cfg.get("sampled", {}) or {}
-        max_samples = int(sampled.get("max_samples", 116))
-        if max_samples <= 0:
-            raise ValueError("deepset.sampled.max_samples must be > 0")
-        thresholds = (deepset_cfg.get("thresholds", {}) or {}).get("report", {}) or {}
-        for key in ("attack_off_rate_ge", "coverage_wall_any_attack_ge", "f1_ge"):
-            val = float(thresholds.get(key, 0.0))
-            if val < 0.0 or val > 1.0:
-                raise ValueError(f"deepset.thresholds.report.{key} must be in [0,1]")
-        benign_off = float(thresholds.get("benign_off_rate_le", 1.0))
-        if benign_off < 0.0 or benign_off > 1.0:
-            raise ValueError("deepset.thresholds.report.benign_off_rate_le must be in [0,1]")
-        repro = deepset_cfg.get("reproducibility", {}) or {}
-        if int(repro.get("seed_default", 41)) < 0:
-            raise ValueError("deepset.reproducibility.seed_default must be >= 0")
-
-    release_gate_cfg = config.get("release_gate", {})
-    if release_gate_cfg:
-        gates = release_gate_cfg.get("gates", [])
-        if not isinstance(gates, list):
-            raise ValueError("release_gate.gates must be a list")
-        allowed_ops = {"eq", "ge", "le", "is_null", "not_null"}
-        for gate in gates:
-            if not isinstance(gate, dict):
-                raise ValueError("release_gate.gates entries must be mappings")
-            gate_id = str(gate.get("id", "")).strip()
-            metric = str(gate.get("metric", "")).strip()
-            op = str(gate.get("op", "")).strip().lower()
-            if not gate_id:
-                raise ValueError("release_gate gate id must be non-empty")
-            if not metric:
-                raise ValueError(f"release_gate {gate_id} metric must be non-empty")
-            if op not in allowed_ops:
-                raise ValueError(f"release_gate {gate_id} op must be one of {sorted(allowed_ops)}")
+    validate_telemetry_config(config)
+    validate_benchmark_configs(config)
+    validate_release_gate_config(config)
+    validate_licensing_config(config)
 
     pi0_cfg = config.get("pi0", {})
     fuzzy_runtime_cfg = (pi0_cfg.get("fuzzy_runtime", {}) or {})
@@ -900,163 +608,7 @@ def validate_resolved_config(config: Dict[str, Any]) -> None:
             if not isinstance(vals, list) or not vals:
                 raise ValueError(f"pi0.semantic.prototypes.guards.{key} must be a non-empty list")
 
-    projector_cfg = config.get("projector", {}) or {}
-    if projector_cfg:
-        mode = str(projector_cfg.get("mode", "pi0")).lower()
-        if mode not in {"pi0", "pitheta", "hybrid", "hybrid_api"}:
-            raise ValueError("projector.mode must be pi0|pitheta|hybrid|hybrid_api")
-        api_cfg = projector_cfg.get("api_perception", {}) or {}
-        if api_cfg:
-            provider = str(api_cfg.get("provider", "openai")).strip().lower()
-            if provider not in {"openai", "anthropic", "openai_compat"}:
-                raise ValueError("projector.api_perception.provider must be openai|anthropic|openai_compat")
-            provider_options = api_cfg.get("provider_options", {}) or {}
-            if provider_options and not isinstance(provider_options, dict):
-                raise ValueError("projector.api_perception.provider_options must be a mapping")
-            enabled = str(api_cfg.get("enabled", "auto")).lower()
-            if enabled not in {"auto", "true", "false"}:
-                raise ValueError("projector.api_perception.enabled must be auto|true|false")
-            if not str(api_cfg.get("model", "gpt-5")).strip():
-                raise ValueError("projector.api_perception.model must be non-empty")
-            default_base_url = "https://api.anthropic.com/v1" if provider == "anthropic" else "https://api.openai.com/v1"
-            if not str(api_cfg.get("base_url", default_base_url)).strip():
-                raise ValueError("projector.api_perception.base_url must be non-empty")
-            default_api_key_env = "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
-            if not str(api_cfg.get("api_key_env", default_api_key_env)).strip():
-                raise ValueError("projector.api_perception.api_key_env must be non-empty")
-            if float(api_cfg.get("timeout_sec", 30.0)) <= 0.0:
-                raise ValueError("projector.api_perception.timeout_sec must be > 0")
-            if int(api_cfg.get("max_retries", 2)) < 0:
-                raise ValueError("projector.api_perception.max_retries must be >= 0")
-            if float(api_cfg.get("backoff_sec", 0.75)) < 0.0:
-                raise ValueError("projector.api_perception.backoff_sec must be >= 0")
-            if float(api_cfg.get("retry_backoff_max_sec", 2.0)) < 0.0:
-                raise ValueError("projector.api_perception.retry_backoff_max_sec must be >= 0")
-            if float(api_cfg.get("request_deadline_sec", 20.0)) <= 0.0:
-                raise ValueError("projector.api_perception.request_deadline_sec must be > 0")
-            if int(api_cfg.get("long_text_threshold_chars", 3000)) <= 0:
-                raise ValueError("projector.api_perception.long_text_threshold_chars must be > 0")
-            if int(api_cfg.get("long_text_max_retries", 1)) < 0:
-                raise ValueError("projector.api_perception.long_text_max_retries must be >= 0")
-            short_thr = int(api_cfg.get("short_text_threshold_chars", 1200))
-            if short_thr <= 0:
-                raise ValueError("projector.api_perception.short_text_threshold_chars must be > 0")
-            _ = bool(api_cfg.get("short_prefer_chat_completions", True))
-            _ = bool(api_cfg.get("short_chat_only", True))
-            _ = bool(api_cfg.get("short_fast_path_enabled", True))
-            _ = bool(api_cfg.get("short_fast_path_skip_on_pi0_hard", True))
-            _ = bool(api_cfg.get("short_fast_path_skip_on_pi0_clean", True))
-            hard_min = float(api_cfg.get("short_fast_path_hard_min_score", 0.55))
-            clean_max = float(api_cfg.get("short_fast_path_clean_max_score", 0.0))
-            if hard_min < 0.0 or hard_min > 1.0:
-                raise ValueError("projector.api_perception.short_fast_path_hard_min_score must be in [0,1]")
-            if clean_max < 0.0 or clean_max > 1.0:
-                raise ValueError("projector.api_perception.short_fast_path_clean_max_score must be in [0,1]")
-            if clean_max > hard_min:
-                raise ValueError(
-                    "projector.api_perception.short_fast_path_clean_max_score must be <= short_fast_path_hard_min_score"
-                )
-            _ = bool(api_cfg.get("prewarm_on_init", True))
-            if float(api_cfg.get("transient_error_ttl_sec", 90.0)) < 0.0:
-                raise ValueError("projector.api_perception.transient_error_ttl_sec must be >= 0")
-            if float(api_cfg.get("responses_cooldown_sec", 60.0)) < 0.0:
-                raise ValueError("projector.api_perception.responses_cooldown_sec must be >= 0")
-            if not str(api_cfg.get("prompt_version", "api_hybrid_v1")).strip():
-                raise ValueError("projector.api_perception.prompt_version must be non-empty")
-            if "cache_path" in api_cfg and not str(api_cfg.get("cache_path", "")).strip():
-                raise ValueError("projector.api_perception.cache_path must be non-empty when provided")
-            if "error_log_path" in api_cfg and not str(api_cfg.get("error_log_path", "")).strip():
-                raise ValueError("projector.api_perception.error_log_path must be non-empty when provided")
-            orch_cfg = api_cfg.get("orchestrator", {}) or {}
-            if orch_cfg and not isinstance(orch_cfg, dict):
-                raise ValueError("projector.api_perception.orchestrator must be a mapping")
-            if isinstance(orch_cfg, dict) and orch_cfg:
-                _ = bool(orch_cfg.get("enabled", False))
-                if not str(orch_cfg.get("master_key_env", "OMEGA_MASTER_KEY")).strip():
-                    raise ValueError("projector.api_perception.orchestrator.master_key_env must be non-empty")
-                store_cfg = orch_cfg.get("store", {}) or {}
-                if store_cfg and not isinstance(store_cfg, dict):
-                    raise ValueError("projector.api_perception.orchestrator.store must be a mapping")
-                if not str(store_cfg.get("sqlite_path", "artifacts/state/provider_orchestrator.db")).strip():
-                    raise ValueError("projector.api_perception.orchestrator.store.sqlite_path must be non-empty")
-                fallback_cfg = orch_cfg.get("fallback", {}) or {}
-                if fallback_cfg and not isinstance(fallback_cfg, dict):
-                    raise ValueError("projector.api_perception.orchestrator.fallback must be a mapping")
-                mode = str(fallback_cfg.get("mode", "rule_only")).strip().lower()
-                if mode not in {"rule_only", "fail_closed"}:
-                    raise ValueError("projector.api_perception.orchestrator.fallback.mode must be rule_only|fail_closed")
-                threshold_cfg = fallback_cfg.get("threshold", {}) or {}
-                if threshold_cfg and not isinstance(threshold_cfg, dict):
-                    raise ValueError("projector.api_perception.orchestrator.fallback.threshold must be a mapping")
-                if int(threshold_cfg.get("errors", 3)) <= 0:
-                    raise ValueError("projector.api_perception.orchestrator.fallback.threshold.errors must be > 0")
-                if int(threshold_cfg.get("window_sec", 60)) <= 0:
-                    raise ValueError("projector.api_perception.orchestrator.fallback.threshold.window_sec must be > 0")
-                recovery_cfg = orch_cfg.get("recovery", {}) or {}
-                if recovery_cfg and not isinstance(recovery_cfg, dict):
-                    raise ValueError("projector.api_perception.orchestrator.recovery must be a mapping")
-                interval = int(recovery_cfg.get("healthcheck_interval_sec", 180))
-                if interval < 120 or interval > 300:
-                    raise ValueError("projector.api_perception.orchestrator.recovery.healthcheck_interval_sec must be in [120,300]")
-                alerts_cfg = orch_cfg.get("alerts", {}) or {}
-                if alerts_cfg and not isinstance(alerts_cfg, dict):
-                    raise ValueError("projector.api_perception.orchestrator.alerts must be a mapping")
-                if int(alerts_cfg.get("cooldown_sec", 900)) <= 0:
-                    raise ValueError("projector.api_perception.orchestrator.alerts.cooldown_sec must be > 0")
-                providers_cfg = orch_cfg.get("providers", [])
-                if providers_cfg and not isinstance(providers_cfg, list):
-                    raise ValueError("projector.api_perception.orchestrator.providers must be a list")
-                if isinstance(providers_cfg, list):
-                    for idx, row in enumerate(providers_cfg):
-                        if not isinstance(row, dict):
-                            raise ValueError(f"projector.api_perception.orchestrator.providers[{idx}] must be a mapping")
-                        if not str(row.get("id", "")).strip():
-                            raise ValueError(f"projector.api_perception.orchestrator.providers[{idx}].id must be non-empty")
-                        ptype = str(row.get("type", "")).strip().lower()
-                        if ptype not in {"openai", "anthropic", "openai_compat"}:
-                            raise ValueError(
-                                f"projector.api_perception.orchestrator.providers[{idx}].type must be openai|anthropic|openai_compat"
-                            )
-                        if "priority" in row and int(row.get("priority", 0)) < 0:
-                            raise ValueError(
-                                f"projector.api_perception.orchestrator.providers[{idx}].priority must be >= 0"
-                            )
-        pitheta_cfg = projector_cfg.get("pitheta", {}) or {}
-        if pitheta_cfg:
-            if int(pitheta_cfg.get("max_length", 256)) <= 0:
-                raise ValueError("projector.pitheta.max_length must be > 0")
-            if int(pitheta_cfg.get("batch_size", 8)) <= 0:
-                raise ValueError("projector.pitheta.batch_size must be > 0")
-            head_mode = str(pitheta_cfg.get("head_mode", "auto")).lower()
-            if head_mode not in {"auto", "legacy", "ordinal"}:
-                raise ValueError("projector.pitheta.head_mode must be auto|legacy|ordinal")
-            conversion_mode = str(pitheta_cfg.get("conversion_mode", "expected")).lower()
-            if conversion_mode not in {"expected", "argmax"}:
-                raise ValueError("projector.pitheta.conversion_mode must be expected|argmax")
-            pressure_map = list(pitheta_cfg.get("pressure_map", [0.0, 0.25, 0.6, 1.0]))
-            if len(pressure_map) != 4:
-                raise ValueError("projector.pitheta.pressure_map must have 4 values")
-            last = -1.0
-            for i, value in enumerate(pressure_map):
-                v = float(value)
-                if v < 0.0:
-                    raise ValueError(f"projector.pitheta.pressure_map[{i}] must be >= 0")
-                if i > 0 and v < last:
-                    raise ValueError("projector.pitheta.pressure_map must be non-decreasing")
-                last = v
-            _ = bool(pitheta_cfg.get("require_calibration", True))
-            if "calibration_file" in pitheta_cfg and not str(pitheta_cfg.get("calibration_file", "")).strip():
-                raise ValueError("projector.pitheta.calibration_file must be non-empty when provided")
-            thresholds = (pitheta_cfg.get("legacy", {}) or {}).get("wall_thresholds", pitheta_cfg.get("wall_thresholds", {})) or {}
-            for wall in (
-                "override_instructions",
-                "secret_exfiltration",
-                "tool_or_action_abuse",
-                "policy_evasion",
-            ):
-                val = float(thresholds.get(wall, 0.5))
-                if val < 0.0 or val > 1.0:
-                    raise ValueError(f"projector.pitheta.wall_thresholds.{wall} must be in [0,1]")
+    validate_projector_config(config)
 
     pitheta_train_cfg = config.get("pitheta_train", {}) or {}
     if pitheta_train_cfg:
@@ -1181,6 +733,8 @@ def load_resolved_config(
             resolved = _deep_merge(resolved, layer)
 
         profile_path = root / "profiles" / f"{profile}.yml"
+        if not profile_path.exists():
+            _raise_profile_not_found(profile=profile)
         if profile_path.exists():
             file_hashes[str(profile_path.as_posix())] = _sha256_bytes(profile_path.read_bytes())
         resolved = _deep_merge(resolved, _load_yaml(profile_path))
@@ -1192,13 +746,19 @@ def load_resolved_config(
             resolved = _deep_merge(resolved, layer)
 
         profile_layer, source, digest = _load_bundled_yaml("profiles", f"{profile}.yml")
+        if source is None:
+            profile_layer, source, digest = _load_enterprise_bundled_yaml("profiles", f"{profile}.yml")
+        if source is None:
+            _raise_profile_not_found(profile=profile)
         if source is not None and digest is not None:
             file_hashes[source] = digest
         resolved = _deep_merge(resolved, profile_layer)
 
-    resolved = _apply_env_overrides(resolved, env or os.environ)
+    env_source = env or os.environ
+    resolved = _apply_env_overrides(resolved, env_source)
     if cli_overrides:
         resolved = _deep_merge(resolved, cli_overrides)
+    resolved = expand_omega_environment(resolved, env_source)
 
     validate_resolved_config(resolved)
 
@@ -1225,4 +785,3 @@ def config_refs_from_snapshot(snapshot: ConfigSnapshot, code_commit: str = "unkn
         base = Path(path).name.replace(".yml", "")
         refs[f"{base}_sha256"] = digest
     return refs
-

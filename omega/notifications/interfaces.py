@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from omega.notifications.models import ActionRequestEvent, ApprovalDecision, ApprovalRecord, RiskEvent
 
@@ -29,6 +29,32 @@ class ApprovalStore(ABC):
 
     @abstractmethod
     def get_latest_for_session(self, *, tenant_id: str, session_id: str) -> Optional[ApprovalRecord]:
+        ...
+
+
+    @abstractmethod
+    def get_latest_for_intent(
+        self,
+        *,
+        tenant_id: str,
+        session_id: str,
+        tool_intent_id: str,
+    ) -> Optional[ApprovalRecord]:
+        ...
+
+    @abstractmethod
+    def consume_tool_approval(
+        self,
+        *,
+        approval_id: str,
+        tenant_id: str,
+        session_id: str,
+        tool_name: str,
+        tool_args_sha256: str,
+        tool_intent_id: str,
+        step: int,
+        now_iso: str,
+    ) -> Optional[ApprovalRecord]:
         ...
 
     @abstractmethod

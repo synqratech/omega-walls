@@ -16,6 +16,7 @@ if str(ROOT) not in os.sys.path:
     os.sys.path.insert(0, str(ROOT))
 
 from omega import OmegaWalls
+from omega.env_file import load_repo_env_file
 
 
 @dataclass
@@ -96,7 +97,35 @@ def _measure_loop(fn: Callable[[int], None], repeats: int) -> TimingStats:
 
 def _build_rule_guard(profile: str) -> Dict[str, object]:
     t0 = time.perf_counter()
-    guard = OmegaWalls(profile=profile, projector_mode="pi0")
+    guard = OmegaWalls(
+        profile=profile,
+        projector_mode="pi0",
+        cli_overrides={"pi0": {"semantic": {"enabled": "false"}}},
+    )
+    t1 = time.perf_counter()
+    return {"guard": guard, "init_ms": (t1 - t0) * 1000.0}
+
+
+def _build_local_semantic_guard(
+    profile: str,
+    *,
+    semantic_model_path: str,
+    semantic_device: str,
+) -> Dict[str, object]:
+    t0 = time.perf_counter()
+    guard = OmegaWalls(
+        profile=profile,
+        projector_mode="pi0",
+        cli_overrides={
+            "pi0": {
+                "semantic": {
+                    "enabled": "true",
+                    "model_path": str(semantic_model_path),
+                    "device": str(semantic_device),
+                }
+            }
+        },
+    )
     t1 = time.perf_counter()
     return {"guard": guard, "init_ms": (t1 - t0) * 1000.0}
 
@@ -138,6 +167,17 @@ def _format_row(name: str, stats: TimingStats) -> str:
     )
 
 
+def _semantic_status_from_guard(guard: OmegaWalls) -> Dict[str, object]:
+    projector = getattr(guard, "_projector", None)
+    status_fn = getattr(projector, "semantic_status", None)
+    if callable(status_fn):
+        try:
+            return dict(status_fn() or {})
+        except Exception as exc:  # noqa: BLE001
+            return {"status_error": str(exc)}
+    return {}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Latency benchmark for OmegaWalls (baseline/rule/hybrid_api).")
     parser.add_argument("--profile", default="dev")
@@ -153,9 +193,12 @@ def main() -> int:
     parser.add_argument("--hybrid-repeats-short", type=int, default=None)
     parser.add_argument("--hybrid-repeats-medium", type=int, default=None)
     parser.add_argument("--hybrid-repeats-large", type=int, default=None)
+    parser.add_argument("--semantic-model-path", default="e5-small-v2")
+    parser.add_argument("--semantic-device", default="auto")
     parser.add_argument("--artifacts-root", default="artifacts/latency_bench")
     parser.add_argument("--run-tag", default=None)
     args = parser.parse_args()
+    load_repo_env_file()
 
     run_id = str(args.run_tag or f"omega_latency_{_utc_now()}")
     out_dir = (ROOT / str(args.artifacts_root) / run_id).resolve()
@@ -184,6 +227,8 @@ def main() -> int:
         "created_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "profile": str(args.profile),
         "api_model": str(args.api_model),
+        "semantic_model_path": str(args.semantic_model_path),
+        "semantic_device": str(args.semantic_device),
         "inputs_chars": {k: len(v) for k, v in inputs.items()},
         "repeats_by_size": repeats_by_size,
         "hybrid_repeats_by_size": hybrid_repeats_by_size,
@@ -222,7 +267,39 @@ def main() -> int:
         rule_results[key] = asdict(stats)
     report["modes"]["omega_rule_only_pi0"] = {
         "init_ms": float(rule_built["init_ms"]),
+        "semantic_enabled": False,
         "per_size": rule_results,
+    }
+
+    # Local semantic (pi0 + local encoder).
+    local_semantic_built = _build_local_semantic_guard(
+        profile=str(args.profile),
+        semantic_model_path=str(args.semantic_model_path),
+        semantic_device=str(args.semantic_device),
+    )
+    local_semantic_guard: OmegaWalls = local_semantic_built["guard"]  # type: ignore[assignment]
+    local_semantic_results: Dict[str, Dict[str, float]] = {}
+    semantic_status = _semantic_status_from_guard(local_semantic_guard)
+    for key, text in inputs.items():
+        def _local_semantic(_: int, payload: str = text, size_key: str = key) -> None:
+            _ = local_semantic_guard.analyze_text(
+                payload,
+                session_id=f"lat-local-semantic-{size_key}",
+                source_id=f"latency:local-semantic:{size_key}",
+                source_type="doc",
+                trust="untrusted",
+                reset_session=True,
+            )
+
+        stats = _measure_loop(_local_semantic, int(repeats_by_size[key]))
+        local_semantic_results[key] = asdict(stats)
+    semantic_status_after = _semantic_status_from_guard(local_semantic_guard)
+    report["modes"]["omega_rule_pi0_local_semantic"] = {
+        "init_ms": float(local_semantic_built["init_ms"]),
+        "semantic_enabled": True,
+        "semantic_status_before_first_request": semantic_status,
+        "semantic_status_after_first_request": semantic_status_after,
+        "per_size": local_semantic_results,
     }
 
     # Hybrid API mode.
@@ -291,8 +368,10 @@ def main() -> int:
         print(f"\n[{size_key}] chars={len(inputs[size_key])}")
         b = TimingStats(**report["modes"]["baseline_no_omega"]["per_size"][size_key])  # type: ignore[index]
         r = TimingStats(**report["modes"]["omega_rule_only_pi0"]["per_size"][size_key])  # type: ignore[index]
+        s = TimingStats(**report["modes"]["omega_rule_pi0_local_semantic"]["per_size"][size_key])  # type: ignore[index]
         print(_format_row("baseline_no_omega", b))
         print(_format_row("omega_rule_only_pi0", r))
+        print(_format_row("omega_rule_pi0_local_semantic", s))
         hybrid = report["modes"].get("omega_hybrid_api", {})
         if isinstance(hybrid, dict) and hybrid.get("status") == "ok":
             w = TimingStats(**hybrid["per_size_warm"][size_key])  # type: ignore[index]

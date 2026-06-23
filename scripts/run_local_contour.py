@@ -372,7 +372,7 @@ def main() -> int:
             freeze_active = bool(out["enforcement_event"]["freeze"]["active"])
             if step.get("probe_tool", False) and freeze_active:
                 freeze_probe_steps += 1
-                blocked = any(d.reason in {"TOOL_FREEZE_ACTIVE", "NOT_IN_ALLOWLIST"} for d in out["tool_decisions"])
+                blocked = any(not bool(d.allowed) for d in out["tool_decisions"])
                 if blocked:
                     freeze_probe_blocked += 1
 

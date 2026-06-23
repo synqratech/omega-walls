@@ -4,10 +4,32 @@ import argparse
 import fnmatch
 import json
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+@dataclass(frozen=True)
+class IncludeEntry:
+    src: str
+    dst: str
+
+
+def _normalize_include_entry(raw: Any) -> IncludeEntry:
+    if isinstance(raw, str):
+        rel = raw.strip()
+        if not rel:
+            raise ValueError("include entries must not be empty")
+        return IncludeEntry(src=rel, dst=rel)
+    if isinstance(raw, dict):
+        src = str(raw.get("src", "")).strip()
+        dst = str(raw.get("dst", "")).strip()
+        if not src or not dst:
+            raise ValueError("include mapping entries must define non-empty src and dst")
+        return IncludeEntry(src=src, dst=dst)
+    raise ValueError("include entries must be strings or {src,dst} objects")
 
 
 def _load_manifest(path: Path) -> Dict[str, Any]:
@@ -17,7 +39,7 @@ def _load_manifest(path: Path) -> Dict[str, Any]:
     if not isinstance(include, list) or not isinstance(exclude_globs, list):
         raise ValueError("allowlist manifest must contain include[] and exclude_globs[] lists")
     return {
-        "include": [str(x) for x in include if str(x).strip()],
+        "include": [_normalize_include_entry(item) for item in include],
         "exclude_globs": [str(x) for x in exclude_globs if str(x).strip()],
     }
 
@@ -47,7 +69,7 @@ def export_allowlist(
     clean: bool = False,
 ) -> Dict[str, Any]:
     cfg = _load_manifest(manifest_path)
-    include = cfg["include"]
+    include: List[IncludeEntry] = cfg["include"]
     exclude_globs = cfg["exclude_globs"]
 
     if clean and output_dir.exists():
@@ -58,27 +80,31 @@ def export_allowlist(
     skipped: List[str] = []
     missing: List[str] = []
 
-    for rel_item in include:
-        src = (root / rel_item).resolve()
+    for entry in include:
+        src = (root / entry.src).resolve()
         if not src.exists():
-            missing.append(rel_item)
+            missing.append(entry.src)
             continue
         for src_file in _iter_files(src):
             rel = src_file.relative_to(root).as_posix()
             if _is_excluded(rel, exclude_globs):
                 skipped.append(rel)
                 continue
-            dst = output_dir / rel
+            src_suffix = src_file.relative_to(src).as_posix() if src.is_dir() else ""
+            dst_rel = Path(entry.dst)
+            if src.is_dir() and src_suffix:
+                dst_rel = dst_rel / src_suffix
+            dst = output_dir / dst_rel
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src_file, dst)
-            copied.append(rel)
+            copied.append(dst_rel.as_posix())
 
     report = {
         "event": "oss_export_allowlist_v1",
         "root": str(root.as_posix()),
         "manifest": str(manifest_path.as_posix()),
         "output_dir": str(output_dir.as_posix()),
-        "include_items": include,
+        "include_items": [{"src": item.src, "dst": item.dst} for item in include],
         "exclude_globs": exclude_globs,
         "copied_total": int(len(copied)),
         "skipped_total": int(len(skipped)),

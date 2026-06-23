@@ -1,0 +1,27 @@
+{
+  "schema_version": "benchmark_snapshot_v1",
+  "benchmark_id": "promptshield_text",
+  "frozen_run_id": "promptshield_eval_w202613_20260324T164314Z",
+  "source_report": "artifacts/promptshield_eval/promptshield_eval_w202613_20260324T164314Z/report.json",
+  "status": "ok",
+  "comparability_status": "non_comparable",
+  "comparability_reason": "No benchmark-maintainer detector leaderboard equivalence is attached to this PromptShield protocol.",
+  "metrics": {
+    "summary": {
+      "attack_off_rate": 0.48111332007952284,
+      "benign_off_rate": 0.04627766599597585,
+      "precision": 0.9132075471698113,
+      "recall": 0.48111332007952284,
+      "balanced_accuracy": 0.7174178270417735
+    },
+    "counts": {
+      "attack_total": 503,
+      "benign_total": 497,
+      "samples_total": 1000
+    }
+  },
+  "notes": [
+    "Evaluation mode is stateless per sample.",
+    "Use this track as a diagnostic reference rather than direct leaderboard ranking."
+  ]
+}

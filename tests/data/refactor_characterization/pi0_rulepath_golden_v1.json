@@ -1,0 +1,1802 @@
+{
+  "schema_version": "pi0_rulepath_golden_v1",
+  "semantic_enabled": "false",
+  "rows": [
+    {
+      "id": "POS-001",
+      "v": {
+        "override_instructions": 8.2,
+        "secret_exfiltration": 0.0,
+        "tool_or_action_abuse": 0.0,
+        "policy_evasion": 0.0
+      },
+      "polarity": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "matches": {
+        "real_override_intent": true,
+        "secret_direct_print_hit": false,
+        "tool_parameter_injection_intent": false,
+        "agent_chain_triggered": false,
+        "goal_hijack_priority_intent": false,
+        "promptshield_precedence_hijack_intent": false,
+        "promptshield_wrapper_attack_intent": false,
+        "promptshield_secret_emit_intent": false,
+        "fuzzy_scan_strategy": "full",
+        "pi0_rule_tier": {
+          "walls": {
+            "override_instructions": {
+              "hard_hit": true,
+              "soft_hit": true,
+              "hard_signals": [
+                "real_override_intent"
+              ],
+              "soft_signals": [
+                "legacy_override_score"
+              ],
+              "raw_score": 8.200000000000001
+            },
+            "secret_exfiltration": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "tool_or_action_abuse": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.4
+            },
+            "policy_evasion": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            }
+          },
+          "hard_any": true,
+          "soft_any": true
+        },
+        "guard_block_reason": "",
+        "guard_block_reasons": []
+      }
+    },
+    {
+      "id": "POS-002",
+      "v": {
+        "override_instructions": 8.2,
+        "secret_exfiltration": 0.0,
+        "tool_or_action_abuse": 0.0,
+        "policy_evasion": 0.0
+      },
+      "polarity": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "matches": {
+        "real_override_intent": true,
+        "secret_direct_print_hit": false,
+        "tool_parameter_injection_intent": false,
+        "agent_chain_triggered": false,
+        "goal_hijack_priority_intent": false,
+        "promptshield_precedence_hijack_intent": false,
+        "promptshield_wrapper_attack_intent": false,
+        "promptshield_secret_emit_intent": false,
+        "fuzzy_scan_strategy": "full",
+        "pi0_rule_tier": {
+          "walls": {
+            "override_instructions": {
+              "hard_hit": true,
+              "soft_hit": true,
+              "hard_signals": [
+                "real_override_intent"
+              ],
+              "soft_signals": [
+                "legacy_override_score"
+              ],
+              "raw_score": 8.200000000000001
+            },
+            "secret_exfiltration": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "tool_or_action_abuse": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.4
+            },
+            "policy_evasion": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            }
+          },
+          "hard_any": true,
+          "soft_any": true
+        },
+        "guard_block_reason": "",
+        "guard_block_reasons": []
+      }
+    },
+    {
+      "id": "POS-003",
+      "v": {
+        "override_instructions": 7.4,
+        "secret_exfiltration": 0.0,
+        "tool_or_action_abuse": 0.0,
+        "policy_evasion": 0.0
+      },
+      "polarity": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "matches": {
+        "real_override_intent": true,
+        "secret_direct_print_hit": false,
+        "tool_parameter_injection_intent": false,
+        "agent_chain_triggered": false,
+        "goal_hijack_priority_intent": false,
+        "promptshield_precedence_hijack_intent": false,
+        "promptshield_wrapper_attack_intent": false,
+        "promptshield_secret_emit_intent": false,
+        "fuzzy_scan_strategy": "full",
+        "pi0_rule_tier": {
+          "walls": {
+            "override_instructions": {
+              "hard_hit": true,
+              "soft_hit": true,
+              "hard_signals": [
+                "real_override_intent"
+              ],
+              "soft_signals": [
+                "legacy_override_score"
+              ],
+              "raw_score": 7.3999999999999995
+            },
+            "secret_exfiltration": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "tool_or_action_abuse": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.4
+            },
+            "policy_evasion": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            }
+          },
+          "hard_any": true,
+          "soft_any": true
+        },
+        "guard_block_reason": "",
+        "guard_block_reasons": []
+      }
+    },
+    {
+      "id": "POS-004",
+      "v": {
+        "override_instructions": 8.2,
+        "secret_exfiltration": 0.0,
+        "tool_or_action_abuse": 0.0,
+        "policy_evasion": 0.0
+      },
+      "polarity": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "matches": {
+        "real_override_intent": true,
+        "secret_direct_print_hit": false,
+        "tool_parameter_injection_intent": false,
+        "agent_chain_triggered": false,
+        "goal_hijack_priority_intent": false,
+        "promptshield_precedence_hijack_intent": false,
+        "promptshield_wrapper_attack_intent": false,
+        "promptshield_secret_emit_intent": false,
+        "fuzzy_scan_strategy": "full",
+        "pi0_rule_tier": {
+          "walls": {
+            "override_instructions": {
+              "hard_hit": true,
+              "soft_hit": true,
+              "hard_signals": [
+                "real_override_intent"
+              ],
+              "soft_signals": [
+                "legacy_override_score"
+              ],
+              "raw_score": 8.200000000000001
+            },
+            "secret_exfiltration": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "tool_or_action_abuse": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.4
+            },
+            "policy_evasion": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            }
+          },
+          "hard_any": true,
+          "soft_any": true
+        },
+        "guard_block_reason": "",
+        "guard_block_reasons": []
+      }
+    },
+    {
+      "id": "POS-005",
+      "v": {
+        "override_instructions": 9.0,
+        "secret_exfiltration": 0.0,
+        "tool_or_action_abuse": 0.0,
+        "policy_evasion": 0.0
+      },
+      "polarity": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "matches": {
+        "real_override_intent": true,
+        "secret_direct_print_hit": false,
+        "tool_parameter_injection_intent": false,
+        "agent_chain_triggered": false,
+        "goal_hijack_priority_intent": false,
+        "promptshield_precedence_hijack_intent": false,
+        "promptshield_wrapper_attack_intent": false,
+        "promptshield_secret_emit_intent": false,
+        "fuzzy_scan_strategy": "full",
+        "pi0_rule_tier": {
+          "walls": {
+            "override_instructions": {
+              "hard_hit": true,
+              "soft_hit": true,
+              "hard_signals": [
+                "real_override_intent"
+              ],
+              "soft_signals": [
+                "legacy_override_score"
+              ],
+              "raw_score": 9.0
+            },
+            "secret_exfiltration": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "tool_or_action_abuse": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.4
+            },
+            "policy_evasion": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            }
+          },
+          "hard_any": true,
+          "soft_any": true
+        },
+        "guard_block_reason": "",
+        "guard_block_reasons": []
+      }
+    },
+    {
+      "id": "POS-006",
+      "v": {
+        "override_instructions": 0.0,
+        "secret_exfiltration": 4.3,
+        "tool_or_action_abuse": 0.0,
+        "policy_evasion": 0.0
+      },
+      "polarity": [
+        0,
+        1,
+        0,
+        0
+      ],
+      "matches": {
+        "real_override_intent": false,
+        "secret_direct_print_hit": false,
+        "tool_parameter_injection_intent": false,
+        "agent_chain_triggered": false,
+        "goal_hijack_priority_intent": false,
+        "promptshield_precedence_hijack_intent": false,
+        "promptshield_wrapper_attack_intent": false,
+        "promptshield_secret_emit_intent": false,
+        "fuzzy_scan_strategy": "full",
+        "pi0_rule_tier": {
+          "walls": {
+            "override_instructions": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "secret_exfiltration": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 4.300000000000001
+            },
+            "tool_or_action_abuse": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.6
+            },
+            "policy_evasion": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            }
+          },
+          "hard_any": false,
+          "soft_any": false
+        },
+        "guard_block_reason": "",
+        "guard_block_reasons": []
+      }
+    },
+    {
+      "id": "OBF-001",
+      "v": {
+        "override_instructions": 8.2,
+        "secret_exfiltration": 0.0,
+        "tool_or_action_abuse": 0.0,
+        "policy_evasion": 0.0
+      },
+      "polarity": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "matches": {
+        "real_override_intent": true,
+        "secret_direct_print_hit": false,
+        "tool_parameter_injection_intent": false,
+        "agent_chain_triggered": false,
+        "goal_hijack_priority_intent": false,
+        "promptshield_precedence_hijack_intent": false,
+        "promptshield_wrapper_attack_intent": false,
+        "promptshield_secret_emit_intent": false,
+        "fuzzy_scan_strategy": "full",
+        "pi0_rule_tier": {
+          "walls": {
+            "override_instructions": {
+              "hard_hit": true,
+              "soft_hit": true,
+              "hard_signals": [
+                "real_override_intent"
+              ],
+              "soft_signals": [
+                "legacy_override_score"
+              ],
+              "raw_score": 8.200000000000001
+            },
+            "secret_exfiltration": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "tool_or_action_abuse": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.4
+            },
+            "policy_evasion": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            }
+          },
+          "hard_any": true,
+          "soft_any": true
+        },
+        "guard_block_reason": "",
+        "guard_block_reasons": []
+      }
+    },
+    {
+      "id": "OBF-002",
+      "v": {
+        "override_instructions": 8.2,
+        "secret_exfiltration": 0.0,
+        "tool_or_action_abuse": 0.0,
+        "policy_evasion": 0.0
+      },
+      "polarity": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "matches": {
+        "real_override_intent": true,
+        "secret_direct_print_hit": false,
+        "tool_parameter_injection_intent": false,
+        "agent_chain_triggered": false,
+        "goal_hijack_priority_intent": false,
+        "promptshield_precedence_hijack_intent": false,
+        "promptshield_wrapper_attack_intent": false,
+        "promptshield_secret_emit_intent": false,
+        "fuzzy_scan_strategy": "full",
+        "pi0_rule_tier": {
+          "walls": {
+            "override_instructions": {
+              "hard_hit": true,
+              "soft_hit": true,
+              "hard_signals": [
+                "real_override_intent"
+              ],
+              "soft_signals": [
+                "legacy_override_score"
+              ],
+              "raw_score": 8.200000000000001
+            },
+            "secret_exfiltration": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "tool_or_action_abuse": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.4
+            },
+            "policy_evasion": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            }
+          },
+          "hard_any": true,
+          "soft_any": true
+        },
+        "guard_block_reason": "",
+        "guard_block_reasons": []
+      }
+    },
+    {
+      "id": "OBF-003",
+      "v": {
+        "override_instructions": 4.7,
+        "secret_exfiltration": 0.0,
+        "tool_or_action_abuse": 0.0,
+        "policy_evasion": 0.0
+      },
+      "polarity": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "matches": {
+        "real_override_intent": false,
+        "secret_direct_print_hit": false,
+        "tool_parameter_injection_intent": false,
+        "agent_chain_triggered": false,
+        "goal_hijack_priority_intent": false,
+        "promptshield_precedence_hijack_intent": false,
+        "promptshield_wrapper_attack_intent": false,
+        "promptshield_secret_emit_intent": false,
+        "fuzzy_scan_strategy": "full",
+        "pi0_rule_tier": {
+          "walls": {
+            "override_instructions": {
+              "hard_hit": false,
+              "soft_hit": true,
+              "hard_signals": [],
+              "soft_signals": [
+                "legacy_override_score"
+              ],
+              "raw_score": 4.7
+            },
+            "secret_exfiltration": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "tool_or_action_abuse": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.6000000000000001
+            },
+            "policy_evasion": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.3
+            }
+          },
+          "hard_any": false,
+          "soft_any": true
+        },
+        "guard_block_reason": "",
+        "guard_block_reasons": []
+      }
+    },
+    {
+      "id": "OBF-004",
+      "v": {
+        "override_instructions": 7.4,
+        "secret_exfiltration": 0.0,
+        "tool_or_action_abuse": 0.0,
+        "policy_evasion": 0.0
+      },
+      "polarity": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "matches": {
+        "real_override_intent": true,
+        "secret_direct_print_hit": false,
+        "tool_parameter_injection_intent": false,
+        "agent_chain_triggered": false,
+        "goal_hijack_priority_intent": false,
+        "promptshield_precedence_hijack_intent": false,
+        "promptshield_wrapper_attack_intent": false,
+        "promptshield_secret_emit_intent": false,
+        "fuzzy_scan_strategy": "full",
+        "pi0_rule_tier": {
+          "walls": {
+            "override_instructions": {
+              "hard_hit": true,
+              "soft_hit": true,
+              "hard_signals": [
+                "real_override_intent"
+              ],
+              "soft_signals": [
+                "legacy_override_score"
+              ],
+              "raw_score": 7.3999999999999995
+            },
+            "secret_exfiltration": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "tool_or_action_abuse": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.4
+            },
+            "policy_evasion": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            }
+          },
+          "hard_any": true,
+          "soft_any": true
+        },
+        "guard_block_reason": "",
+        "guard_block_reasons": []
+      }
+    },
+    {
+      "id": "OBF-005",
+      "v": {
+        "override_instructions": 7.4,
+        "secret_exfiltration": 0.0,
+        "tool_or_action_abuse": 0.0,
+        "policy_evasion": 0.0
+      },
+      "polarity": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "matches": {
+        "real_override_intent": true,
+        "secret_direct_print_hit": false,
+        "tool_parameter_injection_intent": false,
+        "agent_chain_triggered": false,
+        "goal_hijack_priority_intent": false,
+        "promptshield_precedence_hijack_intent": false,
+        "promptshield_wrapper_attack_intent": false,
+        "promptshield_secret_emit_intent": false,
+        "fuzzy_scan_strategy": "full",
+        "pi0_rule_tier": {
+          "walls": {
+            "override_instructions": {
+              "hard_hit": true,
+              "soft_hit": true,
+              "hard_signals": [
+                "real_override_intent"
+              ],
+              "soft_signals": [
+                "legacy_override_score"
+              ],
+              "raw_score": 7.3999999999999995
+            },
+            "secret_exfiltration": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "tool_or_action_abuse": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.4
+            },
+            "policy_evasion": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            }
+          },
+          "hard_any": true,
+          "soft_any": true
+        },
+        "guard_block_reason": "",
+        "guard_block_reasons": []
+      }
+    },
+    {
+      "id": "OBF-006",
+      "v": {
+        "override_instructions": 0.0,
+        "secret_exfiltration": 4.05,
+        "tool_or_action_abuse": 0.0,
+        "policy_evasion": 0.0
+      },
+      "polarity": [
+        0,
+        1,
+        0,
+        0
+      ],
+      "matches": {
+        "real_override_intent": false,
+        "secret_direct_print_hit": false,
+        "tool_parameter_injection_intent": false,
+        "agent_chain_triggered": false,
+        "goal_hijack_priority_intent": false,
+        "promptshield_precedence_hijack_intent": false,
+        "promptshield_wrapper_attack_intent": false,
+        "promptshield_secret_emit_intent": false,
+        "fuzzy_scan_strategy": "full",
+        "pi0_rule_tier": {
+          "walls": {
+            "override_instructions": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "secret_exfiltration": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 4.050000000000001
+            },
+            "tool_or_action_abuse": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.6
+            },
+            "policy_evasion": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            }
+          },
+          "hard_any": false,
+          "soft_any": false
+        },
+        "guard_block_reason": "",
+        "guard_block_reasons": []
+      }
+    },
+    {
+      "id": "HN-001",
+      "v": {
+        "override_instructions": 0.0,
+        "secret_exfiltration": 0.0,
+        "tool_or_action_abuse": 0.0,
+        "policy_evasion": 0.0
+      },
+      "polarity": [
+        0,
+        -1,
+        0,
+        0
+      ],
+      "matches": {
+        "real_override_intent": false,
+        "secret_direct_print_hit": false,
+        "tool_parameter_injection_intent": false,
+        "agent_chain_triggered": false,
+        "goal_hijack_priority_intent": false,
+        "promptshield_precedence_hijack_intent": false,
+        "promptshield_wrapper_attack_intent": false,
+        "promptshield_secret_emit_intent": false,
+        "fuzzy_scan_strategy": "full",
+        "pi0_rule_tier": {
+          "walls": {
+            "override_instructions": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "secret_exfiltration": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.8499999999999999
+            },
+            "tool_or_action_abuse": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.6
+            },
+            "policy_evasion": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            }
+          },
+          "hard_any": false,
+          "soft_any": false
+        },
+        "guard_block_reason": "",
+        "guard_block_reasons": []
+      }
+    },
+    {
+      "id": "HN-002",
+      "v": {
+        "override_instructions": 0.0,
+        "secret_exfiltration": 0.0,
+        "tool_or_action_abuse": 0.0,
+        "policy_evasion": 0.0
+      },
+      "polarity": [
+        0,
+        -1,
+        0,
+        0
+      ],
+      "matches": {
+        "real_override_intent": false,
+        "secret_direct_print_hit": false,
+        "tool_parameter_injection_intent": false,
+        "agent_chain_triggered": false,
+        "goal_hijack_priority_intent": false,
+        "promptshield_precedence_hijack_intent": false,
+        "promptshield_wrapper_attack_intent": false,
+        "promptshield_secret_emit_intent": false,
+        "fuzzy_scan_strategy": "full",
+        "pi0_rule_tier": {
+          "walls": {
+            "override_instructions": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "secret_exfiltration": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.5999999999999999
+            },
+            "tool_or_action_abuse": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.6
+            },
+            "policy_evasion": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            }
+          },
+          "hard_any": false,
+          "soft_any": false
+        },
+        "guard_block_reason": "",
+        "guard_block_reasons": []
+      }
+    },
+    {
+      "id": "HN-003",
+      "v": {
+        "override_instructions": 0.0,
+        "secret_exfiltration": 0.0,
+        "tool_or_action_abuse": 0.0,
+        "policy_evasion": 0.0
+      },
+      "polarity": [
+        -1,
+        0,
+        0,
+        -1
+      ],
+      "matches": {
+        "real_override_intent": false,
+        "secret_direct_print_hit": false,
+        "tool_parameter_injection_intent": false,
+        "agent_chain_triggered": false,
+        "goal_hijack_priority_intent": false,
+        "promptshield_precedence_hijack_intent": false,
+        "promptshield_wrapper_attack_intent": false,
+        "promptshield_secret_emit_intent": false,
+        "fuzzy_scan_strategy": "full",
+        "pi0_rule_tier": {
+          "walls": {
+            "override_instructions": {
+              "hard_hit": false,
+              "soft_hit": true,
+              "hard_signals": [],
+              "soft_signals": [
+                "promptshield_fp_guard_blocked"
+              ],
+              "raw_score": 0.0
+            },
+            "secret_exfiltration": {
+              "hard_hit": false,
+              "soft_hit": true,
+              "hard_signals": [],
+              "soft_signals": [
+                "promptshield_fp_guard_blocked"
+              ],
+              "raw_score": 0.0
+            },
+            "tool_or_action_abuse": {
+              "hard_hit": false,
+              "soft_hit": true,
+              "hard_signals": [],
+              "soft_signals": [
+                "promptshield_fp_guard_blocked"
+              ],
+              "raw_score": 0.0
+            },
+            "policy_evasion": {
+              "hard_hit": false,
+              "soft_hit": true,
+              "hard_signals": [],
+              "soft_signals": [
+                "promptshield_fp_guard_blocked"
+              ],
+              "raw_score": 3.95
+            }
+          },
+          "hard_any": false,
+          "soft_any": true
+        },
+        "guard_block_reason": "promptshield_fp_cleanup",
+        "guard_block_reasons": [
+          "promptshield_fp_cleanup"
+        ]
+      }
+    },
+    {
+      "id": "HN-004",
+      "v": {
+        "override_instructions": 0.0,
+        "secret_exfiltration": 0.0,
+        "tool_or_action_abuse": 0.0,
+        "policy_evasion": 0.0
+      },
+      "polarity": [
+        -1,
+        0,
+        0,
+        -1
+      ],
+      "matches": {
+        "real_override_intent": true,
+        "secret_direct_print_hit": false,
+        "tool_parameter_injection_intent": false,
+        "agent_chain_triggered": false,
+        "goal_hijack_priority_intent": false,
+        "promptshield_precedence_hijack_intent": false,
+        "promptshield_wrapper_attack_intent": false,
+        "promptshield_secret_emit_intent": false,
+        "fuzzy_scan_strategy": "full",
+        "pi0_rule_tier": {
+          "walls": {
+            "override_instructions": {
+              "hard_hit": true,
+              "soft_hit": false,
+              "hard_signals": [
+                "real_override_intent"
+              ],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "secret_exfiltration": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "tool_or_action_abuse": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "policy_evasion": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            }
+          },
+          "hard_any": true,
+          "soft_any": false
+        },
+        "guard_block_reason": "quoted_override_example",
+        "guard_block_reasons": [
+          "quoted_override_example"
+        ]
+      }
+    },
+    {
+      "id": "HN-005",
+      "v": {
+        "override_instructions": 0.0,
+        "secret_exfiltration": 0.0,
+        "tool_or_action_abuse": 0.0,
+        "policy_evasion": 0.0
+      },
+      "polarity": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "matches": {
+        "real_override_intent": false,
+        "secret_direct_print_hit": false,
+        "tool_parameter_injection_intent": false,
+        "agent_chain_triggered": false,
+        "goal_hijack_priority_intent": false,
+        "promptshield_precedence_hijack_intent": false,
+        "promptshield_wrapper_attack_intent": false,
+        "promptshield_secret_emit_intent": false,
+        "fuzzy_scan_strategy": "full",
+        "pi0_rule_tier": {
+          "walls": {
+            "override_instructions": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "secret_exfiltration": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.55
+            },
+            "tool_or_action_abuse": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "policy_evasion": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            }
+          },
+          "hard_any": false,
+          "soft_any": false
+        },
+        "guard_block_reason": "",
+        "guard_block_reasons": []
+      }
+    },
+    {
+      "id": "HN-006",
+      "v": {
+        "override_instructions": 0.0,
+        "secret_exfiltration": 0.0,
+        "tool_or_action_abuse": 0.0,
+        "policy_evasion": 0.0
+      },
+      "polarity": [
+        0,
+        0,
+        -1,
+        -1
+      ],
+      "matches": {
+        "real_override_intent": false,
+        "secret_direct_print_hit": false,
+        "tool_parameter_injection_intent": false,
+        "agent_chain_triggered": false,
+        "goal_hijack_priority_intent": false,
+        "promptshield_precedence_hijack_intent": false,
+        "promptshield_wrapper_attack_intent": false,
+        "promptshield_secret_emit_intent": false,
+        "fuzzy_scan_strategy": "full",
+        "pi0_rule_tier": {
+          "walls": {
+            "override_instructions": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "secret_exfiltration": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "tool_or_action_abuse": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.55
+            },
+            "policy_evasion": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            }
+          },
+          "hard_any": false,
+          "soft_any": false
+        },
+        "guard_block_reason": "",
+        "guard_block_reasons": []
+      }
+    },
+    {
+      "id": "HN-007",
+      "v": {
+        "override_instructions": 0.0,
+        "secret_exfiltration": 0.0,
+        "tool_or_action_abuse": 0.0,
+        "policy_evasion": 0.0
+      },
+      "polarity": [
+        0,
+        0,
+        0,
+        -1
+      ],
+      "matches": {
+        "real_override_intent": false,
+        "secret_direct_print_hit": false,
+        "tool_parameter_injection_intent": false,
+        "agent_chain_triggered": false,
+        "goal_hijack_priority_intent": false,
+        "promptshield_precedence_hijack_intent": false,
+        "promptshield_wrapper_attack_intent": false,
+        "promptshield_secret_emit_intent": false,
+        "fuzzy_scan_strategy": "full",
+        "pi0_rule_tier": {
+          "walls": {
+            "override_instructions": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "secret_exfiltration": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "tool_or_action_abuse": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "policy_evasion": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 2.5
+            }
+          },
+          "hard_any": false,
+          "soft_any": false
+        },
+        "guard_block_reason": "",
+        "guard_block_reasons": []
+      }
+    },
+    {
+      "id": "HN-008",
+      "v": {
+        "override_instructions": 0.0,
+        "secret_exfiltration": 0.0,
+        "tool_or_action_abuse": 0.0,
+        "policy_evasion": 0.0
+      },
+      "polarity": [
+        0,
+        -1,
+        -1,
+        0
+      ],
+      "matches": {
+        "real_override_intent": false,
+        "secret_direct_print_hit": false,
+        "tool_parameter_injection_intent": false,
+        "agent_chain_triggered": false,
+        "goal_hijack_priority_intent": false,
+        "promptshield_precedence_hijack_intent": false,
+        "promptshield_wrapper_attack_intent": false,
+        "promptshield_secret_emit_intent": false,
+        "fuzzy_scan_strategy": "full",
+        "pi0_rule_tier": {
+          "walls": {
+            "override_instructions": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "secret_exfiltration": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 1.9
+            },
+            "tool_or_action_abuse": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 1.15
+            },
+            "policy_evasion": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            }
+          },
+          "hard_any": false,
+          "soft_any": false
+        },
+        "guard_block_reason": "",
+        "guard_block_reasons": []
+      }
+    },
+    {
+      "id": "WBREG-001",
+      "v": {
+        "override_instructions": 7.4,
+        "secret_exfiltration": 0.0,
+        "tool_or_action_abuse": 0.0,
+        "policy_evasion": 0.0
+      },
+      "polarity": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "matches": {
+        "real_override_intent": false,
+        "secret_direct_print_hit": false,
+        "tool_parameter_injection_intent": false,
+        "agent_chain_triggered": false,
+        "goal_hijack_priority_intent": false,
+        "promptshield_precedence_hijack_intent": false,
+        "promptshield_wrapper_attack_intent": false,
+        "promptshield_secret_emit_intent": false,
+        "fuzzy_scan_strategy": "full",
+        "pi0_rule_tier": {
+          "walls": {
+            "override_instructions": {
+              "hard_hit": false,
+              "soft_hit": true,
+              "hard_signals": [],
+              "soft_signals": [
+                "legacy_override_score"
+              ],
+              "raw_score": 7.4
+            },
+            "secret_exfiltration": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "tool_or_action_abuse": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.4
+            },
+            "policy_evasion": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            }
+          },
+          "hard_any": false,
+          "soft_any": true
+        },
+        "guard_block_reason": "",
+        "guard_block_reasons": []
+      }
+    },
+    {
+      "id": "WBREG-002",
+      "v": {
+        "override_instructions": 5.234783,
+        "secret_exfiltration": 0.0,
+        "tool_or_action_abuse": 0.0,
+        "policy_evasion": 0.0
+      },
+      "polarity": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "matches": {
+        "real_override_intent": false,
+        "secret_direct_print_hit": false,
+        "tool_parameter_injection_intent": false,
+        "agent_chain_triggered": false,
+        "goal_hijack_priority_intent": false,
+        "promptshield_precedence_hijack_intent": false,
+        "promptshield_wrapper_attack_intent": false,
+        "promptshield_secret_emit_intent": false,
+        "fuzzy_scan_strategy": "full",
+        "pi0_rule_tier": {
+          "walls": {
+            "override_instructions": {
+              "hard_hit": false,
+              "soft_hit": true,
+              "hard_signals": [],
+              "soft_signals": [
+                "legacy_override_score"
+              ],
+              "raw_score": 5.234782608695653
+            },
+            "secret_exfiltration": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "tool_or_action_abuse": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.4
+            },
+            "policy_evasion": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            }
+          },
+          "hard_any": false,
+          "soft_any": true
+        },
+        "guard_block_reason": "",
+        "guard_block_reasons": []
+      }
+    },
+    {
+      "id": "WBREG-003",
+      "v": {
+        "override_instructions": 8.721429,
+        "secret_exfiltration": 0.0,
+        "tool_or_action_abuse": 0.0,
+        "policy_evasion": 0.0
+      },
+      "polarity": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "matches": {
+        "real_override_intent": true,
+        "secret_direct_print_hit": false,
+        "tool_parameter_injection_intent": false,
+        "agent_chain_triggered": false,
+        "goal_hijack_priority_intent": false,
+        "promptshield_precedence_hijack_intent": false,
+        "promptshield_wrapper_attack_intent": false,
+        "promptshield_secret_emit_intent": false,
+        "fuzzy_scan_strategy": "full",
+        "pi0_rule_tier": {
+          "walls": {
+            "override_instructions": {
+              "hard_hit": true,
+              "soft_hit": true,
+              "hard_signals": [
+                "real_override_intent"
+              ],
+              "soft_signals": [
+                "legacy_override_score"
+              ],
+              "raw_score": 8.721428571428572
+            },
+            "secret_exfiltration": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "tool_or_action_abuse": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.4
+            },
+            "policy_evasion": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            }
+          },
+          "hard_any": true,
+          "soft_any": true
+        },
+        "guard_block_reason": "",
+        "guard_block_reasons": []
+      }
+    },
+    {
+      "id": "WBREG-004",
+      "v": {
+        "override_instructions": 0.0,
+        "secret_exfiltration": 0.0,
+        "tool_or_action_abuse": 0.0,
+        "policy_evasion": 2.5
+      },
+      "polarity": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "matches": {
+        "real_override_intent": false,
+        "secret_direct_print_hit": false,
+        "tool_parameter_injection_intent": false,
+        "agent_chain_triggered": false,
+        "goal_hijack_priority_intent": false,
+        "promptshield_precedence_hijack_intent": false,
+        "promptshield_wrapper_attack_intent": false,
+        "promptshield_secret_emit_intent": false,
+        "fuzzy_scan_strategy": "full",
+        "pi0_rule_tier": {
+          "walls": {
+            "override_instructions": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "secret_exfiltration": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "tool_or_action_abuse": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "policy_evasion": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 2.5
+            }
+          },
+          "hard_any": false,
+          "soft_any": false
+        },
+        "guard_block_reason": "",
+        "guard_block_reasons": []
+      }
+    },
+    {
+      "id": "WBREG-005",
+      "v": {
+        "override_instructions": 0.0,
+        "secret_exfiltration": 0.0,
+        "tool_or_action_abuse": 0.0,
+        "policy_evasion": 3.95
+      },
+      "polarity": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "matches": {
+        "real_override_intent": false,
+        "secret_direct_print_hit": false,
+        "tool_parameter_injection_intent": false,
+        "agent_chain_triggered": false,
+        "goal_hijack_priority_intent": false,
+        "promptshield_precedence_hijack_intent": false,
+        "promptshield_wrapper_attack_intent": false,
+        "promptshield_secret_emit_intent": false,
+        "fuzzy_scan_strategy": "full",
+        "pi0_rule_tier": {
+          "walls": {
+            "override_instructions": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "secret_exfiltration": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "tool_or_action_abuse": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "policy_evasion": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 3.95
+            }
+          },
+          "hard_any": false,
+          "soft_any": false
+        },
+        "guard_block_reason": "",
+        "guard_block_reasons": []
+      }
+    },
+    {
+      "id": "WBREG-006",
+      "v": {
+        "override_instructions": 0.0,
+        "secret_exfiltration": 4.3,
+        "tool_or_action_abuse": 0.0,
+        "policy_evasion": 0.0
+      },
+      "polarity": [
+        0,
+        1,
+        0,
+        0
+      ],
+      "matches": {
+        "real_override_intent": false,
+        "secret_direct_print_hit": false,
+        "tool_parameter_injection_intent": false,
+        "agent_chain_triggered": false,
+        "goal_hijack_priority_intent": false,
+        "promptshield_precedence_hijack_intent": false,
+        "promptshield_wrapper_attack_intent": false,
+        "promptshield_secret_emit_intent": false,
+        "fuzzy_scan_strategy": "full",
+        "pi0_rule_tier": {
+          "walls": {
+            "override_instructions": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "secret_exfiltration": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 4.300000000000001
+            },
+            "tool_or_action_abuse": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.6
+            },
+            "policy_evasion": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            }
+          },
+          "hard_any": false,
+          "soft_any": false
+        },
+        "guard_block_reason": "",
+        "guard_block_reasons": []
+      }
+    },
+    {
+      "id": "WBREG-007",
+      "v": {
+        "override_instructions": 0.0,
+        "secret_exfiltration": 4.3,
+        "tool_or_action_abuse": 0.0,
+        "policy_evasion": 0.0
+      },
+      "polarity": [
+        0,
+        1,
+        0,
+        0
+      ],
+      "matches": {
+        "real_override_intent": false,
+        "secret_direct_print_hit": false,
+        "tool_parameter_injection_intent": false,
+        "agent_chain_triggered": false,
+        "goal_hijack_priority_intent": false,
+        "promptshield_precedence_hijack_intent": false,
+        "promptshield_wrapper_attack_intent": false,
+        "promptshield_secret_emit_intent": false,
+        "fuzzy_scan_strategy": "full",
+        "pi0_rule_tier": {
+          "walls": {
+            "override_instructions": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "secret_exfiltration": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 4.300000000000001
+            },
+            "tool_or_action_abuse": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.6
+            },
+            "policy_evasion": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            }
+          },
+          "hard_any": false,
+          "soft_any": false
+        },
+        "guard_block_reason": "",
+        "guard_block_reasons": []
+      }
+    },
+    {
+      "id": "WBREG-008",
+      "v": {
+        "override_instructions": 0.0,
+        "secret_exfiltration": 0.0,
+        "tool_or_action_abuse": 1.65,
+        "policy_evasion": 0.0
+      },
+      "polarity": [
+        0,
+        0,
+        1,
+        0
+      ],
+      "matches": {
+        "real_override_intent": false,
+        "secret_direct_print_hit": false,
+        "tool_parameter_injection_intent": false,
+        "agent_chain_triggered": false,
+        "goal_hijack_priority_intent": false,
+        "promptshield_precedence_hijack_intent": false,
+        "promptshield_wrapper_attack_intent": false,
+        "promptshield_secret_emit_intent": false,
+        "fuzzy_scan_strategy": "full",
+        "pi0_rule_tier": {
+          "walls": {
+            "override_instructions": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "secret_exfiltration": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            },
+            "tool_or_action_abuse": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 1.6500000000000001
+            },
+            "policy_evasion": {
+              "hard_hit": false,
+              "soft_hit": false,
+              "hard_signals": [],
+              "soft_signals": [],
+              "raw_score": 0.0
+            }
+          },
+          "hard_any": false,
+          "soft_any": false
+        },
+        "guard_block_reason": "",
+        "guard_block_reasons": []
+      }
+    }
+  ]
+}

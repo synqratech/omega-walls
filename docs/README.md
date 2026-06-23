@@ -7,5 +7,4 @@ This index is the canonical public documentation surface for OSS users.
 1. [Quickstart & Core Concepts](quickstart.md)
 2. [Configuration & Policy Tuning](config.md)
 3. [Integrations Hub](framework_integrations_quickstart.md)
-4. [Enterprise Pilot Guide (Enterprise)](enterprise_pilot_guide.md)
-5. [Pilot Operations Runbook](pilot_operations_runbook.md)
+4. Enterprise pilots and runbooks are distributed separately with the Enterprise edition.

@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from omega import DetectionResult, GuardAction, GuardDecision, OmegaDetectionResult, OmegaWalls
+from omega import (
+    DetectionResult,
+    GuardAction,
+    GuardDecision,
+    OmegaDetectionResult,
+    OmegaWalls,
+)
 
 
 def test_public_import_exposes_omegawalls() -> None:
@@ -42,3 +48,19 @@ def test_stateful_session_and_reset() -> None:
     guard.reset_session("sess-1")
     r3 = guard.analyze_text("safe memo", session_id="sess-1")
     assert r3.step == 1
+
+
+def test_sdk_context_manager_releases_multimodal_workers(monkeypatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "omega.vision.ocr_runtime.shutdown_ocr_workers", lambda: calls.append("ocr")
+    )
+    monkeypatch.setattr(
+        "omega.rag.attachment_parser_runtime.shutdown_attachment_parser_broker",
+        lambda: calls.append("parser"),
+    )
+    with OmegaWalls(profile="quickstart") as guard:
+        assert guard.analyze_text("safe memo").off is False
+    assert calls == ["ocr", "parser"]
+    guard.close()
+    assert calls == ["ocr", "parser"]

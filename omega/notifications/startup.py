@@ -112,6 +112,8 @@ def _semantic_readiness(projector: Any) -> Dict[str, Any]:
     enabled_mode = str(raw_status.get("enabled_mode", "auto")).strip().lower()
     active = bool(raw_status.get("active", False))
     attempted = bool(raw_status.get("attempted", False))
+    configured_device = str(raw_status.get("configured_device", "auto")).strip().lower() or "auto"
+    runtime_device = str(raw_status.get("runtime_device", "")).strip().lower()
     error = raw_status.get("error")
     if enabled_mode in {"false", "off", "disabled"}:
         state = "DISABLED"
@@ -128,6 +130,8 @@ def _semantic_readiness(projector: Any) -> Dict[str, Any]:
             "enabled_mode": enabled_mode,
             "active": active,
             "attempted": attempted,
+            "configured_device": configured_device,
+            "runtime_device": runtime_device,
             "error": (str(error) if error else ""),
         },
     }
@@ -299,11 +303,17 @@ def _build_preflight_hints(items: List[Mapping[str, Any]]) -> List[str]:
         )
 
     semantic_item = by_name.get("semantic_readiness")
-    if semantic_item and str(semantic_item.get("status", "")).upper() == "WARN":
+    if semantic_item:
         details = semantic_item.get("details", {}) if isinstance(semantic_item.get("details", {}), Mapping) else {}
-        if bool(details.get("attempted", False)) and not bool(details.get("active", True)):
+        if str(semantic_item.get("status", "")).upper() == "WARN" and bool(details.get("attempted", False)) and not bool(
+            details.get("active", True)
+        ):
             _append(
                 "Semantic fallback appears active. Install transformers+torch to enable semantic encoder, or intentionally disable semantic mode."
+            )
+        if bool(details.get("active", False)) and str(details.get("runtime_device", "")).strip().lower() == "cpu":
+            _append(
+                "Local semantic encoder is running on CPU. Expect a slow cold start on Windows; use CUDA-enabled torch for local semantic runs, or intentionally disable local semantic and stay rule-only."
             )
 
     return hints

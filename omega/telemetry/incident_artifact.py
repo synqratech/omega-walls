@@ -20,6 +20,12 @@ def _to_sorted_unique(items: Iterable[Any]) -> list[str]:
     return sorted({str(x) for x in items if str(x).strip()})
 
 
+def should_capture_incident_text(*, config: Mapping[str, Any]) -> bool:
+    off_policy = config.get("off_policy", {}) if isinstance(config.get("off_policy", {}), Mapping) else {}
+    incident_cfg = off_policy.get("incident_artifact", {}) if isinstance(off_policy.get("incident_artifact", {}), Mapping) else {}
+    return bool(incident_cfg.get("capture_incident_text", False))
+
+
 def _normalize_action(action: Any) -> Dict[str, Any]:
     if hasattr(action, "__dict__"):
         raw = dict(action.__dict__)

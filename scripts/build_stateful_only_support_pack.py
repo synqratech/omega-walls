@@ -7,10 +7,15 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import random
+import sys
 from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
 
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from scripts.session_pack_leakage import build_opaque_maps
 ATTACK_ONSET_PHASES = {
     "triggered_user_request",
     "reasoning_to_tool_escalation",
@@ -23,6 +28,7 @@ ATTACK_ONSET_PHASES = {
 class BuiltPack:
     pack_root: Path
     runtime_pack_path: Path
+    labels_pack_path: Path
     manifest_path: Path
     readme_path: Path
     stats: Dict[str, Any]
@@ -186,10 +192,50 @@ def _write_pack(
 ) -> BuiltPack:
     pack_root = (out_root / pack_id).resolve()
     runtime_dir = pack_root / "runtime"
+    labels_dir = pack_root / "labels"
     runtime_dir.mkdir(parents=True, exist_ok=True)
+    labels_dir.mkdir(parents=True, exist_ok=True)
     runtime_pack_path = runtime_dir / "session_pack.jsonl"
+    labels_pack_path = labels_dir / "session_pack_labels.jsonl"
+
+    s_map, a_map, src_map = build_opaque_maps(rows=rows, session_key="session_id", actor_key="actor_id", source_key="source_ref")
+    runtime_rows: List[Dict[str, Any]] = []
+    labels_rows: List[Dict[str, Any]] = []
+    for row in rows:
+        old_sid = str(row.get("session_id", "")).strip()
+        old_aid = str(row.get("actor_id", "")).strip()
+        old_src = str(row.get("source_ref", "")).strip()
+        runtime_rows.append(
+            {
+                "session_id": s_map[old_sid],
+                "turn_id": int(row.get("turn_id", 0)),
+                "text": str(row.get("text", "")),
+                "source_type": str(row.get("source_type", "external_untrusted")),
+                "source_id": src_map[old_src],
+            }
+        )
+        labels_rows.append(
+            {
+                "session_id": s_map[old_sid],
+                "turn_id": int(row.get("turn_id", 0)),
+                "label_turn": str(row.get("label_turn", "")),
+                "label_session": str(row.get("label_session", "")),
+                "family": str(row.get("family", "")),
+                "source_ref": old_src,
+                "actor_id": a_map[old_aid],
+                "bucket": str(row.get("bucket", "cross_session")),
+                "eval_slice": str(row.get("eval_slice", "context_required")),
+                "meta_phase": str(row.get("meta_phase", "")),
+                "meta_rel_time_min": int(row.get("meta_rel_time_min", 0) or 0),
+            }
+        )
+    runtime_rows = sorted(runtime_rows, key=lambda x: (str(x["session_id"]), int(x["turn_id"])))
+    labels_rows = sorted(labels_rows, key=lambda x: (str(x["session_id"]), int(x["turn_id"])))
     with runtime_pack_path.open("w", encoding="utf-8") as fh:
-        for row in rows:
+        for row in runtime_rows:
+            fh.write(json.dumps(dict(row), ensure_ascii=False) + "\n")
+    with labels_pack_path.open("w", encoding="utf-8") as fh:
+        for row in labels_rows:
             fh.write(json.dumps(dict(row), ensure_ascii=False) + "\n")
 
     manifest = list(scenes)
@@ -223,6 +269,7 @@ def _write_pack(
         "pack_id": pack_id,
         "pack_root": str(pack_root),
         "runtime_pack_path": str(runtime_pack_path),
+        "labels_pack_path": str(labels_pack_path),
         "manifest_path": str(manifest_path),
         "readme_path": str(readme_path),
         "stats": dict(stats),
@@ -231,6 +278,7 @@ def _write_pack(
     return BuiltPack(
         pack_root=pack_root,
         runtime_pack_path=runtime_pack_path,
+        labels_pack_path=labels_pack_path,
         manifest_path=manifest_path,
         readme_path=readme_path,
         stats=dict(stats),
@@ -293,6 +341,7 @@ def main() -> int:
         "pack_id": str(args.pack_id),
         "pack_root": str(built.pack_root),
         "runtime_pack_path": str(built.runtime_pack_path),
+        "labels_pack_path": str(built.labels_pack_path),
         "manifest_path": str(built.manifest_path),
         "readme_path": str(built.readme_path),
         "stats": built.stats,

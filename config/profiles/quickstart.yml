@@ -3,6 +3,7 @@ profiles:
 
 runtime:
   mode: quickstart
+  guard_mode: monitor
 
 logging:
   mode: PER_STEP

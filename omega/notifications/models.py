@@ -51,6 +51,10 @@ class ActionRequestEvent:
     risk_event: RiskEvent
     required_action: str
     timeout_sec: int
+    approval_scope: str = "policy"
+    tool_name: str = ""
+    tool_args_sha256: str = ""
+    tool_intent_id: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -92,6 +96,13 @@ class ApprovalRecord:
     trace_id: str
     decision_id: str
     control_outcome: str
+    approval_scope: str = "policy"
+    tool_name: str = ""
+    tool_args_sha256: str = ""
+    tool_intent_id: str = ""
+    single_use: bool = True
+    consumed_at: str = ""
+    consumed_by_step: Optional[int] = None
     channels: List[str] = field(default_factory=list)
     callback_ids: Dict[str, str] = field(default_factory=dict)
     resolution: Optional[ApprovalDecision] = None

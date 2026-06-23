@@ -216,6 +216,19 @@ def build_off_event(
                 "source_id": item.source_id,
                 "source_type": item.source_type,
                 "trust": item.trust,
+                "artifact_id": str(item.artifact_id or ((item.meta or {}).get("artifact_id", "")) or "") or None,
+                "origin": str(item.origin or ((item.meta or {}).get("origin", "")) or "") or None,
+                "derived_from": list(item.derived_from or ((item.meta or {}).get("derived_from", []) or [])) or None,
+                "content_hash": str(item.content_hash or ((item.meta or {}).get("content_hash", "")) or "") or None,
+                "boundary_step": (
+                    int(item.boundary_step)
+                    if item.boundary_step is not None
+                    else (
+                        int((item.meta or {}).get("boundary_step"))
+                        if (item.meta or {}).get("boundary_step") is not None
+                        else None
+                    )
+                ),
                 "contrib_c": contrib.c,
                 "v": contrib.v.tolist(),
                 "e": contrib.e.tolist(),

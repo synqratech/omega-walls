@@ -1,0 +1,15 @@
+profiles:
+  env: sensitive_rules_only
+
+runtime:
+  guard_mode: enforce
+
+projector:
+  mode: hybrid_api
+  api_perception:
+    strict: true
+    semantic_mode: rules_only
+    orchestrator:
+      enabled: true
+      fallback:
+        mode: rule_only

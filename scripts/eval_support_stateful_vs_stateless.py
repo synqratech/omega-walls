@@ -4,6 +4,7 @@ import argparse
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -19,8 +20,17 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from omega.interfaces.contracts_v1 import ContentItem, WALLS_V1
-from scripts.eval_session_pi_gate import OmegaHarnessRunner, SessionSpec, SessionTurnRow, group_sessions, load_pack_rows
+from omega.env_file import load_repo_env_file
+from omega.interfaces.contracts_v1 import WALLS_V1
+from scripts.eval_session_pi_gate import (
+    OmegaHarnessRunner,
+    SessionSpec,
+    SessionTurnRow,
+    build_runtime_packet_payload,
+    build_runtime_turn_payload,
+    group_sessions,
+    load_pack_rows,
+)
 
 
 WALL_EXFIL = "secret_exfiltration"
@@ -117,6 +127,7 @@ class PackDescriptor:
     pack_id: str
     pack_root: Path
     runtime_pack_path: Path
+    labels_pack_path: Optional[Path]
     manifest_path: Optional[Path]
     readme_path: Optional[Path]
     stats: Dict[str, Any]
@@ -133,6 +144,20 @@ class TurnSignal:
     walls: List[str]
     action_types: List[str]
     control_outcome: str
+    effect_wall_candidate: Optional[Dict[str, Any]] = None
+    effect_policy_gate: Optional[Dict[str, Any]] = None
+    effect_forecast: Optional[Dict[str, Any]] = None
+    effect_forecast_status: str = "disabled"
+    effect_policy_gate_status: str = "disabled"
+    named_skill_invocation: Optional[Dict[str, Any]] = None
+    skill_provenance_assessment: Optional[Dict[str, Any]] = None
+    skillbox_status: str = "disabled"
+    skillbox_verification: Optional[Dict[str, Any]] = None
+    skillbox_ledger_hit: bool = False
+    skillbox_content_sha256: Optional[str] = None
+    skillbox_capabilities: Optional[List[str]] = None
+    skillbox_gate_decision: str = "disabled"
+    effect_text_analysis: Optional[Dict[str, Any]] = None
 
 
 @dataclass(frozen=True)
@@ -427,6 +452,8 @@ class OmegaDecisionRunner:
         api_cache_path: Optional[str],
         api_error_log_path: Optional[str],
         enable_stateful_support_tuning: bool = False,
+        enable_effects_shadow: bool = False,
+        provenance_mode: str = "blob",
         api_provider: Optional[str] = None,
         api_key_env: Optional[str] = None,
     ) -> None:
@@ -447,7 +474,10 @@ class OmegaDecisionRunner:
             api_error_log_path=api_error_log_path,
             blind_eval=False,
             enable_stateful_support_tuning=bool(enable_stateful_support_tuning),
+            enable_effects_shadow=bool(enable_effects_shadow),
+            provenance_mode=str(provenance_mode),
         )
+        self._provenance_mode = str(provenance_mode or "blob").strip().lower()
         walls = getattr(self._base._harness, "config", {}).get("omega", {}).get("walls", WALLS_V1)
         self._walls = [str(w) for w in list(walls)]
         off_cfg = (
@@ -484,18 +514,13 @@ class OmegaDecisionRunner:
         }
 
     def run_turn(self, *, session_id: str, actor_id: str, turn: SessionTurnRow) -> TurnSignal:
-        trust = _blind_trust_for_source_type(str(turn.source_type))
-        source_id = f"support_eval:{turn.bucket}:{turn.family}"
-        item = ContentItem(
-            doc_id=f"{session_id}:turn:{int(turn.turn_id):03d}",
-            source_id=source_id,
-            source_type=str(turn.source_type or "other"),
-            trust=trust,
-            text=str(turn.text),
+        runtime_packet = build_runtime_packet_payload(
+            build_runtime_turn_payload(turn),
+            provenance_mode=self._provenance_mode,
         )
         out = self._base._harness.run_step(  # noqa: SLF001 - private reuse to expose richer telemetry for eval.
-            user_query=turn.text,
-            packet_items=[item],
+            user_query=runtime_packet.user_query,
+            packet_items=runtime_packet.packet_items,
             actor_id=actor_id,
         )
         step_result = out["step_result"]
@@ -528,6 +553,21 @@ class OmegaDecisionRunner:
         actions = getattr(decision, "actions", []) if decision is not None else []
         action_types = sorted({str(getattr(action, "type", "")).strip() for action in actions if str(getattr(action, "type", "")).strip()})
         control_outcome = str(out.get("control_outcome", "ALLOW"))
+        effect_candidate = (
+            dict(out.get("effect_wall_candidate", {}))
+            if isinstance(out.get("effect_wall_candidate"), Mapping)
+            else None
+        )
+        effect_forecast = (
+            dict(out.get("effect_forecast", {}))
+            if isinstance(out.get("effect_forecast"), Mapping)
+            else None
+        )
+        effect_policy_gate = (
+            dict(out.get("effect_policy_gate", {}))
+            if isinstance(out.get("effect_policy_gate"), Mapping)
+            else None
+        )
         return TurnSignal(
             turn_id=int(turn.turn_id),
             off=bool(getattr(step_result, "off", False)),
@@ -538,11 +578,55 @@ class OmegaDecisionRunner:
             walls=sorted(set(walls_active)),
             action_types=action_types,
             control_outcome=control_outcome,
+            effect_wall_candidate=effect_candidate,
+            effect_policy_gate=effect_policy_gate,
+            effect_forecast=effect_forecast,
+            effect_forecast_status=str(out.get("effect_forecast_status", "disabled")),
+            effect_policy_gate_status=str(out.get("effect_policy_gate_status", "disabled")),
+            named_skill_invocation=(
+                dict(out.get("named_skill_invocation", {}))
+                if isinstance(out.get("named_skill_invocation"), Mapping)
+                else None
+            ),
+            skill_provenance_assessment=(
+                dict(out.get("skill_provenance_assessment", {}))
+                if isinstance(out.get("skill_provenance_assessment"), Mapping)
+                else None
+            ),
+            skillbox_status=str(out.get("skillbox_status", "disabled")),
+            skillbox_verification=(
+                dict(out.get("skillbox_verification", {}))
+                if isinstance(out.get("skillbox_verification"), Mapping)
+                else None
+            ),
+            skillbox_ledger_hit=bool(out.get("skillbox_ledger_hit", False)),
+            skillbox_content_sha256=(
+                str(out.get("skillbox_content_sha256"))
+                if out.get("skillbox_content_sha256") is not None
+                else None
+            ),
+            skillbox_capabilities=[
+                str(x) for x in list(out.get("skillbox_capabilities", []) or [])
+            ],
+            skillbox_gate_decision=str(out.get("skillbox_gate_decision", "disabled")),
+            effect_text_analysis=(
+                dict(out.get("effect_text_analysis", {}))
+                if isinstance(out.get("effect_text_analysis"), Mapping)
+                else None
+            ),
         )
 
 
 def _build_prefix_text(turns: Sequence[SessionTurnRow]) -> str:
     return "\n".join(str(turn.text).strip() for turn in turns)
+
+
+def _opaque_ephemeral_id(*, kind: str, session_id: str, turn_id: int) -> str:
+    digest = hashlib.sha1(f"{kind}:{session_id}:{int(turn_id)}".encode("utf-8")).hexdigest()
+    val = int(digest[:10], 16) % 1_000_000
+    if str(kind) == "session":
+        return f"s_{val:06d}"
+    return f"a_{val:06d}"
 
 
 def _new_row(
@@ -571,6 +655,48 @@ def _new_row(
         "walls": list(signal.walls),
         "action_types": list(signal.action_types),
         "control_outcome": str(signal.control_outcome),
+        "effect_wall_candidate": (
+            dict(signal.effect_wall_candidate)
+            if isinstance(signal.effect_wall_candidate, Mapping)
+            else None
+        ),
+        "effect_policy_gate": (
+            dict(signal.effect_policy_gate)
+            if isinstance(signal.effect_policy_gate, Mapping)
+            else None
+        ),
+        "effect_forecast": (
+            dict(signal.effect_forecast)
+            if isinstance(signal.effect_forecast, Mapping)
+            else None
+        ),
+        "effect_forecast_status": str(signal.effect_forecast_status),
+        "effect_policy_gate_status": str(signal.effect_policy_gate_status),
+        "named_skill_invocation": (
+            dict(signal.named_skill_invocation)
+            if isinstance(signal.named_skill_invocation, Mapping)
+            else None
+        ),
+        "skill_provenance_assessment": (
+            dict(signal.skill_provenance_assessment)
+            if isinstance(signal.skill_provenance_assessment, Mapping)
+            else None
+        ),
+        "skillbox_status": str(signal.skillbox_status),
+        "skillbox_verification": (
+            dict(signal.skillbox_verification)
+            if isinstance(signal.skillbox_verification, Mapping)
+            else None
+        ),
+        "skillbox_ledger_hit": bool(signal.skillbox_ledger_hit),
+        "skillbox_content_sha256": signal.skillbox_content_sha256,
+        "skillbox_capabilities": [str(x) for x in list(signal.skillbox_capabilities or [])],
+        "skillbox_gate_decision": str(signal.skillbox_gate_decision),
+        "effect_text_analysis": (
+            dict(signal.effect_text_analysis)
+            if isinstance(signal.effect_text_analysis, Mapping)
+            else None
+        ),
     }
     if extra:
         payload.update(dict(extra))
@@ -662,8 +788,16 @@ def evaluate_baseline_a_sessions(
         first_off_turn: Optional[int] = None
         off_turn_signal: Optional[TurnSignal] = None
         for turn in session.turns:
-            ephemeral_session_id = f"{session.session_id}::turn::{int(turn.turn_id)}"
-            ephemeral_actor_id = f"{session.actor_id}::turn::{int(turn.turn_id)}"
+            ephemeral_session_id = _opaque_ephemeral_id(
+                kind="session",
+                session_id=session.session_id,
+                turn_id=int(turn.turn_id),
+            )
+            ephemeral_actor_id = _opaque_ephemeral_id(
+                kind="actor",
+                session_id=session.session_id,
+                turn_id=int(turn.turn_id),
+            )
             runner.reset(session_id=ephemeral_session_id, actor_id=ephemeral_actor_id)
             signal = runner.run_turn(session_id=ephemeral_session_id, actor_id=ephemeral_actor_id, turn=turn)
             session_signals.append(signal)
@@ -756,6 +890,7 @@ def evaluate_baseline_c_prefix_scan(
                 session_id=session.session_id,
                 turn_id=int(idx),
                 text=prefix_text,
+                source_id=base_turn.source_id,
                 label_turn=base_turn.label_turn,
                 label_session=session.label_session,
                 family=session.family,
@@ -765,8 +900,16 @@ def evaluate_baseline_c_prefix_scan(
                 bucket=session.bucket,
                 eval_slice=base_turn.eval_slice,
             )
-            ephemeral_session_id = f"{session.session_id}::prefix::{idx}"
-            ephemeral_actor_id = f"{session.actor_id}::prefix::{idx}"
+            ephemeral_session_id = _opaque_ephemeral_id(
+                kind="session",
+                session_id=session.session_id,
+                turn_id=int(idx),
+            )
+            ephemeral_actor_id = _opaque_ephemeral_id(
+                kind="actor",
+                session_id=session.session_id,
+                turn_id=int(idx),
+            )
             runner.reset(session_id=ephemeral_session_id, actor_id=ephemeral_actor_id)
             signal = runner.run_turn(session_id=ephemeral_session_id, actor_id=ephemeral_actor_id, turn=prefix_turn)
             signals.append(signal)
@@ -1032,6 +1175,181 @@ def summarize_variant_outcomes(outcomes: Sequence[SessionOutcome]) -> Dict[str, 
     }
 
 
+def summarize_effect_shadow_rows(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+    by_variant: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        variant = str(row.get("variant", "unknown"))
+        bucket = by_variant.setdefault(
+            variant,
+            {
+                "turns_total": 0,
+                "candidate_turns": 0,
+                "policy_gate_passed_turns": 0,
+                "provider_failure_turns": 0,
+                "benign_turns": 0,
+                "benign_candidate_turns": 0,
+                "benign_policy_gate_passed_turns": 0,
+                "status_counts": defaultdict(int),
+                "policy_gate_status_counts": defaultdict(int),
+                "candidate_by_family": defaultdict(int),
+                "policy_gate_passed_by_family": defaultdict(int),
+                "policy_gate_passed_by_label": defaultdict(int),
+                "named_skill_invocation_by_label": defaultdict(int),
+                "confidence_histogram": {"0.70-0.79": 0, "0.80-0.89": 0, "0.90-1.00": 0},
+                "named_skill_invocation_turns": 0,
+                "skipped_due_to_missing_effect_text": 0,
+                "no_effect_but_named_skill_invocation": 0,
+                "source_mismatch_simulated_blocks": 0,
+                "skillbox_checked_count": 0,
+                "skillbox_verified_count": 0,
+                "skillbox_unknown_count": 0,
+                "skillbox_source_mismatch_count": 0,
+                "skillbox_hash_mismatch_count": 0,
+                "skillbox_tampered_count": 0,
+                "skillbox_dangerous_capability_unapproved_count": 0,
+                "attack_turns": 0,
+                "benign_source_mismatch_simulated_blocks": 0,
+                "attack_sessions_total": set(),
+                "attack_sessions_with_source_mismatch": set(),
+                "benign_sessions_total": set(),
+                "benign_sessions_with_source_mismatch": set(),
+                "attack_skillbox_block_sessions": set(),
+                "benign_skillbox_block_sessions": set(),
+            },
+        )
+        bucket["turns_total"] += 1
+        session_id = str(row.get("session_id", ""))
+        if str(row.get("label_session")) == "attack":
+            bucket["attack_turns"] += 1
+            if session_id:
+                bucket["attack_sessions_total"].add(session_id)
+        if str(row.get("label_session")) == "benign":
+            bucket["benign_turns"] += 1
+            if session_id:
+                bucket["benign_sessions_total"].add(session_id)
+        status = str(row.get("effect_forecast_status", "disabled"))
+        bucket["status_counts"][status] += 1
+        named_skill = row.get("named_skill_invocation")
+        if isinstance(named_skill, Mapping) and bool(named_skill.get("detected", False)):
+            bucket["named_skill_invocation_turns"] += 1
+            bucket["named_skill_invocation_by_label"][str(row.get("label_session", "unknown"))] += 1
+            if status == "no_effect":
+                bucket["no_effect_but_named_skill_invocation"] += 1
+        effect_text = row.get("effect_text_analysis")
+        if (
+            status == "skipped"
+            and isinstance(effect_text, Mapping)
+            and bool(effect_text.get("missing_effect_text", False))
+        ):
+            bucket["skipped_due_to_missing_effect_text"] += 1
+        gate = row.get("effect_policy_gate")
+        gate_status = str(row.get("effect_policy_gate_status", "disabled"))
+        if isinstance(gate, Mapping):
+            gate_status = str(gate.get("status", gate_status))
+        bucket["policy_gate_status_counts"][gate_status] += 1
+        if status in {"provider_error", "provider_unavailable", "invalid_response"}:
+            bucket["provider_failure_turns"] += 1
+        candidate = row.get("effect_wall_candidate")
+        if isinstance(candidate, Mapping):
+            bucket["candidate_turns"] += 1
+            if str(row.get("label_session")) == "benign":
+                bucket["benign_candidate_turns"] += 1
+            bucket["candidate_by_family"][str(row.get("family", "unknown"))] += 1
+            conf = float(candidate.get("confidence", 0.0) or 0.0)
+            if conf >= 0.90:
+                bucket["confidence_histogram"]["0.90-1.00"] += 1
+            elif conf >= 0.80:
+                bucket["confidence_histogram"]["0.80-0.89"] += 1
+            else:
+                bucket["confidence_histogram"]["0.70-0.79"] += 1
+        if isinstance(gate, Mapping) and bool(gate.get("would_enforce", False)):
+            bucket["policy_gate_passed_turns"] += 1
+            if str(row.get("label_session")) == "benign":
+                bucket["benign_policy_gate_passed_turns"] += 1
+            bucket["policy_gate_passed_by_family"][str(row.get("family", "unknown"))] += 1
+            bucket["policy_gate_passed_by_label"][str(row.get("label_session", "unknown"))] += 1
+        provenance = row.get("skill_provenance_assessment")
+        if isinstance(provenance, Mapping) and bool(provenance.get("simulated_block", False)):
+            bucket["source_mismatch_simulated_blocks"] += 1
+            if str(row.get("label_session")) == "benign":
+                bucket["benign_source_mismatch_simulated_blocks"] += 1
+                if session_id:
+                    bucket["benign_sessions_with_source_mismatch"].add(session_id)
+            elif str(row.get("label_session")) == "attack" and session_id:
+                bucket["attack_sessions_with_source_mismatch"].add(session_id)
+        skillbox_verification = row.get("skillbox_verification")
+        if isinstance(skillbox_verification, Mapping):
+            bucket["skillbox_checked_count"] += 1
+            verification_status = str(skillbox_verification.get("verification_status", "unknown"))
+            if verification_status == "verified":
+                bucket["skillbox_verified_count"] += 1
+            elif verification_status == "unknown":
+                bucket["skillbox_unknown_count"] += 1
+            elif verification_status == "source_mismatch":
+                bucket["skillbox_source_mismatch_count"] += 1
+            elif verification_status == "hash_mismatch":
+                bucket["skillbox_hash_mismatch_count"] += 1
+            elif verification_status == "tampered":
+                bucket["skillbox_tampered_count"] += 1
+            elif verification_status == "dangerous_capability_unapproved":
+                bucket["skillbox_dangerous_capability_unapproved_count"] += 1
+            if bool(skillbox_verification.get("simulated_block", False)) and session_id:
+                if str(row.get("label_session")) == "attack":
+                    bucket["attack_skillbox_block_sessions"].add(session_id)
+                elif str(row.get("label_session")) == "benign":
+                    bucket["benign_skillbox_block_sessions"].add(session_id)
+    out: Dict[str, Any] = {}
+    for variant, raw in sorted(by_variant.items()):
+        candidate_by_family = dict(raw.pop("candidate_by_family"))
+        policy_gate_passed_by_family = dict(raw.pop("policy_gate_passed_by_family"))
+        policy_gate_passed_by_label = dict(raw.pop("policy_gate_passed_by_label"))
+        named_skill_invocation_by_label = dict(raw.pop("named_skill_invocation_by_label"))
+        status_counts = dict(raw.pop("status_counts"))
+        policy_gate_status_counts = dict(sorted(dict(raw.pop("policy_gate_status_counts")).items()))
+        attack_sessions_total = len(raw.pop("attack_sessions_total"))
+        attack_sessions_with_source_mismatch = len(raw.pop("attack_sessions_with_source_mismatch"))
+        benign_sessions_total = len(raw.pop("benign_sessions_total"))
+        benign_sessions_with_source_mismatch = len(raw.pop("benign_sessions_with_source_mismatch"))
+        attack_skillbox_block_sessions = len(raw.pop("attack_skillbox_block_sessions"))
+        benign_skillbox_block_sessions = len(raw.pop("benign_skillbox_block_sessions"))
+        out[variant] = {
+            **raw,
+            "candidate_turn_rate": _safe_div(raw["candidate_turns"], raw["turns_total"]),
+            "benign_candidate_turn_rate": _safe_div(raw["benign_candidate_turns"], raw["benign_turns"]),
+            "policy_gate_passed_turn_rate": _safe_div(raw["policy_gate_passed_turns"], raw["turns_total"]),
+            "benign_policy_gate_passed_turn_rate": _safe_div(
+                raw["benign_policy_gate_passed_turns"], raw["benign_turns"]
+            ),
+            "status_counts": status_counts,
+            "policy_gate_status_counts": policy_gate_status_counts,
+            "candidate_by_family": candidate_by_family,
+            "policy_gate_passed_by_family": policy_gate_passed_by_family,
+            "policy_gate_passed_by_label": policy_gate_passed_by_label,
+            "named_skill_invocation_by_label": named_skill_invocation_by_label,
+            "simulate_source_mismatch_attack_turn_rate": _safe_div(
+                raw["source_mismatch_simulated_blocks"] - raw["benign_source_mismatch_simulated_blocks"],
+                raw["attack_turns"],
+            ),
+            "simulate_source_mismatch_session_recall": _safe_div(
+                attack_sessions_with_source_mismatch, attack_sessions_total
+            ),
+            "simulate_source_mismatch_fp_rate": _safe_div(
+                raw["benign_source_mismatch_simulated_blocks"], raw["benign_turns"]
+            ),
+            "simulate_source_mismatch_session_fp_rate": _safe_div(
+                benign_sessions_with_source_mismatch, benign_sessions_total
+            ),
+            "simulated_skillbox_block_sessions": int(attack_skillbox_block_sessions),
+            "simulated_skillbox_attack_recall": _safe_div(
+                attack_skillbox_block_sessions, attack_sessions_total
+            ),
+            "simulated_skillbox_benign_fp_rate": _safe_div(
+                benign_skillbox_block_sessions, benign_sessions_total
+            ),
+        }
+    return out
+
+
 def _session_off_rate_at_tau(outcomes: Sequence[SessionOutcome], *, tau: float, label_session: str) -> float:
     selected = [x for x in outcomes if str(x.label_session) == str(label_session)]
     if not selected:
@@ -1268,6 +1586,7 @@ def discover_packs(packs_root: Path) -> List[PackDescriptor]:
                     pack_id=str(item.get("pack_id", pack_root.name)),
                     pack_root=pack_root,
                     runtime_pack_path=runtime_pack_path,
+                    labels_pack_path=Path(str(item.get("labels_pack_path"))).resolve() if item.get("labels_pack_path") else None,
                     manifest_path=Path(str(item.get("manifest_path"))).resolve() if item.get("manifest_path") else None,
                     readme_path=Path(str(item.get("readme_path"))).resolve() if item.get("readme_path") else None,
                     stats=dict(item.get("stats", {})) if isinstance(item.get("stats"), Mapping) else {},
@@ -1283,6 +1602,7 @@ def discover_packs(packs_root: Path) -> List[PackDescriptor]:
                     pack_id=pack_root.name,
                     pack_root=pack_root.resolve(),
                     runtime_pack_path=runtime_pack_path.resolve(),
+                    labels_pack_path=((pack_root / "labels" / "session_pack_labels.jsonl").resolve() if (pack_root / "labels" / "session_pack_labels.jsonl").exists() else None),
                     manifest_path=(pack_root / "manifest.json").resolve() if (pack_root / "manifest.json").exists() else None,
                     readme_path=(pack_root / "README.md").resolve() if (pack_root / "README.md").exists() else None,
                     stats={},
@@ -1345,6 +1665,9 @@ def run_eval(
     baseline_d_calibration: str = "benign_q95",
     baseline_d_mode: str = "per_turn_only",
     require_semantic_active: bool = False,
+    allow_legacy_runtime_leakage: bool = False,
+    enable_effects_shadow: bool = False,
+    provenance_mode: str = "blob",
 ) -> Dict[str, Any]:
     if str(baseline_c_mode).strip().lower() != "prefix_scan":
         raise ValueError(f"unsupported baseline-c mode: {baseline_c_mode}")
@@ -1375,7 +1698,11 @@ def run_eval(
         )
 
     for descriptor in pack_descriptors:
-        rows = load_pack_rows(descriptor.runtime_pack_path)
+        rows = load_pack_rows(
+            descriptor.runtime_pack_path,
+            labels_path=descriptor.labels_pack_path,
+            allow_legacy_runtime_leakage=bool(allow_legacy_runtime_leakage),
+        )
         sessions = group_sessions(rows)
         pack_sessions[descriptor.pack_id] = sessions
 
@@ -1395,6 +1722,8 @@ def run_eval(
             api_cache_path=api_cache_path,
             api_error_log_path=api_error_log_path,
             enable_stateful_support_tuning=bool(enable_stateful_support_tuning),
+            enable_effects_shadow=bool(enable_effects_shadow),
+            provenance_mode=str(provenance_mode),
         )
         if bool(require_semantic_active):
             ensure_semantic_fn = getattr(stateful_runner, "ensure_semantic_active", None)
@@ -1432,6 +1761,8 @@ def run_eval(
             api_cache_path=api_cache_path,
             api_error_log_path=api_error_log_path,
             enable_stateful_support_tuning=bool(enable_stateful_support_tuning),
+            enable_effects_shadow=bool(enable_effects_shadow),
+            provenance_mode=str(provenance_mode),
         )
         if bool(require_semantic_active):
             ensure_semantic_fn = getattr(baseline_a_runner, "ensure_semantic_active", None)
@@ -1469,6 +1800,8 @@ def run_eval(
             api_cache_path=api_cache_path,
             api_error_log_path=api_error_log_path,
             enable_stateful_support_tuning=bool(enable_stateful_support_tuning),
+            enable_effects_shadow=bool(enable_effects_shadow),
+            provenance_mode=str(provenance_mode),
         )
         if bool(require_semantic_active):
             ensure_semantic_fn = getattr(baseline_c_runner, "ensure_semantic_active", None)
@@ -1514,6 +1847,7 @@ def run_eval(
                 "pack_id": descriptor.pack_id,
                 "pack_root": str(descriptor.pack_root),
                 "runtime_pack_path": str(descriptor.runtime_pack_path),
+                "labels_pack_path": (str(descriptor.labels_pack_path) if descriptor.labels_pack_path else None),
                 "manifest_path": str(descriptor.manifest_path) if descriptor.manifest_path else None,
                 "readme_path": str(descriptor.readme_path) if descriptor.readme_path else None,
                 "stats": descriptor.stats,
@@ -1596,6 +1930,7 @@ def run_eval(
         compare_variants=compare_variants,
     )
     market_ready = build_market_ready_table(overall)
+    effect_shadow_summary = summarize_effect_shadow_rows(rows_all)
     missed_report = build_stateful_missed_attack_report(
         stateful_outcomes=all_outcomes_by_variant.get(VARIANT_STATEFUL, []),
         rows=rows_all,
@@ -1637,6 +1972,8 @@ def run_eval(
             "allow_api_fallback": bool(allow_api_fallback),
             "require_semantic_active": bool(require_semantic_active),
             "enable_stateful_support_tuning": bool(enable_stateful_support_tuning),
+            "enable_effects_shadow": bool(enable_effects_shadow),
+            "provenance_mode": str(provenance_mode),
             "api_model": api_model,
             "api_provider": api_provider,
             "api_key_env": api_key_env,
@@ -1656,12 +1993,14 @@ def run_eval(
             "baseline_d_mode": baseline_d_mode,
             "seed": int(seed),
             "packs_root": str(packs_root.resolve()),
+            "allow_legacy_runtime_leakage": bool(allow_legacy_runtime_leakage),
         },
         "packs": [
             {
                 "pack_id": descriptor.pack_id,
                 "pack_root": str(descriptor.pack_root),
                 "runtime_pack_path": str(descriptor.runtime_pack_path),
+                "labels_pack_path": (str(descriptor.labels_pack_path) if descriptor.labels_pack_path else None),
                 "stats": descriptor.stats,
                 "projector_status": projectors.get(descriptor.pack_id, {}),
             }
@@ -1671,6 +2010,7 @@ def run_eval(
         "metrics": {
             "overall": overall,
             "per_pack": {key: pack_summaries[key]["variants"] for key in sorted(pack_summaries.keys())},
+            "effect_shadow": effect_shadow_summary,
         },
         "comparisons": comparisons,
         "comparisons_matched_benign_rate": matched_benign_rate,
@@ -1699,6 +2039,8 @@ def main() -> int:
     parser.add_argument("--allow-api-fallback", action="store_true")
     parser.add_argument("--require-semantic-active", action="store_true")
     parser.add_argument("--enable-stateful-support-tuning", action="store_true")
+    parser.add_argument("--enable-effects-shadow", action="store_true")
+    parser.add_argument("--provenance-mode", choices=["blob", "segmented"], default="blob")
     parser.add_argument("--api-model", default="gpt-5.4-mini")
     parser.add_argument("--api-provider", default=None)
     parser.add_argument("--api-key-env", default=None)
@@ -1718,7 +2060,9 @@ def main() -> int:
     parser.add_argument("--baseline-d-mode", choices=["per_turn_only"], default="per_turn_only")
     parser.add_argument("--artifacts-root", default="artifacts/support_family_eval_compare")
     parser.add_argument("--seed", type=int, default=41)
+    parser.add_argument("--allow-legacy-runtime-leakage", action="store_true")
     args = parser.parse_args()
+    load_repo_env_file()
 
     report = run_eval(
         packs_root=ROOT / str(args.packs_root),
@@ -1728,6 +2072,8 @@ def main() -> int:
         allow_api_fallback=bool(args.allow_api_fallback),
         require_semantic_active=bool(args.require_semantic_active),
         enable_stateful_support_tuning=bool(args.enable_stateful_support_tuning),
+        enable_effects_shadow=bool(args.enable_effects_shadow),
+        provenance_mode=str(args.provenance_mode),
         api_model=(str(args.api_model) if args.api_model else None),
         api_provider=(str(args.api_provider) if args.api_provider else None),
         api_key_env=(str(args.api_key_env) if args.api_key_env else None),
@@ -1745,6 +2091,7 @@ def main() -> int:
         baseline_d_retries=(int(args.baseline_d_retries) if args.baseline_d_retries is not None else None),
         baseline_d_calibration=str(args.baseline_d_calibration),
         baseline_d_mode=str(args.baseline_d_mode),
+        allow_legacy_runtime_leakage=bool(args.allow_legacy_runtime_leakage),
         artifacts_root=ROOT / str(args.artifacts_root),
         seed=int(args.seed),
     )

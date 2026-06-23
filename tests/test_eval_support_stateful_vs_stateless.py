@@ -37,6 +37,7 @@ def _mk_session(
                 session_id=session_id,
                 turn_id=idx,
                 text=text,
+                source_id=f"src_{idx:06d}",
                 label_turn=lbl_turn,
                 label_session=label_session,
                 family=family,
@@ -436,51 +437,71 @@ def test_matched_benign_rate_comparison_uses_stateful_target():
 
 def _write_pack_runtime(pack_dir: Path, *, attack_trigger: str) -> None:
     (pack_dir / "runtime").mkdir(parents=True, exist_ok=True)
+    (pack_dir / "labels").mkdir(parents=True, exist_ok=True)
     (pack_dir / "manifest.json").write_text("{}", encoding="utf-8")
     (pack_dir / "README.md").write_text("# pack\n", encoding="utf-8")
-    rows = [
+    runtime_rows = [
         {
-            "session_id": "attack_sess",
+            "session_id": "s_000001",
             "turn_id": 1,
             "text": "benign context",
-            "label_turn": "benign",
-            "label_session": "attack",
-            "family": "xsrc",
-            "source_ref": "a/1",
             "source_type": "external_untrusted",
-            "actor_id": "actor_attack",
-            "bucket": "core",
-            "eval_slice": "text_intrinsic",
+            "source_id": "src_000001",
         },
         {
-            "session_id": "attack_sess",
+            "session_id": "s_000001",
             "turn_id": 2,
             "text": attack_trigger,
-            "label_turn": "attack",
-            "label_session": "attack",
-            "family": "xsrc",
-            "source_ref": "a/2",
             "source_type": "external_untrusted",
-            "actor_id": "actor_attack",
+            "source_id": "src_000002",
+        },
+        {
+            "session_id": "s_000002",
+            "turn_id": 1,
+            "text": "normal request",
+            "source_type": "internal_trusted",
+            "source_id": "src_000003",
+        },
+    ]
+    labels_rows = [
+        {
+            "session_id": "s_000001",
+            "turn_id": 1,
+            "label_turn": "benign",
+            "label_session": "attack",
+            "family": "xsrc_family",
+            "source_ref": "a/1",
+            "actor_id": "a_000001",
             "bucket": "core",
             "eval_slice": "text_intrinsic",
         },
         {
-            "session_id": "benign_sess",
+            "session_id": "s_000001",
+            "turn_id": 2,
+            "label_turn": "attack",
+            "label_session": "attack",
+            "family": "xsrc_family",
+            "source_ref": "a/2",
+            "actor_id": "a_000001",
+            "bucket": "core",
+            "eval_slice": "text_intrinsic",
+        },
+        {
+            "session_id": "s_000002",
             "turn_id": 1,
-            "text": "normal request",
             "label_turn": "benign",
             "label_session": "benign",
-            "family": "xsrc",
+            "family": "xsrc_family",
             "source_ref": "b/1",
-            "source_type": "internal_trusted",
-            "actor_id": "actor_benign",
+            "actor_id": "a_000002",
             "bucket": "core",
             "eval_slice": "text_intrinsic",
         },
     ]
-    body = "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n"
-    (pack_dir / "runtime" / "session_pack.jsonl").write_text(body, encoding="utf-8")
+    runtime_body = "\n".join(json.dumps(row, ensure_ascii=False) for row in runtime_rows) + "\n"
+    labels_body = "\n".join(json.dumps(row, ensure_ascii=False) for row in labels_rows) + "\n"
+    (pack_dir / "runtime" / "session_pack.jsonl").write_text(runtime_body, encoding="utf-8")
+    (pack_dir / "labels" / "session_pack_labels.jsonl").write_text(labels_body, encoding="utf-8")
 
 
 def test_run_eval_smoke_four_packs(monkeypatch):
@@ -536,6 +557,7 @@ def test_run_eval_smoke_four_packs(monkeypatch):
             baseline_c_mode="prefix_scan",
             artifacts_root=artifacts_root,
             seed=41,
+            provenance_mode="segmented",
         )
 
         assert set(report["metrics"]["overall"].keys()) == {
@@ -550,8 +572,83 @@ def test_run_eval_smoke_four_packs(monkeypatch):
         assert Path(report["artifacts"]["calibration_json"]).exists()
         assert Path(report["artifacts"]["packs_summary_json"]).exists()
         assert Path(report["artifacts"]["baseline_d_calibration_json"]).exists()
+        assert report["config"]["provenance_mode"] == "segmented"
     finally:
         shutil.rmtree(tmp_path, ignore_errors=True)
+
+
+def test_effect_shadow_summary_counts_candidates_and_benign_rate() -> None:
+    rows = [
+        {
+            "variant": support_eval.VARIANT_STATEFUL,
+            "session_id": "s-1",
+            "label_session": "attack",
+            "family": "malicious_skill",
+            "effect_forecast_status": "candidate",
+            "effect_wall_candidate": {
+                "effect": "modify_skill_or_tool",
+                "effect_domain": "skill_integrity",
+                "confidence": 0.82,
+            },
+            "effect_policy_gate": {
+                "status": "passed",
+                "would_enforce": True,
+            },
+            "effect_policy_gate_status": "passed",
+            "named_skill_invocation": {"detected": True},
+            "skill_provenance_assessment": {"simulated_block": True},
+            "effect_text_analysis": {"missing_effect_text": False},
+        },
+        {
+            "variant": support_eval.VARIANT_STATEFUL,
+            "session_id": "s-2",
+            "label_session": "benign",
+            "family": "benign",
+            "effect_forecast_status": "candidate",
+            "effect_wall_candidate": {
+                "effect": "write_persistent_memory",
+                "effect_domain": "memory_integrity",
+                "confidence": 0.91,
+            },
+            "effect_policy_gate": {
+                "status": "not_applicable",
+                "would_enforce": False,
+            },
+            "effect_policy_gate_status": "not_applicable",
+            "named_skill_invocation": {"detected": False},
+            "effect_text_analysis": {"missing_effect_text": False},
+        },
+        {
+            "variant": support_eval.VARIANT_STATEFUL,
+            "session_id": "s-3",
+            "label_session": "attack",
+            "family": "memory_tampering",
+            "effect_forecast_status": "skipped",
+            "effect_wall_candidate": None,
+            "named_skill_invocation": {"detected": False},
+            "effect_text_analysis": {"missing_effect_text": True},
+        },
+    ]
+    summary = support_eval.summarize_effect_shadow_rows(rows)
+    stateful = summary[support_eval.VARIANT_STATEFUL]
+    assert stateful["candidate_turns"] == 2
+    assert stateful["provider_failure_turns"] == 0
+    assert stateful["status_counts"] == {"candidate": 2, "skipped": 1}
+    assert stateful["benign_candidate_turn_rate"] == 1.0
+    assert stateful["policy_gate_passed_turns"] == 1
+    assert stateful["benign_policy_gate_passed_turn_rate"] == 0.0
+    assert stateful["policy_gate_status_counts"] == {"disabled": 1, "not_applicable": 1, "passed": 1}
+    assert stateful["policy_gate_passed_by_family"]["malicious_skill"] == 1
+    assert stateful["policy_gate_passed_by_label"]["attack"] == 1
+    assert stateful["candidate_by_family"]["malicious_skill"] == 1
+    assert stateful["confidence_histogram"]["0.80-0.89"] == 1
+    assert stateful["confidence_histogram"]["0.90-1.00"] == 1
+    assert stateful["named_skill_invocation_turns"] == 1
+    assert stateful["named_skill_invocation_by_label"] == {"attack": 1}
+    assert stateful["skipped_due_to_missing_effect_text"] == 1
+    assert stateful["source_mismatch_simulated_blocks"] == 1
+    assert stateful["simulate_source_mismatch_attack_turn_rate"] == 0.5
+    assert stateful["simulate_source_mismatch_session_recall"] == 0.5
 
 
 def test_run_eval_fail_fast_on_semantic_inactive(monkeypatch):

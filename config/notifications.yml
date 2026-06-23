@@ -74,3 +74,13 @@ notifications:
       WARN: 300
       BLOCK: 60
     min_risk_score: 0.7
+  webhook:
+    enabled: false
+    url: ""
+    types:
+      - quota_warning
+      - quota_exhausted
+      - fallback_activated
+      - fallback_recovered
+      - key_invalid
+      - provider_outage

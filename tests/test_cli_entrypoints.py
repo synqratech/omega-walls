@@ -12,6 +12,7 @@ def test_project_scripts_declared_in_pyproject() -> None:
 
     assert scripts.get("omega-walls") == "omega.cli:main"
     assert scripts.get("omega-walls-api") == "omega.api.cli:main"
+    assert "omega-walls-enterprise-lifecycle" not in scripts
 
 
 def test_project_script_targets_importable_callables() -> None:

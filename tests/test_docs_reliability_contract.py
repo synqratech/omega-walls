@@ -49,12 +49,12 @@ def test_required_reliability_docs_exist() -> None:
 
 
 def test_readme_links_reliability_docs() -> None:
-    text = _read("README.md")
+    text = _read("README_OSS.md")
     assert "(docs/quickstart.md)" in text
     assert "(docs/config.md)" in text
     assert "(docs/framework_integrations_quickstart.md)" in text
-    assert "(docs/enterprise_pilot_guide.md)" in text
-    assert "(docs/pilot_operations_runbook.md)" in text
+    assert "(docs/enterprise_pilot_guide.md)" not in text
+    assert "(docs/pilot_operations_runbook.md)" not in text
 
 
 def test_docs_index_links_reliability_docs() -> None:
@@ -62,8 +62,8 @@ def test_docs_index_links_reliability_docs() -> None:
     assert "(quickstart.md)" in text
     assert "(config.md)" in text
     assert "(framework_integrations_quickstart.md)" in text
-    assert "(enterprise_pilot_guide.md)" in text
-    assert "(pilot_operations_runbook.md)" in text
+    assert "(enterprise_pilot_guide.md)" not in text
+    assert "(pilot_operations_runbook.md)" not in text
 
 
 def test_quickstart_contains_monitor_report_explain_and_enforce_transition() -> None:
@@ -75,14 +75,36 @@ def test_quickstart_contains_monitor_report_explain_and_enforce_transition() -> 
     assert "fallback" in text or "continuity" in text
 
 
+def test_readme_quickstart_is_lightweight_and_has_framework_fast_path() -> None:
+    text = _read("README_OSS.md")
+    assert "pip install omega-walls" in text
+    assert "omega-walls --profile quickstart" in text
+    assert "quickstart" in text
+    assert "monitor mode" in text
+
+
+def test_readme_pypi_quickstart_matches_sdk_monitor_contract() -> None:
+    text = _read("README_PYPI.md")
+    assert "profile=\"quickstart\"" in text
+    assert "defaults to monitor mode" in text
+    assert "Use mode=\"enforce\"" not in text
+    assert "cli_overrides" not in text
+
+
+def test_quickstart_doc_does_not_reference_unpackaged_profiles() -> None:
+    text = _read("docs/quickstart.md")
+    assert "sensitive_hybrid_redacted" not in text
+    assert "sensitive_local_semantic" not in text
+    assert "`prod`" in text
+
+
 def test_local_links_in_reliability_docs_are_valid() -> None:
     for rel in [
-        "README.md",
+        "README_OSS.md",
+        "README_PYPI.md",
         "docs/README.md",
         "docs/quickstart.md",
         "docs/config.md",
         "docs/framework_integrations_quickstart.md",
-        "docs/enterprise_pilot_guide.md",
-        "docs/pilot_operations_runbook.md",
     ]:
         _assert_local_links_exist(rel)

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import json
 from pathlib import Path
+import shutil
+import uuid
 
-from scripts.build_session_benchmark_pack import build_session_pack
+from scripts.build_session_benchmark_pack import build_session_pack, write_session_pack
 
 
 def _group(rows):
@@ -85,3 +88,26 @@ def test_session_pack_builder_schema_and_balance():
     assert cross_sessions == 30
     assert mixed_attack == 42
     assert seen_context_required > 0
+
+
+def test_write_session_pack_dual_runtime_contract():
+    root = Path(__file__).resolve().parent.parent
+    rows = build_session_pack(repo_root=root, seed=41)
+    out_root = Path("tmp_codex_pytest") / "session_pack_builder" / f"dual_{uuid.uuid4().hex}"
+    try:
+        result = write_session_pack(rows, out_root=out_root, seed=41)
+        runtime_path = Path(result["runtime_jsonl"])
+        labels_path = Path(result["labels_jsonl"])
+        assert runtime_path.exists()
+        assert labels_path.exists()
+
+        runtime_rows = [json.loads(x) for x in runtime_path.read_text(encoding="utf-8").splitlines() if x.strip()]
+        assert runtime_rows
+        for row in runtime_rows[:20]:
+            assert set(row.keys()) == {"session_id", "turn_id", "text", "source_type", "source_id"}
+            assert str(row["session_id"]).startswith("s_")
+            assert str(row["source_id"]).startswith("src_")
+            assert "label" not in "".join(row.keys())
+            assert "family" not in "".join(row.keys())
+    finally:
+        shutil.rmtree(out_root, ignore_errors=True)

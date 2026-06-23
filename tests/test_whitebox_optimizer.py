@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import asdict
 
 from omega.config.loader import load_resolved_config
+from omega.eval.attack_corpus import generate
+from omega.eval.whitebox_eval import WhiteboxOptimizer, evaluate_whitebox
 from omega.projector.pi0_intent_v2 import Pi0IntentAwareV2
-from redteam.generator import generate
-from redteam.whitebox_optimizer import WhiteboxOptimizer, evaluate_whitebox
 
 
 def test_whitebox_optimizer_reduces_or_keeps_score():
